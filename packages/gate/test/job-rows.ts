@@ -1,4 +1,4 @@
-import type { Job } from '@expunge/contracts';
+import { contentHash, type Job } from '@expunge/contracts';
 import type { MongoService } from '@expunge/mongo';
 import type { EpisodeRequest, EpisodeResult } from '../src/index.js';
 const RUNTIME_HASH = 'c'.repeat(64);
@@ -31,11 +31,12 @@ export function jobRecorder(
     const runtimeHash = stamp.runtimeHash === undefined ? RUNTIME_HASH : stamp.runtimeHash;
     const model = 'model' in stamp ? stamp.model : [PROVIDER_STAMP];
     const status: Job['status'] =
-      (stamp.status ?? result.outcome === 'completed')
+      stamp.status ??
+      (result.outcome === 'completed'
         ? 'succeeded'
         : result.outcome === 'cancelled'
           ? 'cancelled'
-          : 'failed';
+          : 'failed');
     const now = new Date();
     const job: Job = {
       _id: jobId,
@@ -53,7 +54,6 @@ export function jobRecorder(
       checkpoint: {
         v: 1,
         ...(runtimeHash ? { attestedRuntimeHash: runtimeHash } : {}),
-        ...(model === undefined ? {} : { attestedModels: model }),
       } as never,
       status,
       cancellationRequested: false,
@@ -68,5 +68,19 @@ export function jobRecorder(
       updatedAt: now,
     };
     await setup.control.collection('jobs').insertOne(job as never);
+    // The authoritative stamps live in insert-only run_attestations rows, one per fence, as the worker writes them.
+    const stamps = Array.isArray(model) ? model : [];
+    for (const stampRow of stamps as Array<Record<string, unknown>>) {
+      const scope = request.instanceScope;
+      await setup.control.collection('run_attestations').insertOne({
+        _id: contentHash({ ...scope, jobId, fence: stampRow.fence }, 'run-attestation-row'),
+        ...scope,
+        jobId,
+        runId: request.runId,
+        at: now,
+        createdAt: now,
+        ...stampRow,
+      } as never);
+    }
   };
 }

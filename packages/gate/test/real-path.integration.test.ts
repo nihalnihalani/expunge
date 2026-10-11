@@ -18,7 +18,13 @@ import { createDomainEnv } from '@expunge/domain';
 import { ELIGIBILITY_POLICY_HASH } from '@expunge/fixtures';
 import { generateSealedFixture } from '@expunge/fixtures/sealed';
 import { gradeWorld, runReference } from '@expunge/grader';
-import { ArtifactRepository, AuthorityRepository, JobRepository, ProjectionRepository } from '@expunge/mongo';
+import {
+  ArtifactRepository,
+  AttestationRepository,
+  AuthorityRepository,
+  JobRepository,
+  ProjectionRepository,
+} from '@expunge/mongo';
 import { runtimeHash } from '@expunge/runtime';
 import { FakeChatModel, fakeText, fakeToolCalls, type FakeTurn } from '@expunge/runtime/testing';
 import type { HarnessBundle } from '@expunge/contracts';
@@ -44,7 +50,7 @@ import {
   GraderEpisodeHost,
   MongoEpisodePort,
   budgetHashOf,
-  MongoJobEvidence,
+  AttestedJobEvidence,
   modelStampsOf,
   verifyArm,
   campaignCrypto,
@@ -150,6 +156,7 @@ describeLive('MongoEpisodePort over the real worker and domain gateway (FAKE mod
           committed: new MongoCommittedReader(executor),
           projection: new FencedProjectionSink(executor, jobs, projections),
           runtimeHash: RT,
+          attestations: new AttestationRepository(executor),
           onResult,
           config: workerConfigFromEnv({
             EXPUNGE_WORKER_ID: `gate-${session}`,
@@ -242,7 +249,7 @@ describeLive('MongoEpisodePort over the real worker and domain gateway (FAKE mod
     expect(outcomes.candidate!.useful).toBe(true);
     // D8-8 / DA-11 F-1: the stored job says a FAKE adapter ran. A profile that DECLARES a provider model, as the port's
     // caller may, does not change that: the gate reads the stamp the worker committed and holds it as fake evidence.
-    const reader = new MongoJobEvidence(grader);
+    const reader = new AttestedJobEvidence(grader);
     for (const arm of ['parent', 'candidate'] as const) {
       const row = await reader.read({ ...BASE_SCOPE, scopeId: outcomes[arm]!.scope }, outcomes[arm]!.jobId);
       const stamps = modelStampsOf(row.stamps);
