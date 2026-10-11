@@ -2,7 +2,14 @@ import { contentHash, type JsonValue, type ScopeKey } from '@expunge/contracts';
 import type { OutboxRepository } from '@expunge/mongo';
 import type { ClientSession } from 'mongodb';
 import { z } from 'zod';
-import { sanitizeProperty } from './sanitize.js';
+import { createHash } from 'node:crypto';
+import { LeakError, detectLeak, type LeakGuard } from './leak.js';
+import {
+  DEFAULT_SANITIZATION,
+  sanitizeFreeText,
+  sanitizeProperty,
+  type SanitizationPolicy,
+} from './sanitize.js';
 
 /**
  * Application origins we may WRITE to Raindrop. `raindrop_classifier` is vendor-produced and is never written by us;
@@ -54,6 +61,25 @@ export const telemetryPayloadSchema = z.discriminatedUnion('type', [
       type: z.literal('sdk_event'),
       eventId: id,
       role: z.enum(['worker', 'improver', 'hider', 'observer']),
+    })
+    .strict(),
+  // The gateway's report_diagnostic (origin agent_self_report): structure and hashes only. The free text never enters
+  // the payload; detailFlagged records that it tripped the leak guard.
+  z
+    .object({
+      type: z.literal('agent_diagnostic'),
+      eventId: id,
+      jobId: id,
+      runId: id,
+      toolCallId: id,
+      severity: z.enum(['info', 'warning', 'error']),
+      codes: z
+        .array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/))
+        .min(1)
+        .max(16),
+      detailSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      detailLength: z.number().int().min(0).max(100_000),
+      detailFlagged: z.enum(['subject_literal', 'held_out', 'private_id']).optional(),
     })
     .strict(),
 ]);
@@ -152,6 +178,49 @@ export function sdkEpisodeIntent(input: {
 }
 
 /**
+ * The gateway's diagnostic as a telemetry intent. The free text goes through the same leak guard as narrative BEFORE it
+ * is hashed; the payload keeps only its hash and length, and records a flag if the guard found something.
+ */
+export function agentDiagnosticIntent(input: {
+  jobId: string;
+  runId: string;
+  attempt: number;
+  toolCallId: string;
+  severity: 'info' | 'warning' | 'error';
+  codes: string[];
+  detail: string;
+  guard: LeakGuard;
+}): TelemetryIntent {
+  const finding = detectLeak(input.detail, input.guard);
+  const flagged =
+    finding?.code === 'SubjectLiteral'
+      ? ('subject_literal' as const)
+      : finding?.code === 'PrivateIdLeak'
+        ? ('private_id' as const)
+        : finding?.code === 'HeldOutLeak'
+          ? ('held_out' as const)
+          : undefined;
+  return {
+    kind: 'agent_diagnostic',
+    jobId: input.jobId,
+    discriminator: `diagnostic:${input.toolCallId}`,
+    evidenceRequired: ['signals'],
+    payload: {
+      type: 'agent_diagnostic',
+      eventId: `expunge:worker:${input.jobId}:${input.runId}:${input.attempt}`,
+      jobId: input.jobId,
+      runId: input.runId,
+      toolCallId: input.toolCallId,
+      severity: input.severity,
+      codes: input.codes,
+      detailSha256: createHash('sha256').update(input.detail.normalize('NFKC')).digest('hex'),
+      detailLength: input.detail.length,
+      ...(flagged ? { detailFlagged: flagged } : {}),
+    },
+  };
+}
+
+/**
  * Commits an outbox intent. Call it with the SAME `session` as the domain outcome it describes, so the intent and the
  * outcome commit or abort together; dispatch happens later, outside any transaction. Idempotent outside a transaction: the
  * operation id is derived from the intent and a duplicate-key insert returns `inserted: false`. Inside a transaction a
@@ -162,8 +231,18 @@ export async function enqueueTelemetry(
   scope: ScopeKey,
   intent: TelemetryIntent,
   session?: ClientSession,
+  policy: SanitizationPolicy = DEFAULT_SANITIZATION,
 ): Promise<{ operationId: string; inserted: boolean }> {
-  const payload = telemetryPayloadSchema.parse(intent.payload);
+  const parsed = telemetryPayloadSchema.parse(intent.payload);
+  // By code: free text of an `event` intent is reduced by the policy before it is stored or sent (fail closed).
+  const payload =
+    parsed.type === 'event'
+      ? {
+          ...parsed,
+          output: sanitizeFreeText(parsed.output, policy),
+          ...(parsed.input !== undefined ? { input: sanitizeFreeText(parsed.input, policy) } : {}),
+        }
+      : parsed;
   const operationId = operationIdFor(intent);
   try {
     await outbox.enqueue(
@@ -190,6 +269,7 @@ export async function enqueueTelemetry(
   }
 }
 
+export { LeakError };
 export class TelemetryIntentConflict extends Error {
   constructor(readonly operationId: string) {
     super(`TelemetryIntentConflict:${operationId}`);

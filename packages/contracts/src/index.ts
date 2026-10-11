@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import canonicalizeModule from 'canonicalize';
 const canonicalize = canonicalizeModule as unknown as (value: unknown) => string | undefined;
 import { z } from 'zod';
-import type { ProjectionEventKind } from './projection.js';
+import type { EvidenceDelivery, ProjectionEventKind } from './projection.js';
 
 export * from './projection.js';
 
@@ -212,6 +212,8 @@ export type EvidenceReference = {
   retrievedAt: string;
   contentHash: string;
   permittedUse: 'training' | 'gate_only' | 'display_only' | 'revoked';
+  /** How each delivery proof was obtained (observed, worker_attested, inferred, resend_unverified). Optional. */
+  delivery?: EvidenceDelivery;
 };
 export type HarnessBundle = {
   contractVersion: 1;
@@ -401,6 +403,12 @@ export type EvidenceBundle = {
   cost: CostSummary;
   confidence: number;
   split: 'train' | 'protected' | 'validation' | 'final';
+  /**
+   * What was deliberately left out, so a consumer never mistakes absence for emptiness. `freeText`: free-text fields
+   * (diagnostic details) were reduced to a hash and length because no forbidden-literal list could vouch for them.
+   * `values`: raw tool values and failure witnesses were withheld because the split is not `train`.
+   */
+  withheld?: { freeText: boolean; values: boolean };
 };
 export type OutboxState =
   | 'pending'
@@ -995,4 +1003,62 @@ export function validateHarnessBundle(value: unknown): HarnessBundle {
   )
     throw new Error('InvalidWorkflowReferences');
   return bundle;
+}
+
+/** Domain constant of the salted private-id hash. A change is a new version of every exported set. */
+export const PRIVATE_ID_DOMAIN = 'expunge-private-id:v1';
+/**
+ * Salted hash of a private target id or identity token of a world. The grader exports a set of these per world
+ * instance; the observer recomputes the hash of candidate tokens and refuses a match, so it never holds a raw id.
+ * hex(sha256(PRIVATE_ID_DOMAIN NUL salt NUL NFKC(id))).
+ */
+export function privateIdHash(salt: string, id: string): string {
+  return createHash('sha256')
+    .update(`${PRIVATE_ID_DOMAIN}\u0000${salt}\u0000${id.normalize('NFKC')}`)
+    .digest('hex');
+}
+
+/** Every identifier by which an evidence bundle can be tied to a job, world or remote source. */
+function bundleIdentities(bundle: EvidenceBundle): {
+  jobs: Set<string>;
+  worlds: Set<string>;
+  sources: Set<string>;
+} {
+  const sources = new Set<string>();
+  for (const source of bundle.sources) {
+    if (source.externalEventId) sources.add(`event:${source.externalEventId}`);
+    if (source.externalTraceId) sources.add(`trace:${source.externalTraceId}`);
+    for (const signal of source.externalSignalIds) sources.add(`signal:${signal}`);
+    for (const local of source.localSourceIds) sources.add(`local:${local}`);
+  }
+  return { jobs: new Set([bundle.binding.jobId]), worlds: new Set([bundle.binding.worldId]), sources };
+}
+
+/** True when two bundles share no job, no world and no source identifier. */
+export function bundlesDisjoint(a: EvidenceBundle, b: EvidenceBundle): boolean {
+  const left = bundleIdentities(a);
+  const right = bundleIdentities(b);
+  for (const key of ['jobs', 'worlds', 'sources'] as const)
+    for (const item of left[key]) if (right[key].has(item)) return false;
+  return true;
+}
+
+/**
+ * The wrong-incident control's evidence: an unrelated incident from the pool, under the same schema. A pool bundle
+ * qualifies only if it is disjoint (job, world, every source id) from EVERY target incident bundle; of those the one
+ * with the smallest evidenceId is chosen, which is deterministic and equals "first pool bundle by evidenceId" whenever
+ * the pool's jobs and worlds are distinct. Returns null when nothing qualifies; the caller decides how to fail.
+ * Replay note: a ledger row from the control's own run is held out. In-sample rows are the target incident's run, for
+ * every arm, and attribution is by the cited evidence's run.
+ */
+export function selectWrongIncident(
+  incident: readonly EvidenceBundle[],
+  pool: readonly EvidenceBundle[],
+): EvidenceBundle | null {
+  const candidates = pool
+    .filter((candidate) => incident.every((target) => bundlesDisjoint(target, candidate)))
+    .sort((left, right) =>
+      left.evidenceId < right.evidenceId ? -1 : left.evidenceId > right.evidenceId ? 1 : 0,
+    );
+  return candidates[0] ?? null;
 }

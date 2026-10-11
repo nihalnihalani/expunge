@@ -1,5 +1,6 @@
 import type { SubagentRun } from 'raindrop-ai';
-import type { Episode } from './episode.js';
+import { assertTelemetryUserId, type Episode } from './episode.js';
+import { sanitizeValue } from './sanitize.js';
 import type { RaindropTracing } from './tracing.js';
 
 /** The three headers a dispatch carrier needs. Send ALL of them: instrumentation rewrites traceparent and baggage. */
@@ -26,7 +27,8 @@ export function dispatchSubagent(
   const dispatch = episode.interaction.subagent({
     name: options.name,
     childEventId: options.childEventId,
-    ...(options.input !== undefined ? { input: options.input } : {}),
+    // By code, not by comment: the dispatch input is reduced by the episode's sanitization policy before the SDK sees it.
+    ...(options.input !== undefined ? { input: sanitizeValue(options.input, episode.policy) } : {}),
   });
   return {
     childEventId: dispatch.childEventId,
@@ -68,7 +70,7 @@ export function runAsSubagent<T>(
   return tracing.client.withSubagentRun(headers, fn, {
     name: options.name,
     eventId: options.eventId,
-    userId: options.userId,
+    userId: assertTelemetryUserId(options.userId),
     ...(options.convoId ? { convoId: options.convoId } : {}),
   });
 }

@@ -1,12 +1,21 @@
-import { contentHash, type OutboxState, type ScopeKey, type TelemetryOutbox } from '@expunge/contracts';
+import {
+  contentHash,
+  type EvidenceDelivery,
+  type OutboxState,
+  type ScopeKey,
+  type TelemetryOutbox,
+} from '@expunge/contracts';
+import type { ProjectionEventInput } from '@expunge/mongo';
 import {
   IngestClient,
+  requireGuard,
   telemetryPayloadSchema,
+  type LeakGuard,
   type IngestFailure,
   type TelemetryPayload,
 } from '@expunge/observability';
 import type { ClientSession } from 'mongodb';
-import { missingFields, observeEvent, type EvidenceStore } from './evidence.js';
+import { missingFields, observeEvent, type EvidenceObservation, type EvidenceStore } from './evidence.js';
 import { RaindropQueryClient, RaindropQueryError, type RaindropEvent } from './query-client.js';
 import type { RunInTransaction } from './scan.js';
 
@@ -56,6 +65,37 @@ export type DispatcherOptions = {
 
 const BLOCKED_HOLD_MS = 15 * 60_000;
 
+/** The slice of ProjectionRepository the dispatcher uses; appends are best effort and never fail a dispatch. */
+export interface ProjectionPort {
+  append(key: ScopeKey, event: ProjectionEventInput): Promise<unknown>;
+}
+
+/** The Raindrop signal name the gateway's report_diagnostic maps to. */
+export const AGENT_DIAGNOSTIC_SIGNAL = 'agent_diagnostic';
+const RECEIPT_WORKER_ATTESTED = 'worker-attested-not-observed';
+const RECEIPT_INFERRED = 'inferred-from-query-visible';
+const RECEIPT_RESEND_SUFFIX = 'resend-unverified';
+
+/**
+ * How each delivery proof of an outbox row was obtained. Read from the receipts the dispatcher itself wrote, so a
+ * consumer can tell an observed HTTP acceptance from a worker attestation, an inference or an unverified resend.
+ */
+export function deliveryOf(attained: TelemetryOutbox['attained']): EvidenceDelivery {
+  const enqueued = attained.sdk_enqueued?.externalReceiptId;
+  const accepted = attained.ingest_accepted?.externalReceiptId;
+  return {
+    sdkEnqueued: enqueued === RECEIPT_WORKER_ATTESTED ? 'worker_attested' : 'observed',
+    ingestAccepted:
+      accepted === RECEIPT_INFERRED
+        ? 'inferred'
+        : accepted?.endsWith(RECEIPT_RESEND_SUFFIX)
+          ? 'resend_unverified'
+          : 'observed',
+    queryVisible: 'observed',
+    evidenceReady: 'observed',
+  };
+}
+
 /**
  * Dispatches telemetry outbox intents AFTER the domain transaction that wrote them, and walks each through
  *   pending/leased -> sdk_enqueued -> ingest_accepted -> query_visible -> evidence_ready
@@ -77,9 +117,13 @@ export class OutboxDispatcher {
       transaction: RunInTransaction;
       scope: ScopeKey;
       projectId: string;
+      /** REQUIRED: subject literals and private ids no stored observation may carry. */
+      guard: LeakGuard;
+      projection?: ProjectionPort;
     },
     options: DispatcherOptions,
   ) {
+    requireGuard(deps.guard);
     this.opts = {
       leaseMs: 30_000,
       maxAttempts: 8,
@@ -130,13 +174,31 @@ export class OutboxDispatcher {
     try {
       // 1. Send (HTTP kinds only). An sdk_event was produced live by the worker's SDK; there is nothing to send.
       if (payload.type !== 'sdk_event' && !row.attained.ingest_accepted) {
-        await advance('sdk_enqueued', { contentHash: payloadHash });
-        const sent = await this.send(payload);
-        if (!sent.ok) return await this.fail(row, sent);
-        await advance('ingest_accepted', {
-          contentHash: payloadHash,
-          externalReceiptId: `http-${sent.status}`,
-        });
+        // sdk_enqueued attained but ingest_accepted not: an earlier attempt may have sent and crashed before it could
+        // record the acceptance. Sending again blindly could double count at the vendor, so read before sending.
+        const previouslyAttempted = Boolean(row.attained.sdk_enqueued);
+        if (!previouslyAttempted) await advance('sdk_enqueued', { contentHash: payloadHash });
+        let resendUnverified = false;
+        let delivered = false;
+        if (previouslyAttempted) {
+          const existing = await this.deps.query.getEvent(payload.eventId);
+          if (existing && this.alreadyDelivered(payload, existing)) {
+            // Visible on the remote event, so ingestion accepted it; no 2xx of OURS was seen, and the label says so.
+            await advance('ingest_accepted', {
+              contentHash: payloadHash,
+              externalReceiptId: RECEIPT_INFERRED,
+            });
+            delivered = true;
+          } else resendUnverified = true; // not visible: it may be lagging, so the resend is labelled unverified
+        }
+        if (!delivered) {
+          const sent = await this.send(payload, lease.operationId);
+          if (!sent.ok) return await this.fail(row, sent);
+          await advance('ingest_accepted', {
+            contentHash: payloadHash,
+            externalReceiptId: `http-${sent.status}${resendUnverified ? `-${RECEIPT_RESEND_SUFFIX}` : ''}`,
+          });
+        }
       }
 
       // 2. Read back by ID. Absent means "not visible yet", never "nothing happened".
@@ -146,21 +208,35 @@ export class OutboxDispatcher {
       const traces = row.evidenceRequired.includes('spans')
         ? await this.deps.query.getTraces(payload.eventId)
         : undefined;
-      const observation = observeEvent(this.deps.projectId, event, traces, this.opts.now());
+      const observation = observeEvent(this.deps.projectId, event, {
+        guard: this.deps.guard,
+        now: this.opts.now(),
+        ...(traces ? { traces } : {}),
+      });
 
       if (payload.type === 'sdk_event') {
         // The worker's SDK enqueue and terminal POST happen in another process and cannot be observed here, so they are
         // recorded as what they are: worker-attested and inferred from the event being visible. Never as observed.
         await advance('sdk_enqueued', {
           contentHash: payloadHash,
-          externalReceiptId: 'worker-attested-not-observed',
+          externalReceiptId: RECEIPT_WORKER_ATTESTED,
         });
         await advance('ingest_accepted', {
           contentHash: observation.contentHash,
-          externalReceiptId: 'inferred-from-query-visible',
+          externalReceiptId: RECEIPT_INFERRED,
         });
       }
       await advance('query_visible', { contentHash: observation.contentHash, externalReceiptId: event.id });
+      if (observation.quarantined) {
+        // The remote event carries held-out or subject material. Keep a structure-only record and never promote it.
+        await this.deps.transaction((session) => this.deps.evidence.put(observation, scope, session));
+        return await this.retryWith(
+          row,
+          `EvidenceQuarantined:${observation.quarantined}`,
+          'dead_letter',
+          true,
+        );
+      }
 
       // 3. Required remote fields, plus the specific thing this intent is about.
       const missing = [
@@ -186,6 +262,7 @@ export class OutboxDispatcher {
           session,
         );
       });
+      await this.project(row, payload, event, observation);
       return { operationId: lease.operationId, result: 'evidence_ready', attained: attained() };
     } catch (error) {
       if (error instanceof RaindropQueryError) return await this.failQuery(row, error);
@@ -193,8 +270,10 @@ export class OutboxDispatcher {
     }
   }
 
-  private send(payload: Exclude<TelemetryPayload, { type: 'sdk_event' }>) {
+  private send(payload: Exclude<TelemetryPayload, { type: 'sdk_event' }>, operationId: string) {
     const { ingest } = this.deps;
+    // `dedupe_key` is OUR convention for counting distinct sends downstream; it is not claimed to be vendor idempotency.
+    const dedupe = { dedupe_key: operationId };
     if (payload.type === 'signal')
       return ingest.trackSignals([
         {
@@ -202,7 +281,23 @@ export class OutboxDispatcher {
           signal_name: payload.signalName,
           signal_type: payload.signalType,
           ...(payload.sentiment ? { sentiment: payload.sentiment } : {}),
-          properties: { ...payload.properties, origin: payload.origin },
+          properties: { ...payload.properties, origin: payload.origin, ...dedupe },
+        },
+      ]);
+    if (payload.type === 'agent_diagnostic')
+      return ingest.trackSignals([
+        {
+          event_id: payload.eventId,
+          signal_name: AGENT_DIAGNOSTIC_SIGNAL,
+          signal_type: 'default',
+          properties: {
+            origin: 'agent_self_report',
+            severity: payload.severity,
+            codes: payload.codes.join(',').slice(0, 256),
+            tool_call_id: payload.toolCallId,
+            detail_sha256: payload.detailSha256,
+            ...dedupe,
+          },
         },
       ]);
     return ingest.trackEvents([
@@ -210,7 +305,7 @@ export class OutboxDispatcher {
         user_id: payload.userId,
         event: payload.event,
         event_id: payload.eventId,
-        properties: { ...payload.properties, origin: payload.origin },
+        properties: { ...payload.properties, origin: payload.origin, ...dedupe },
         ai_data: {
           output: payload.output,
           ...(payload.input ? { input: payload.input } : {}),
@@ -221,12 +316,70 @@ export class OutboxDispatcher {
     ]);
   }
 
+  /** True when the remote event already shows what this intent would send. */
+  private alreadyDelivered(
+    payload: Exclude<TelemetryPayload, { type: 'sdk_event' }>,
+    event: RaindropEvent,
+  ): boolean {
+    if (payload.type === 'signal') return (event.signals ?? []).some((s) => s.name === payload.signalName);
+    if (payload.type === 'agent_diagnostic')
+      return (event.signals ?? []).some((s) => s.name === AGENT_DIAGNOSTIC_SIGNAL);
+    return event.event_name === payload.event;
+  }
+
+  /**
+   * The evidence_ready projection event the operator UI replays, carrying the delivery labels. Best effort: the run id
+   * comes from the remote event's own run_id property, and a failed append never changes the dispatch result.
+   */
+  private async project(
+    row: TelemetryOutbox,
+    payload: TelemetryPayload,
+    event: RaindropEvent,
+    observation: EvidenceObservation,
+  ): Promise<void> {
+    const { projection, scope } = this.deps;
+    const runId = event.properties?.run_id;
+    if (!projection || typeof runId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(runId)) return;
+    const signalIds = observation.event.signals.map((signal) => signal.id).slice(0, 256);
+    try {
+      await projection.append(scope, {
+        eventId: `${row.operationId}:evidence_ready`,
+        jobId: row.jobId,
+        runId,
+        artifactIds: [],
+        kind: 'evidence_ready',
+        payload: {
+          evidenceId: `ev:${row.operationId}`,
+          provider: 'raindrop',
+          externalEventId: observation.externalEventId,
+          externalSignalIds: signalIds,
+          origin:
+            payload.type === 'sdk_event' || payload.type === 'agent_diagnostic'
+              ? 'agent_self_report'
+              : payload.origin,
+          outboxState: 'evidence_ready',
+          truncated: observation.potentiallyTruncated,
+          missing: [],
+          contentHash: observation.contentHash,
+          permittedUse: 'display_only',
+          delivery: deliveryOf(row.attained),
+        },
+      });
+    } catch {
+      /* the UI recovers from the authoritative outbox row */
+    }
+  }
+
   /** What this particular intent needs beyond the generic field list. */
   private specificGaps(payload: TelemetryPayload, event: RaindropEvent): string[] {
     if (payload.type === 'signal')
       return (event.signals ?? []).some((signal) => signal.name === payload.signalName)
         ? []
         : [`signal:${payload.signalName}`];
+    if (payload.type === 'agent_diagnostic')
+      return (event.signals ?? []).some((signal) => signal.name === AGENT_DIAGNOSTIC_SIGNAL)
+        ? []
+        : [`signal:${AGENT_DIAGNOSTIC_SIGNAL}`];
     if (payload.type === 'event') return event.assistant_output ? [] : ['assistant_output'];
     return [];
   }

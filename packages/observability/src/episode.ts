@@ -1,9 +1,49 @@
 import { otelMiddleware } from '@tanstack/ai/middlewares/otel';
 import type { Interaction, SubagentRun } from 'raindrop-ai';
 import type { ToolDefinition } from '@expunge/vendor-openmuse';
-import { DEFAULT_SANITIZATION, sanitizeProperty, type SanitizationPolicy } from './sanitize.js';
+import {
+  DEFAULT_SANITIZATION,
+  sanitizeFreeText,
+  sanitizeProperty,
+  type SanitizationPolicy,
+} from './sanitize.js';
 import { instrumentTool } from './tools.js';
 import type { RaindropTracing } from './tracing.js';
+
+/**
+ * The only task descriptions that reach Raindrop verbatim. Anything else is free text and goes through the fail-closed
+ * sanitizer, which redacts it unless the policy carries a literal list. The input is therefore never a place a subject
+ * name can travel by accident.
+ */
+export const EPISODE_INPUT_LABELS = [
+  'cleanup job',
+  'improver campaign',
+  'observer scan',
+  'grader run',
+  'dispatch',
+  'smoke test',
+] as const;
+export type EpisodeInputLabel = (typeof EPISODE_INPUT_LABELS)[number];
+
+export function episodeInput(input: string, policy: SanitizationPolicy): string {
+  return (EPISODE_INPUT_LABELS as readonly string[]).includes(input)
+    ? input
+    : sanitizeFreeText(input, policy);
+}
+
+/** Opaque, namespaced telemetry identity: a short lower-case namespace and a hex digest. A handle or a name does not fit. */
+const TELEMETRY_USER_ID = /^[a-z]{1,8}_[a-f0-9]{16,64}$/;
+export const isTelemetryUserId = (id: string): boolean => TELEMETRY_USER_ID.test(id);
+export class InvalidTelemetryUserId extends Error {
+  constructor() {
+    super('InvalidTelemetryUserId');
+    this.name = 'InvalidTelemetryUserId';
+  }
+}
+export function assertTelemetryUserId(id: string): string {
+  if (!TELEMETRY_USER_ID.test(id)) throw new InvalidTelemetryUserId();
+  return id;
+}
 
 export type EpisodeRole = 'worker' | 'improver' | 'hider' | 'observer';
 
@@ -19,7 +59,7 @@ export type EpisodeContext = {
   /** Opaque, namespaced telemetry identity (see subject_tokens). Never a subject handle or a name. */
   telemetryUserId: string;
   evidenceArm?: string;
-  /** Already-sanitized one-line description of the task. */
+  /** A label from EPISODE_INPUT_LABELS; any other text is redacted unless the policy has a forbidden-literal list. */
   input: string;
 };
 
@@ -70,6 +110,7 @@ export class Episode {
     options: { policy?: SanitizationPolicy; linked?: SubagentRun } = {},
   ): Episode {
     const policy = options.policy ?? DEFAULT_SANITIZATION;
+    assertTelemetryUserId(context.telemetryUserId);
     const eventId = options.linked?.eventId ?? episodeEventId(context);
     const interaction =
       options.linked?.interaction ??
@@ -78,7 +119,7 @@ export class Episode {
         event: `expunge.${context.role}`,
         userId: context.telemetryUserId,
         convoId: context.jobId,
-        input: context.input,
+        input: episodeInput(context.input, policy),
         properties: properties(context, policy),
         featureFlags: {
           harness_version: context.harnessHash,

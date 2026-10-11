@@ -1,4 +1,5 @@
 import type { ObserverCursor, ObserverQueryIdentity, ScopeKey } from '@expunge/contracts';
+import type { LeakGuard } from '@expunge/observability';
 import type { ClientSession } from 'mongodb';
 import { FakeRaindrop } from '../../observability/test/fake-raindrop.js';
 import {
@@ -9,6 +10,9 @@ import {
   type CursorStore,
 } from '../src/index.js';
 
+/** The subject literal every observer test treats as forbidden. */
+export const LITERAL = 'syn_subject_maria_rossi';
+export const GUARD: LeakGuard = { forbiddenLiterals: [LITERAL] };
 export const SCOPE: ScopeKey = { tenantId: 'tenant-1', env: 'evaluation', scopeId: 'scope-1' };
 
 /** In-memory CursorStore with ObserverCursorRepository's semantics (identity pinning, CAS revision). */
@@ -79,6 +83,7 @@ export function makeRig(fake: FakeRaindrop, over: { sleeps?: number[]; maxAttemp
     evidence,
     transaction: (work) => work(undefined as never),
     scope: SCOPE,
+    guard: GUARD,
   });
   return { client, cursors, evidence, runner };
 }

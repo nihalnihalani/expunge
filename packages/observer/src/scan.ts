@@ -5,6 +5,7 @@ import {
   type ObserverQueryIdentity,
   type ScopeKey,
 } from '@expunge/contracts';
+import { requireGuard, type LeakGuard } from '@expunge/observability';
 import type { ClientSession } from 'mongodb';
 import { missingFields, observeEvent, type EvidenceObservation, type EvidenceStore } from './evidence.js';
 import {
@@ -117,6 +118,8 @@ export type ScanResult = {
   ready: string[];
   pending: string[];
   held: string[];
+  /** Events that tripped the leak guard: stored as structure-only quarantined rows, never evidence. */
+  quarantined: string[];
 };
 
 /**
@@ -132,8 +135,12 @@ export class ObserverRunner {
       evidence: EvidenceStore;
       transaction: RunInTransaction;
       scope: ScopeKey;
+      /** REQUIRED: the subject literals and private ids no stored observation may carry. */
+      guard: LeakGuard;
     },
-  ) {}
+  ) {
+    requireGuard(deps.guard);
+  }
 
   async runOnce(query: ObserverQueryIdentity, options: ScanOptions): Promise<ScanResult> {
     const { client, cursors, evidence, transaction, scope } = this.deps;
@@ -150,11 +157,16 @@ export class ObserverRunner {
       ready: [],
       pending: [],
       held: [],
+      quarantined: [],
     };
 
     const observe = async (event: RaindropEvent): Promise<EvidenceObservation> => {
       const traces = options.fetchTraces ? await client.getTraces(event.id) : undefined;
-      return observeEvent(query.projectId, event, traces, now());
+      return observeEvent(query.projectId, event, {
+        guard: this.deps.guard,
+        now: now(),
+        ...(traces ? { traces } : {}),
+      });
     };
     const commit = async (observations: EvidenceObservation[], nextCursor: string | null) => {
       await options.hooks?.beforeCommit?.();
@@ -172,6 +184,12 @@ export class ObserverRunner {
       await options.hooks?.afterCommit?.();
     };
     const settle = (event: RaindropEvent, observation: EvidenceObservation) => {
+      if (observation.quarantined) {
+        // Terminal for the scan: rereading will not make a poisoned event clean, and it must not grow the pending set.
+        pending.delete(event.id);
+        result.quarantined.push(event.id);
+        return;
+      }
       if (missingFields(options.requiredFields, observation.presentFields).length === 0) {
         pending.delete(event.id);
         result.ready.push(event.id);

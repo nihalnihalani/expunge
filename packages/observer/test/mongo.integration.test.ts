@@ -18,7 +18,7 @@ import {
   scope,
   type LiveEnvironment,
 } from './mongo-support.js';
-import { identity, seedWorkerEvents } from './helpers.js';
+import { GUARD, LITERAL, identity, seedWorkerEvents } from './helpers.js';
 
 describeLive('telemetry outbox and observer on a real replica set (local protocol evidence only)', () => {
   const fake = new FakeRaindrop();
@@ -146,6 +146,7 @@ describeLive('telemetry outbox and observer on a real replica set (local protoco
           transaction: (work) => observer.transaction(work),
           scope,
           projectId: 'proj-1',
+          guard: GUARD,
         },
         { ownerId: owner, leaseMs: 20000, baseDelayMs: 100, maxAttempts: 4 },
       );
@@ -236,6 +237,7 @@ describeLive('telemetry outbox and observer on a real replica set (local protoco
         evidence,
         transaction: (work) => observer.transaction(work),
         scope,
+        guard: GUARD,
       });
       return { cursors, runner };
     };
@@ -317,6 +319,27 @@ describeLive('telemetry outbox and observer on a real replica set (local protoco
       await expect(aRun).rejects.toThrow('StaleObserverCursor');
       expect(await evidenceRows().countDocuments({})).toBe(2); // B's rows only, A's insert rolled back with its failed CAS
       expect((await cursorRow())!.revision).toBe(1);
+    });
+
+    it('O2: a poisoned remote event is stored structure-only in the real evidence collection, under a scope-prefixed id, with no literal anywhere', async () => {
+      fake.seedEvent({
+        id: 'evt-poison',
+        timestamp: new Date(Date.UTC(2026, 5, 1)).toISOString(),
+        properties: { role: 'worker', run_id: 'run-1', note: `about ${LITERAL}`, expected_poststate: ['x'] },
+        assistant_output: '{}',
+      });
+      const { runner } = rig();
+      const result = await runner.runOnce(identity(), { requiredFields: [], pageSize: 10 });
+      expect(result.quarantined).toEqual(['evt-poison']);
+      const rows = await evidenceRows().find({}).toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ quarantined: expect.any(String), presentFields: [] });
+      expect(rows[0]!._id).toMatch(
+        new RegExp(`^raindrop:${scope.tenantId}:${scope.env}:${scope.scopeId}:proj-1:evt-poison:1$`),
+      );
+      const raw = JSON.stringify(rows);
+      expect(raw).not.toContain(LITERAL);
+      expect(raw).not.toContain('expected_poststate');
     });
 
     it('refuses to resume the cursor under a changed filter identity', async () => {

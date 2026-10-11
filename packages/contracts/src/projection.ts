@@ -97,6 +97,19 @@ export interface EffectCommittedPayload {
   /** Graph node ids touched, at most 100. */
   nodeIds: string[];
 }
+/**
+ * How each delivery proof of an evidence row was obtained, so a consumer never reads an attested or inferred step as
+ * an observed one. `worker_attested`: the worker's own SDK queued it in another process and this service could not see
+ * it. `inferred`: a later proof implies it (e.g. the signal is visible in the Query API, so ingestion accepted it) but
+ * no acceptance was seen. `resend_unverified`: a crash left it unknown whether the first send landed, so it was sent
+ * again without proof that the first had not; a vendor-side double count is possible.
+ */
+export interface EvidenceDelivery {
+  sdkEnqueued: 'observed' | 'worker_attested';
+  ingestAccepted: 'observed' | 'inferred' | 'resend_unverified';
+  queryVisible: 'observed';
+  evidenceReady: 'observed';
+}
 export interface EvidenceReadyPayload {
   evidenceId: string;
   provider: string;
@@ -109,6 +122,8 @@ export interface EvidenceReadyPayload {
   missing: string[];
   contentHash: string;
   permittedUse: 'training' | 'gate_only' | 'display_only' | 'revoked';
+  /** Optional so rows written before delivery labels existed stay valid. */
+  delivery?: EvidenceDelivery;
 }
 export interface CandidateProposedPayload {
   candidateId: string;
@@ -394,6 +409,15 @@ export const projectionPayloadSchemas: { [K in ProjectionEventKind]: z.ZodType<P
           missing: ids(64),
           contentHash: hash,
           permittedUse: z.enum(['training', 'gate_only', 'display_only', 'revoked']),
+          delivery: z
+            .object({
+              sdkEnqueued: z.enum(['observed', 'worker_attested']),
+              ingestAccepted: z.enum(['observed', 'inferred', 'resend_unverified']),
+              queryVisible: z.literal('observed'),
+              evidenceReady: z.literal('observed'),
+            })
+            .strict()
+            .optional(),
         })
         .strict(),
     ),

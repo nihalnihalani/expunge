@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { trace, type Tracer } from '@opentelemetry/api';
+import { propagation, trace, type Tracer } from '@opentelemetry/api';
+import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator } from '@opentelemetry/core';
 import { Raindrop } from 'raindrop-ai';
 import type { RaindropWriteConfig } from './config.js';
 
@@ -42,24 +43,44 @@ export function initTracing(config: RaindropWriteConfig, options: TracingOptions
     if (current.identity === identity) return current.tracing;
     throw new Error('TracingAlreadyInitialized');
   }
-  const client = new Raindrop({
-    writeKey: config.writeKey,
-    projectId: config.projectId,
-    ...(config.endpoint ? { endpoint: config.endpoint } : {}),
-    // Regex redaction is defence in depth only; the structural sanitizer in this package is the control.
-    redactPii: true,
-    // Never mirror telemetry to a local debugger/Workshop daemon.
-    localWorkshopUrl: false,
-    debugLogs: false,
-    maxTextFieldChars: 20_000,
-    ...(options.disableBatching !== undefined ? { disableBatching: options.disableBatching } : {}),
-    ...(options.bufferSize !== undefined ? { bufferSize: options.bufferSize } : {}),
-    ...(options.bufferTimeoutMs !== undefined ? { bufferTimeout: options.bufferTimeoutMs } : {}),
-  });
+  // The SDK registers its tracer provider with OTEL_PROPAGATORS from the environment, which can name Jaeger (its 1.x
+  // propagator has a published denial-of-service advisory). The constructor exposes no propagator option, so the
+  // variable is pinned for the duration of construction and the global propagator is then set explicitly.
+  const previousPropagators = process.env.OTEL_PROPAGATORS;
+  process.env.OTEL_PROPAGATORS = 'tracecontext,baggage';
+  let client: Raindrop;
+  try {
+    client = new Raindrop({
+      writeKey: config.writeKey,
+      projectId: config.projectId,
+      ...(config.endpoint ? { endpoint: config.endpoint } : {}),
+      // Regex redaction is defence in depth only; the structural sanitizer in this package is the control.
+      redactPii: true,
+      // Never mirror telemetry to a local debugger/Workshop daemon.
+      localWorkshopUrl: false,
+      debugLogs: false,
+      maxTextFieldChars: 20_000,
+      ...(options.disableBatching !== undefined ? { disableBatching: options.disableBatching } : {}),
+      ...(options.bufferSize !== undefined ? { bufferSize: options.bufferSize } : {}),
+      ...(options.bufferTimeoutMs !== undefined ? { bufferTimeout: options.bufferTimeoutMs } : {}),
+    });
+  } finally {
+    if (previousPropagators === undefined) delete process.env.OTEL_PROPAGATORS;
+    else process.env.OTEL_PROPAGATORS = previousPropagators;
+  }
+  pinPropagator();
   const { writeKey: _writeKey, ...publicConfig } = config;
   const tracing = new RaindropTracing(client, publicConfig, trace.getTracer('expunge', '0.1.0'));
   current = { identity, tracing };
   return tracing;
+}
+
+/** The only propagation formats this process speaks: W3C trace context (traceparent, tracestate) and W3C baggage. */
+export function pinPropagator(): void {
+  propagation.disable();
+  propagation.setGlobalPropagator(
+    new CompositePropagator({ propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()] }),
+  );
 }
 
 /** The process's tracing instance, if initialized. */

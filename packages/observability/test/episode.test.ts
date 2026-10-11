@@ -47,7 +47,7 @@ const context = (over: Partial<EpisodeContext> = {}): EpisodeContext => ({
   workerProfileHash: 'b'.repeat(64),
   worldId: 'world-1',
   completionPolicy: 'verified_receipt',
-  telemetryUserId: 'tok_synthetic_1',
+  telemetryUserId: 'tok_00000000000000a1',
   input: 'cleanup job',
   ...over,
 });
@@ -188,7 +188,7 @@ describe('worker episode instrumentation (real SDK, real TanStack loop, labeled 
     await episode.complete({ status: 'failed', endedBy: 'x', toolCalls: 0, phases: 0, elapsedMs: 0 }); // idempotent: second call is a no-op
     const partial = fake.partialEvents.find((e) => e.event_id === episode.eventId) as any;
     expect(partial.event).toBe('expunge.worker');
-    expect(partial.user_id).toBe('tok_synthetic_1');
+    expect(partial.user_id).toBe('tok_00000000000000a1');
     expect(partial.properties).toMatchObject({
       run_id: ctx.runId,
       job_id: ctx.jobId,
@@ -274,7 +274,7 @@ describe('detached sub-agent carriers', () => {
     const outcome = await runAsSubagent(
       tracing,
       received,
-      { name: 'improver', eventId: 'child-job-1', userId: 'tok_child' },
+      { name: 'improver', eventId: 'child-job-1', userId: 'tok_00000000000000c1' },
       async (run) => ({ linked: run.linked, eventId: run.eventId, parent: run.parent !== null }),
     );
     expect(outcome).toEqual({ linked: true, eventId: 'child-job-1', parent: true });
@@ -284,7 +284,7 @@ describe('detached sub-agent carriers', () => {
     const outcome = await runAsSubagent(
       tracing,
       null,
-      { name: 'improver', eventId: 'orphan-1', userId: 'tok_child' },
+      { name: 'improver', eventId: 'orphan-1', userId: 'tok_00000000000000c1' },
       async (run) => ({ linked: run.linked, parent: run.parent }),
     );
     expect(outcome).toEqual({ linked: false, parent: null });
