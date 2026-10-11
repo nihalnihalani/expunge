@@ -1,0 +1,14 @@
+{
+  "name": "@expunge/evolution",
+  "version": "0.1.0",
+  "description": "Evidence-cited candidate proposal, critic/pruner and as-of decision replay for typed Expunge harness bundles.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/baselines": "0.1.0",
+    "@expunge/contracts": "0.1.0",
+    "@expunge/harness-compiler": "0.1.0",
+    "zod": "3.25.76"
+  }
+}
