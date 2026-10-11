@@ -11,12 +11,14 @@ import {
   type ScopeRegistry,
 } from '@expunge/contracts';
 import { addressId, bsonPreimageHash, typedAddress } from './hashes.js';
+import { assertWorldKey, type WorldKey } from './worldkey.js';
 import {
   fail,
   requirePrincipal,
   scopeFilter,
   worldFilter,
   type MongoService,
+  type Principal,
   type RuntimeDocument,
 } from './client.js';
 
@@ -56,8 +58,26 @@ export type WritePlanInput = {
   mutation: FieldMutation;
   /** Optimistic document version; when set, only a record at this `_rev` is written. */
   expectedRev?: number;
+  /**
+   * Name of the array filter identifier for a wildcard path. Distinct identifiers let several fields be written
+   * by one update (`mergeWritePlans`). Lowercase letter first, then letters and digits.
+   */
+  arrayIdentifier?: string;
+  /** Whether the plan increments `_rev`. Default true; a merged update increments once. */
+  advanceRevision?: boolean;
 };
 export type FieldWriteResult = { matched: number; modified: number };
+export type ScannedRecord = { address: DomainAddress; document: RuntimeDocument };
+export type RecordEffect =
+  | { kind: 'delete'; expectedRev: number }
+  | { kind: 'restrict'; expectedRev: number }
+  | {
+      kind: 'redact' | 'tombstone';
+      expectedRev: number;
+      replacement: string | null;
+      writes: Array<{ fieldId: string; match: ScalarValue }>;
+    };
+const WORLD_READERS: Principal[] = ['domain_executor', 'grader', 'promoter', 'fixture_builder', 'setup'];
 
 function describeScalar(value: unknown, allowNull: boolean): ScalarValue {
   if (value === null) {
@@ -138,7 +158,9 @@ export function compileWritePlan(field: FieldDescriptor, input: WritePlanInput):
   if (input.expectedRev !== undefined && (!Number.isSafeInteger(input.expectedRev) || input.expectedRev < 0))
     fail('InvalidExpectedRevision');
   const revision = input.expectedRev === undefined ? {} : { _rev: input.expectedRev };
-  const advance = { $inc: { _rev: 1 } };
+  const advance = input.advanceRevision === false ? {} : { $inc: { _rev: 1 } };
+  const identifier = input.arrayIdentifier ?? ARRAY_FILTER_IDENTIFIER;
+  if (!/^[a-z][A-Za-z0-9]{0,15}$/.test(identifier)) fail('InvalidArrayIdentifier');
 
   if (wildcardIndex === null) {
     const dotted = segments.join('.');
@@ -158,8 +180,8 @@ export function compileWritePlan(field: FieldDescriptor, input: WritePlanInput):
     const condition = tail ? { [tail]: exactlyScalar(match) } : exactlyScalar(match);
     return { filter, update: { $pull: { [arrayPath]: condition }, ...advance }, wildcardIndex };
   }
-  const element = `${arrayPath}.$[${ARRAY_FILTER_IDENTIFIER}]${tail ? `.${tail}` : ''}`;
-  const arrayFilterKey = tail ? `${ARRAY_FILTER_IDENTIFIER}.${tail}` : ARRAY_FILTER_IDENTIFIER;
+  const element = `${arrayPath}.$[${identifier}]${tail ? `.${tail}` : ''}`;
+  const arrayFilterKey = tail ? `${identifier}.${tail}` : identifier;
   return {
     filter,
     update: { $set: { [element]: replacement }, ...advance },
@@ -253,20 +275,19 @@ export class ScopeRepository {
 
   /** Records of one registered collection whose registered field currently holds `value`. Bounded. */
   async findByField(
-    key: ScopeKey,
-    worldId: string,
+    world: WorldKey,
     registry: ScopeRegistry,
     fieldId: string,
     value: ScalarValue,
     limit = 100,
     session?: ClientSession,
   ): Promise<DomainAddress[]> {
-    requirePrincipal(this.service, ['domain_executor', 'grader', 'promoter', 'fixture_builder', 'setup']);
+    requirePrincipal(this.service, WORLD_READERS);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) fail('InvalidScanLimit');
-    const field = this.boundField(key, registry, fieldId);
+    const field = this.boundField(world, registry, fieldId);
     const rows = await this.service.world
       .collection<RuntimeDocument>(field.collectionId)
-      .find(worldFilter(key, worldId, compileReadFilter(field, value)), {
+      .find(worldFilter(world, world.worldId, compileReadFilter(field, value)), {
         session,
         projection: { _id: 1 },
         limit,
@@ -279,12 +300,52 @@ export class ScopeRepository {
   }
 
   /**
+   * One page of records of a registered collection in `_id` order, with the envelope and the `data` subtree
+   * the registry describes. `afterId` continues from the last record of the previous page. Bounded.
+   */
+  async scan(
+    world: WorldKey,
+    registry: ScopeRegistry,
+    collectionId: string,
+    options: { afterId?: unknown; limit?: number } = {},
+    session?: ClientSession,
+  ): Promise<ScannedRecord[]> {
+    requirePrincipal(this.service, WORLD_READERS);
+    assertWorldKey(world);
+    if (!this.sameScopeAs(world, registry) || !registry.collectionIds.includes(collectionId))
+      fail('UnauthorizedCollection');
+    const limit = options.limit ?? 100;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) fail('InvalidScanLimit');
+    const after = options.afterId === undefined ? {} : { _id: { $gt: options.afterId } };
+    const rows = await this.service.world
+      .collection<RuntimeDocument>(collectionId)
+      .find(worldFilter(world, world.worldId, after), { session, sort: { _id: 1 }, limit })
+      .toArray();
+    return rows.map((document) => ({ address: typedAddress(collectionId, document._id), document }));
+  }
+
+  /** One record by address, or null. */
+  async readRecord(
+    world: WorldKey,
+    registry: ScopeRegistry,
+    address: DomainAddress,
+    session?: ClientSession,
+  ): Promise<RuntimeDocument | null> {
+    requirePrincipal(this.service, WORLD_READERS);
+    assertWorldKey(world);
+    if (!this.sameScopeAs(world, registry) || !registry.collectionIds.includes(address.collectionId))
+      fail('UnauthorizedCollection');
+    return this.service.world
+      .collection<RuntimeDocument>(address.collectionId)
+      .findOne(worldFilter(world, world.worldId, { _id: addressId(address) }), { session });
+  }
+
+  /**
    * Applies one compiled field write to one record, bound to the trusted tenant/env/world and record key.
    * The caller composes this inside a fenced effect transaction; the world revision is advanced there.
    */
   async writeField(
-    key: ScopeKey,
-    worldId: string,
+    world: WorldKey,
     registry: ScopeRegistry,
     address: DomainAddress,
     fieldId: string,
@@ -292,13 +353,13 @@ export class ScopeRepository {
     session?: ClientSession,
   ): Promise<FieldWriteResult> {
     requirePrincipal(this.service, ['domain_executor', 'setup']);
-    const field = this.boundField(key, registry, fieldId);
+    const field = this.boundField(world, registry, fieldId);
     if (address.collectionId !== field.collectionId) fail('AddressFieldMismatch');
     const plan = compileWritePlan(field, input);
     // Inspect the stored value in the same session as the write: refuse to write a scalar over an array.
     const stored = await this.service.world
       .collection<RuntimeDocument>(field.collectionId)
-      .findOne(worldFilter(key, worldId, { _id: addressId(address) }), {
+      .findOne(worldFilter(world, world.worldId, { _id: addressId(address) }), {
         session,
         projection: { data: 1 },
         promoteValues: false,
@@ -308,7 +369,7 @@ export class ScopeRepository {
     const result = await this.service.world
       .collection<RuntimeDocument>(field.collectionId)
       .updateOne(
-        worldFilter(key, worldId, { $and: [{ _id: addressId(address) }, plan.filter] }),
+        worldFilter(world, world.worldId, { $and: [{ _id: addressId(address) }, plan.filter] }),
         plan.update,
         {
           session,
@@ -318,19 +379,88 @@ export class ScopeRepository {
     return { matched: result.matchedCount, modified: result.modifiedCount };
   }
 
+  /**
+   * One owner-policy effect on one record, as a single update so the record's `_rev` advances exactly once.
+   * `delete` removes the record, `restrict` sets `access` to `restricted`, and `redact`/`tombstone` replace the
+   * exact `writes` (registered field plus the exact value) with `replacement` (a string for redact, null for
+   * tombstone; tombstone also sets `lifecycle`). Every variant is conditional on `expectedRev`, so a record that
+   * changed since it was planned fails with `StaleTarget` instead of being written.
+   */
+  async applyEffect(
+    world: WorldKey,
+    registry: ScopeRegistry,
+    address: DomainAddress,
+    effect: RecordEffect,
+    session?: ClientSession,
+  ): Promise<FieldWriteResult> {
+    requirePrincipal(this.service, ['domain_executor', 'setup']);
+    assertWorldKey(world);
+    if (!this.sameScopeAs(world, registry) || !registry.collectionIds.includes(address.collectionId))
+      fail('UnauthorizedCollection');
+    if (!Number.isSafeInteger(effect.expectedRev) || effect.expectedRev < 0) fail('InvalidExpectedRevision');
+    const collection = this.service.world.collection<Document>(address.collectionId);
+    const target: Document = worldFilter(world, world.worldId, {
+      _id: addressId(address),
+      _rev: effect.expectedRev,
+    });
+    let result: FieldWriteResult;
+    if (effect.kind === 'delete') {
+      const deleted = await collection.deleteOne(target, { session });
+      result = { matched: deleted.deletedCount, modified: deleted.deletedCount };
+    } else if (effect.kind === 'restrict') {
+      const updated = await collection.updateOne(
+        target,
+        { $set: { access: 'restricted' }, $inc: { _rev: 1 } },
+        { session },
+      );
+      result = { matched: updated.matchedCount, modified: updated.modifiedCount };
+    } else {
+      if (effect.kind === 'redact' ? typeof effect.replacement !== 'string' : effect.replacement !== null)
+        fail('InvalidReplacement');
+      const stored = await collection.findOne(target, { session, promoteValues: false, promoteLongs: false });
+      if (!stored) fail('StaleTarget');
+      const set: Document = effect.kind === 'tombstone' ? { lifecycle: 'tombstoned' } : {};
+      const arrayFilters: Document[] = [];
+      effect.writes.forEach((write, index) => {
+        const field = this.boundField(world, registry, write.fieldId);
+        if (field.collectionId !== address.collectionId) fail('AddressFieldMismatch');
+        assertStoredShape(stored, field);
+        const plan = compileWritePlan(field, {
+          match: write.match,
+          mutation: { kind: 'replace', replacement: effect.replacement },
+          arrayIdentifier: `t${index}`,
+          advanceRevision: false,
+        });
+        for (const [path, value] of Object.entries((plan.update.$set ?? {}) as Document)) {
+          if (path in set) fail('ConflictingWrites');
+          set[path] = value;
+        }
+        arrayFilters.push(...(plan.arrayFilters ?? []));
+      });
+      const updated = await collection.updateOne(
+        target,
+        { ...(Object.keys(set).length ? { $set: set } : {}), $inc: { _rev: 1 } },
+        { session, ...(arrayFilters.length ? { arrayFilters } : {}) },
+      );
+      result = { matched: updated.matchedCount, modified: updated.modifiedCount };
+    }
+    if (result.matched !== 1) fail('StaleTarget');
+    return result;
+  }
+
   /** Raw preimages use nonpromoted BSON values so EJSON keeps original numeric types. */
   async preimageHash(
-    key: ScopeKey,
-    worldId: string,
+    world: WorldKey,
     registry: ScopeRegistry,
     address: DomainAddress,
     session?: ClientSession,
   ): Promise<string> {
-    if (!registry.collectionIds.includes(address.collectionId) || !this.sameScopeAs(key, registry))
+    assertWorldKey(world);
+    if (!registry.collectionIds.includes(address.collectionId) || !this.sameScopeAs(world, registry))
       fail('UnauthorizedCollection');
     const row = await this.service.world
       .collection<RuntimeDocument>(address.collectionId)
-      .findOne(worldFilter(key, worldId, { _id: addressId(address) }), {
+      .findOne(worldFilter(world, world.worldId, { _id: addressId(address) }), {
         session,
         promoteValues: false,
         promoteLongs: false,
@@ -343,8 +473,9 @@ export class ScopeRepository {
     return registry.tenantId === key.tenantId && registry.env === key.env && registry.scopeId === key.scopeId;
   }
 
-  private boundField(key: ScopeKey, registry: ScopeRegistry, fieldId: string): FieldDescriptor {
-    if (!this.sameScopeAs(key, registry)) fail('UnauthorizedCollection');
+  private boundField(world: WorldKey, registry: ScopeRegistry, fieldId: string): FieldDescriptor {
+    assertWorldKey(world);
+    if (!this.sameScopeAs(world, registry)) fail('UnauthorizedCollection');
     const field = this.field(registry, fieldId);
     if (!registry.collectionIds.includes(field.collectionId)) fail('UnauthorizedCollection');
     return field;

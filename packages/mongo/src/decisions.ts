@@ -1,12 +1,19 @@
 import type { ClientSession, Document } from 'mongodb';
 import {
+  assertCanonicalJson,
+  canonicalJson,
   contentHash,
   sameScope,
   type ActionIntent,
   type ActorContext,
+  type DecisionInputsRecord,
   type DecisionRecord,
   type PolicyDecision,
+  type ScopeKey,
 } from '@expunge/contracts';
+
+/** A decision's recorded inputs stay small: ids, counts and statuses, never record content. */
+export const MAX_DECISION_INPUTS_BYTES = 32_768;
 import { AuthorityRepository } from './authority.js';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
 import { JobRepository } from './jobs.js';
@@ -60,8 +67,14 @@ export class DecisionRepository {
     actor: ActorContext,
     identity: Omit<DecisionIdentity, 'policyDecision'>,
     decision: PolicyDecision,
+    extras: { toolId?: string; inputs?: DecisionInputsRecord } = {},
   ): Promise<DecisionRecord> {
     requirePrincipal(this.service, ['domain_executor', 'setup']);
+    if (extras.inputs !== undefined) {
+      assertCanonicalJson(extras.inputs);
+      if (canonicalJson(extras.inputs).length > MAX_DECISION_INPUTS_BYTES) fail('DecisionInputsTooLarge');
+    }
+    if (extras.toolId !== undefined && (!extras.toolId || extras.toolId.length > 64)) fail('InvalidToolId');
     const job = await this.jobs.workerJob(actor, identity.jobId);
     if (job.binding.runId !== identity.runId || job.binding.harnessHash !== identity.harnessHash)
       fail('IntentBindingMismatch');
@@ -81,6 +94,10 @@ export class DecisionRepository {
       argsDigest: identity.argsDigest,
       decision,
       decidedAt: new Date(),
+      ...(extras.toolId === undefined ? {} : { toolId: extras.toolId }),
+      ...(extras.inputs === undefined
+        ? {}
+        : { inputs: extras.inputs, inputsDigest: contentHash(extras.inputs, 'decision-inputs') }),
     };
     try {
       await this.rows.insertOne({ _id: decisionId, ...record });
@@ -88,6 +105,16 @@ export class DecisionRepository {
       if (!(error && typeof error === 'object' && 'code' in error && error.code === 11000)) throw error;
     }
     return record;
+  }
+
+  /** One job's recorded decisions in time order, for replay and the operator's decision view. Bounded. */
+  async list(actor: ScopeKey, jobId: string, limit = 200): Promise<DecisionRecord[]> {
+    requirePrincipal(this.service, ['domain_executor', 'setup']);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) fail('InvalidDecisionWindow');
+    const rows = await this.rows
+      .find({ ...scopeFilter(actor), jobId }, { sort: { decidedAt: 1, _id: 1 }, limit })
+      .toArray();
+    return rows.map(({ _id: _ignored, ...record }) => record);
   }
 
   /** Throws unless the ledger holds exactly the decision this intent claims, in this scope, and it allows. */

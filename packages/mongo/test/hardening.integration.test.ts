@@ -13,6 +13,7 @@ import {
   deriveEffectKey,
   typedAddress,
   type MongoService,
+  type WorldKey,
 } from '../src/index.js';
 import { validBundle } from '../../contracts/test/valid-bundle.js';
 import {
@@ -82,7 +83,15 @@ describeLive('hardening regressions (real replica set)', () => {
     const job = (await jobs.claim(actor, id, owner, ms))!;
     return { jobId: id, ownerId: owner, fence: job.lease.fence };
   };
+  /** The WorldKey of `worldId` under the test scope, creating the world on first use. */
+  async function ensureWorld(worldId: string): Promise<WorldKey> {
+    const worlds = new WorldRepository(env.service);
+    const existing = await worlds.read(scope, worldId).catch(() => null);
+    if (!existing) await worlds.create(scope, worldId, 1);
+    return worlds.bind(scope, worldId);
+  }
   async function seedWorld(worldId: string, docs: Document[]) {
+    await ensureWorld(worldId);
     await customers().deleteMany({});
     await customers().insertMany(docs.map((doc) => ({ ...scope, worldId, _rev: 1, ...doc })) as never[]);
   }
@@ -448,12 +457,18 @@ describeLive('hardening regressions (real replica set)', () => {
     it.each(cases)('finds and writes a record with a %s _id', async (_label, id, type, expected) => {
       const worldId = 'world-ids';
       await customers().insertOne({ _id: id, ...scope, worldId, _rev: 1, data: { handle: 'h' } } as never);
-      const found = await scopes.findByField(actor, worldId, registry(), 'customers.handle', 'h');
+      const found = await scopes.findByField(await ensureWorld(worldId), registry(), 'customers.handle', 'h');
       expect(found).toEqual([{ collectionId: 'customers', recordId: expected, recordIdBsonType: type }]);
-      const result = await scopes.writeField(actor, worldId, registry(), found[0]!, 'customers.handle', {
-        match: 'h',
-        mutation: { kind: 'replace', replacement: '[redacted]' },
-      });
+      const result = await scopes.writeField(
+        await ensureWorld(worldId),
+        registry(),
+        found[0]!,
+        'customers.handle',
+        {
+          match: 'h',
+          mutation: { kind: 'replace', replacement: '[redacted]' },
+        },
+      );
       expect(result).toEqual({ matched: 1, modified: 1 });
       expect((await customers().findOne({ _id: id } as never))?.data.handle).toBe('[redacted]');
     });
@@ -466,11 +481,17 @@ describeLive('hardening regressions (real replica set)', () => {
   describe('L9: a write never replaces an array through a path that does not declare it', () => {
     const worldId = 'world-arrays';
     const record = string('customers', 'arr');
-    const write = (target: FieldDescriptor, match: string, kind: 'replace' | 'remove' = 'replace') =>
-      scopes.writeField(actor, worldId, registryOf({ fields: [target] }), record, target.fieldId, {
-        match,
-        mutation: kind === 'replace' ? { kind, replacement: '[redacted]' } : { kind },
-      });
+    const write = async (target: FieldDescriptor, match: string, kind: 'replace' | 'remove' = 'replace') =>
+      scopes.writeField(
+        await ensureWorld(worldId),
+        registryOf({ fields: [target] }),
+        record,
+        target.fieldId,
+        {
+          match,
+          mutation: kind === 'replace' ? { kind, replacement: '[redacted]' } : { kind },
+        },
+      );
 
     it('rejects a field whose isArray flag disagrees with its wildcard', async () => {
       for (const bad of [
@@ -560,8 +581,7 @@ describeLive('hardening regressions (real replica set)', () => {
       ).toThrow('UnsafeFieldPath');
       await expect(
         scopes.writeField(
-          actor,
-          worldId,
+          await ensureWorld(worldId),
           registryOf({ fields: [hostile] }),
           string('customers', 'ten'),
           'customers.owner',
@@ -580,18 +600,23 @@ describeLive('hardening regressions (real replica set)', () => {
       const worldId = 'world-key';
       await seedWorld(worldId, [{ _id: 'k1', data: {} }]);
       const found = await scopes.findByField(
-        actor,
-        worldId,
+        await ensureWorld(worldId),
         registryOf({ fields: [key] }),
         'customers.record_id',
         'k1',
       );
       expect(found).toEqual([string('customers', 'k1')]);
       await expect(
-        scopes.writeField(actor, worldId, registryOf({ fields: [key] }), found[0]!, 'customers.record_id', {
-          match: 'k1',
-          mutation: { kind: 'replace', replacement: 'k2' },
-        }),
+        scopes.writeField(
+          await ensureWorld(worldId),
+          registryOf({ fields: [key] }),
+          found[0]!,
+          'customers.record_id',
+          {
+            match: 'k1',
+            mutation: { kind: 'replace', replacement: 'k2' },
+          },
+        ),
       ).rejects.toThrow('UnsafeFieldPath');
     });
   });

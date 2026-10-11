@@ -7,6 +7,8 @@ import {
   ScopeRepository,
   WorldRepository,
   bsonPreimageHash,
+  isWorldKey,
+  worldKeyOf,
   typedAddress,
   type MongoService,
 } from '../src/index.js';
@@ -89,7 +91,8 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
     await new WorldRepository(builder).create(binding, world.worldId, world.scope.revision);
     for (const id of COLLECTION_IDS)
       await env.service.world.collection(id).insertMany(clone(world.collections[id]) as never[]);
-    return { world, binding };
+    const key = await new WorldRepository(builder).bind(binding, world.worldId);
+    return { world, binding, key };
   }
   async function installAuthorityFor(binding: ScopeKey) {
     await env.service.control.collection('authority_revisions').deleteMany({});
@@ -102,14 +105,14 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
 
   for (const family of ['composed_holdout', 'direct_nested', 'shared_array'] as const) {
     it(`${family}: finds exactly the records that hold a subject token, in every registered collection`, async () => {
-      const { world, binding } = await seed(family);
+      const { world, key } = await seed(family);
       const scopes = new ScopeRepository(executor);
       const identityFields = world.scope.fields.filter((f) => f.fieldId.endsWith('.identity_binding'));
       expect(identityFields).toHaveLength(COLLECTION_IDS.length);
       let matches = 0;
       for (const field of identityFields) {
         for (const token of subjectTokens(world)) {
-          const found = await scopes.findByField(binding, world.worldId, world.scope, field.fieldId, token);
+          const found = await scopes.findByField(key, world.scope, field.fieldId, token);
           const expected = (world.collections[field.collectionId as CollectionId] as unknown as Doc[])
             .filter((doc) => valuesAtPath(doc, field.path).some((hit) => hit.value === token))
             .map((doc) => doc._id)
@@ -123,7 +126,7 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
     });
 
     it(`${family}: a targeted redaction changes only the subject's elements and preserves every other byte`, async () => {
-      const { world, binding } = await seed(family);
+      const { world, key } = await seed(family);
       const scopes = new ScopeRepository(executor);
       const model = new Map<string, Doc>(
         COLLECTION_IDS.flatMap((id) =>
@@ -138,29 +141,16 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
       let mixed = 0;
       for (const field of world.scope.fields.filter((f) => f.fieldId.endsWith('.identity_binding'))) {
         for (const token of subjectTokens(world)) {
-          for (const address of await scopes.findByField(
-            binding,
-            world.worldId,
-            world.scope,
-            field.fieldId,
-            token,
-          )) {
-            const key = `${address.collectionId}/${address.recordId}`;
-            const doc = model.get(key)!;
+          for (const address of await scopes.findByField(key, world.scope, field.fieldId, token)) {
+            const recordKey = `${address.collectionId}/${address.recordId}`;
+            const doc = model.get(recordKey)!;
             const siblings = valuesAtPath(doc, field.path).filter((hit) => hit.value !== token);
             if (field.path.includes('*') && siblings.length > 0) mixed += 1;
-            const result = await scopes.writeField(
-              binding,
-              world.worldId,
-              world.scope,
-              address,
-              field.fieldId,
-              {
-                match: token,
-                mutation: { kind: 'replace', replacement: REDACTED },
-              },
-            );
-            expect(modelRedact(doc, field, token), key).toBe(true);
+            const result = await scopes.writeField(key, world.scope, address, field.fieldId, {
+              match: token,
+              mutation: { kind: 'replace', replacement: REDACTED },
+            });
+            expect(modelRedact(doc, field, token), recordKey).toBe(true);
             expect(result).toEqual({ matched: 1, modified: 1 });
             writes += 1;
           }
@@ -171,31 +161,29 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
 
       for (const id of COLLECTION_IDS) {
         for (const doc of await stored(id)) {
-          const key = `${id}/${doc._id}`;
-          const expected = model.get(key)!;
-          expect(doc, key).toEqual(expected);
+          const recordKey = `${id}/${doc._id}`;
+          const expected = model.get(recordKey)!;
+          expect(doc, recordKey).toEqual(expected);
           if (expected._rev === 1)
-            expect(bytes(doc).equals(before.get(key)!), `${key} untouched bytes`).toBe(true);
+            expect(bytes(doc).equals(before.get(recordKey)!), `${recordKey} untouched bytes`).toBe(true);
         }
       }
       // After the cleanup no identity field finds the subject any more.
       for (const field of world.scope.fields.filter((f) => f.fieldId.endsWith('.identity_binding')))
         for (const token of subjectTokens(world))
-          expect(await scopes.findByField(binding, world.worldId, world.scope, field.fieldId, token)).toEqual(
-            [],
-          );
+          expect(await scopes.findByField(key, world.scope, field.fieldId, token)).toEqual([]);
     });
   }
 
   it('removes only the matching element of a mixed array and keeps its siblings in order', async () => {
-    const { world, binding } = await seed('composed_holdout');
+    const { world, key } = await seed('composed_holdout');
     const scopes = new ScopeRepository(executor);
     const aliases = world.scope.fields.find((f) => f.fieldId === 'customers.aliases')!;
     const primary = customersPrimary(world);
     const original = [...(primary.data.aliases as string[])];
     const removed = original[1]!;
     const address = typedAddress('customers', primary._id);
-    const result = await scopes.writeField(binding, world.worldId, world.scope, address, aliases.fieldId, {
+    const result = await scopes.writeField(key, world.scope, address, aliases.fieldId, {
       match: removed,
       mutation: { kind: 'remove' },
     });
@@ -213,7 +201,7 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
   });
 
   it('writes through the effect protocol: fenced job, recorded decision, hashes of the actual preimages', async () => {
-    const { world, binding } = await seed('composed_holdout');
+    const { world, binding, key } = await seed('composed_holdout');
     const scopes = new ScopeRepository(executor);
     const effects = new EffectRepository(executor);
     const worker = { ...actor, ...binding };
@@ -236,7 +224,7 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
       valuesAtPath(world.collections.messages, ['*', ...field.path]).some((hit) => hit.value === candidate),
     )!;
     expect(token).toBeTruthy();
-    const found = await scopes.findByField(binding, world.worldId, world.scope, field.fieldId, token);
+    const found = await scopes.findByField(key, world.scope, field.fieldId, token);
     expect(found.length).toBeGreaterThan(0);
     const action = intent(job._id, { targets: found, effectKind: 'redact', stepId: 'apply' });
     const bound = { ...action, policyDecision: { ...action.policyDecision } };
@@ -248,10 +236,9 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
       apply: async (session) => {
         const applied = [];
         for (const address of found) {
-          const preHash = await scopes.preimageHash(binding, world.worldId, world.scope, address, session);
+          const preHash = await scopes.preimageHash(key, world.scope, address, session);
           await scopes.writeField(
-            binding,
-            world.worldId,
+            key,
             world.scope,
             address,
             field.fieldId,
@@ -261,7 +248,7 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
             },
             session,
           );
-          const postHash = await scopes.preimageHash(binding, world.worldId, world.scope, address, session);
+          const postHash = await scopes.preimageHash(key, world.scope, address, session);
           expect(postHash).not.toBe(preHash);
           applied.push({
             address,
@@ -287,24 +274,76 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
     ).toHaveProperty('revision', 1);
   });
 
-  it('refuses another scope, an unregistered field and a registry from a different tenant', async () => {
-    const { world, binding } = await seed('direct_nested');
+  it('refuses another scope, an unregistered field, another world and any key the repository did not issue', async () => {
+    const { world, binding, key } = await seed('direct_nested');
     const scopes = new ScopeRepository(executor);
     const field = world.scope.fields.find((f) => f.fieldId === 'messages.identity_binding')!;
+    const token = subjectTokens(world)[0]!;
+    // A world of another tenant, with a perfectly valid key, cannot be used with this scope's registry.
+    const otherScope = { ...binding, tenantId: 'other-tenant' };
+    await new WorldRepository(builder).create(otherScope, 'foreign-world', 1);
+    const foreign = await new WorldRepository(builder).bind(otherScope, 'foreign-world');
+    await expect(scopes.findByField(foreign, world.scope, field.fieldId, token)).rejects.toThrow(
+      'UnauthorizedCollection',
+    );
+    await expect(scopes.findByField(key, world.scope, 'messages.not_registered', token)).rejects.toThrow(
+      'UnknownFieldId',
+    );
+    // Another world in the same scope sees none of this world's records.
+    await new WorldRepository(builder).create(binding, 'sibling-world', world.scope.revision);
+    const sibling = await new WorldRepository(builder).bind(binding, 'sibling-world');
+    expect(await scopes.findByField(sibling, world.scope, field.fieldId, token)).toEqual([]);
+    // A bare string, a hand-built object and a copy of a real key with another world id are refused outright.
+    for (const forged of [
+      'world-x',
+      { ...binding, worldId: world.worldId, scopeRevision: 1, jobId: null },
+      { ...key, worldId: 'sibling-world' },
+    ])
+      await expect(scopes.findByField(forged as never, world.scope, field.fieldId, token)).rejects.toThrow(
+        'InvalidWorldKey',
+      );
     await expect(
-      scopes.findByField({ ...binding, tenantId: 'other' }, world.worldId, world.scope, field.fieldId, 'x'),
-    ).rejects.toThrow('UnauthorizedCollection');
-    await expect(
-      scopes.findByField(binding, world.worldId, world.scope, 'messages.not_registered', 'x'),
-    ).rejects.toThrow('UnknownFieldId');
-    expect(
-      await scopes.findByField(
-        binding,
-        'another-world',
+      scopes.writeField(
+        { ...key } as never,
         world.scope,
+        { collectionId: 'messages', recordId: 'x', recordIdBsonType: 'string' },
         field.fieldId,
-        subjectTokens(world)[0]!,
+        { match: token, mutation: { kind: 'remove' } },
       ),
-    ).toEqual([]);
+    ).rejects.toThrow('InvalidWorldKey');
+  });
+
+  it('refuses to bind a world that does not exist under the scope', async () => {
+    const { binding } = await seed('direct_nested');
+    const worlds = new WorldRepository(builder);
+    await expect(worlds.bind(binding, 'nowhere')).rejects.toThrow('UnknownWorld');
+    await expect(worlds.bind({ ...binding, scopeId: 'other-scope' }, 'nowhere')).rejects.toThrow(
+      'UnknownWorld',
+    );
+  });
+
+  it('derives a key from a stored job, so the world comes from the run binding', async () => {
+    const { world, binding } = await seed('direct_nested');
+    const worker = { ...actor, ...binding };
+    const created = await new JobRepository(env.service).create(worker, {
+      jobId: 'keyed-job',
+      kind: 'cleanup',
+      binding: {
+        runId: 'run-keyed-job',
+        worldId: world.worldId,
+        harnessHash: HASH,
+        scopeRevision: world.scope.revision,
+        workerProfileHash: HASH,
+      },
+    });
+    const derived = worldKeyOf(created);
+    expect(derived).toMatchObject({
+      worldId: world.worldId,
+      scopeRevision: world.scope.revision,
+      jobId: 'keyed-job',
+      ...binding,
+    });
+    expect(isWorldKey(derived)).toBe(true);
+    expect(isWorldKey({ ...derived })).toBe(false);
   });
 });

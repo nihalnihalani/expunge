@@ -310,6 +310,14 @@ export type ActionIntent = {
    */
   decisionId: string;
 };
+/** What the gateway knew when it decided one call; replay reads exactly this, never later state. */
+export type DecisionInputsRecord = {
+  facts: Record<string, JsonValue>;
+  bindings: Record<string, JsonValue>;
+  prior: Record<string, JsonValue>;
+  /** ISO time each fact, binding or prior-effect value was observed; later values are future for replay. */
+  observedAt?: Record<string, string>;
+};
 /** One row of the per-scope decision ledger written by the trusted gateway before an effect may commit. */
 export type DecisionRecord = ScopeKey & {
   decisionId: string;
@@ -321,6 +329,11 @@ export type DecisionRecord = ScopeKey & {
   argsDigest: string;
   decision: PolicyDecision;
   decidedAt: Date;
+  /** Worker tool the decision governs (read-only tools are recorded too). */
+  toolId?: string;
+  inputs?: DecisionInputsRecord;
+  /** contentHash of `inputs`, so a replay can prove it read the inputs the gateway used. */
+  inputsDigest?: string;
 };
 /** Authoritative owner authorization state for one scope. Only setup and the approval issuer write it. */
 export type AuthorityRevision = ScopeKey & {
