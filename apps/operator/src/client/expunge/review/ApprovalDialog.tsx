@@ -26,17 +26,112 @@ type Phase = 'idle' | 'submitting' | 'recorded' | 'failed';
  * The only write the dialog makes. The body is exactly the decision and the digest of the
  * descriptor that was displayed; nothing executable and nothing else is ever sent.
  */
+/** What the operator returns for a decision: the database's state and, on approve, the grant it minted. */
+export type DecisionAnswer = ApprovalDecisionResult & {
+  grantId?: string | null;
+};
+
 export function submitDecision(
   proposalId: string,
   descriptor: Pick<ApprovalDescriptorView, 'descriptorDigest'>,
   decision: 'approve' | 'decline',
 ) {
-  return expungeFetch<ApprovalDecisionResult>(
+  return expungeFetch<DecisionAnswer>(
     `/proposals/${encodeURIComponent(proposalId)}/decision`,
     {
       method: 'POST',
       body: { decision, descriptorDigest: descriptor.descriptorDigest },
     },
+  );
+}
+
+export const APPROVE_LABEL = 'Approve this change';
+export const APPROVE_HELP =
+  'Approving grants permission to promote; the promotion appears only when the database commits it.';
+
+/** The dialog's buttons. Approve is last and never default; its label does not claim a promotion. */
+export function DecisionActions({
+  canDecide,
+  recorded,
+  busy,
+  onDecline,
+  onApprove,
+  onRefresh,
+  onClose,
+}: {
+  canDecide: boolean;
+  recorded: boolean;
+  busy: boolean;
+  onDecline: () => void;
+  onApprove: () => void;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  const decidable = canDecide && !recorded;
+  return (
+    <>
+      {decidable && (
+        <p className="ex-note" id="ex-approve-help">
+          {APPROVE_HELP}
+        </p>
+      )}
+      <div className="ex-actions ex-dialog-actions">
+        {decidable && (
+          <button
+            type="button"
+            className="ex-btn"
+            disabled={busy}
+            onClick={onDecline}
+          >
+            Decline
+          </button>
+        )}
+        <button type="button" className="ex-btn" onClick={onRefresh}>
+          Refresh
+        </button>
+        <button type="button" className="ex-btn" onClick={onClose}>
+          Close without deciding
+        </button>
+        {decidable && (
+          <button
+            type="button"
+            className="ex-btn ex-btn--primary"
+            disabled={busy}
+            aria-describedby="ex-approve-help"
+            onClick={onApprove}
+          >
+            {busy ? 'Sending' : APPROVE_LABEL}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** After a decision: what the database reported, and the grant it minted when there is one. Never "promoted". */
+export function DecisionRecorded({
+  decision,
+  state,
+  grantId,
+}: {
+  decision: 'approve' | 'decline';
+  state: ApprovalDecisionResult['state'];
+  grantId: string | null;
+}) {
+  return (
+    <p>
+      <PendingAcknowledgement>
+        {decision === 'approve' ? 'Approval' : 'Decline'} sent. The database
+        reports the proposal as <strong>{state}</strong>.
+        {grantId && decision === 'approve' && (
+          <>
+            {' '}
+            It minted grant <code className="ex-code">{grantId}</code>.
+          </>
+        )}{' '}
+        Promotion appears only when the database commits it.
+      </PendingAcknowledgement>
+    </p>
   );
 }
 
@@ -160,6 +255,7 @@ export function ApprovalDialog({
   const [result, setResult] = useState<{
     decision: 'approve' | 'decline';
     state: ApprovalDecisionResult['state'];
+    grantId: string | null;
   } | null>(null);
   const descriptor = read.data;
   const availability = descriptor
@@ -178,7 +274,11 @@ export function ApprovalDialog({
     setError(null);
     try {
       const answer = await submitDecision(proposalId, descriptor, decision);
-      setResult({ decision, state: answer.state });
+      setResult({
+        decision,
+        state: answer.state,
+        grantId: answer.grantId ?? null,
+      });
       setPhase('recorded');
       announce(
         'Your decision was sent. Waiting for the database to commit the result.',
@@ -248,16 +348,7 @@ export function ApprovalDialog({
               missing={error.missing}
             />
           ) : null}
-          {phase === 'recorded' && result && (
-            <p>
-              <PendingAcknowledgement>
-                {result.decision === 'approve' ? 'Approval' : 'Decline'} sent.
-                The database reports the proposal as{' '}
-                <strong>{result.state}</strong>. Promotion appears only when the
-                database commits it.
-              </PendingAcknowledgement>
-            </p>
-          )}
+          {phase === 'recorded' && result && <DecisionRecorded {...result} />}
           {availability && !availability.canDecide && (
             <div className="ex-banner ex-banner--info" role="status">
               <StatusChip
@@ -269,34 +360,15 @@ export function ApprovalDialog({
               <span>{availability.text}</span>
             </div>
           )}
-          <div className="ex-actions ex-dialog-actions">
-            {availability?.canDecide && phase !== 'recorded' && (
-              <button
-                type="button"
-                className="ex-btn"
-                disabled={busy}
-                onClick={() => void decide('decline')}
-              >
-                Decline
-              </button>
-            )}
-            <button type="button" className="ex-btn" onClick={read.refresh}>
-              Refresh
-            </button>
-            <button type="button" className="ex-btn" onClick={close}>
-              Close without deciding
-            </button>
-            {availability?.canDecide && phase !== 'recorded' && (
-              <button
-                type="button"
-                className="ex-btn ex-btn--primary"
-                disabled={busy}
-                onClick={() => void decide('approve')}
-              >
-                {busy ? 'Sending' : 'Approve promotion'}
-              </button>
-            )}
-          </div>
+          <DecisionActions
+            canDecide={!!availability?.canDecide}
+            recorded={phase === 'recorded'}
+            busy={busy}
+            onDecline={() => void decide('decline')}
+            onApprove={() => void decide('approve')}
+            onRefresh={read.refresh}
+            onClose={close}
+          />
         </>
       )}
     </Dialog>

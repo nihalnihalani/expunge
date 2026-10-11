@@ -144,7 +144,7 @@ const descriptor = (patch: Record<string, unknown> = {}) => ({
   ...patch,
 });
 
-it('uses the approval principal for decisions, names the grant and approver itself, and re-reads committed state', async () => {
+it('uses the approval principal for decisions, names the approver itself, and re-reads committed state', async () => {
   const { app, calls } = build((call) =>
     call.method === 'GET'
       ? descriptor()
@@ -164,23 +164,22 @@ it('uses the approval principal for decisions, names the grant and approver itse
     state: 'approved',
     committedEventSequence: 12,
   });
-  // The stored descriptor is read first, with the read principal, to learn the grant.
+  // The stored descriptor is read first, with the read principal, to check state and digest.
   expect(calls[0].method).toBe('GET');
   expect(calls[0].headers.authorization).toBe(`Bearer ${READ}`);
   expect(calls[1].headers.authorization).toBe(`Bearer ${APPROVAL}`);
-  // DA-7 K1: the forward carries the approver identity and the grant, taken from the server.
+  // DA-7 K1: the forward carries the approver identity taken from the server. A pending
+  // descriptor has no grant (the database mints it on approval), so none is forwarded.
   expect(calls[1].body).toEqual({
     decision: 'approve',
     descriptorDigest: hex('d'),
     toolCallId: 'call-1',
-    grantId: 'grant-1',
     approverId: 'stored-owner',
   });
 });
 
-it('DA-7 K1: refuses an approval that cannot name a pending grant or that does not match the stored digest, without forwarding it', async () => {
+it('DA-7 K1: refuses an approval whose stored descriptor is not pending or does not match the stored digest, without forwarding it', async () => {
   for (const stored of [
-    descriptor({ grantId: null }),
     descriptor({ state: 'consumed' }),
     descriptor({ state: 'expired' }),
   ]) {
@@ -298,4 +297,61 @@ it('requires application/json for mutations (inherited boundary)', async () => {
     body: JSON.stringify(validSubmit),
   });
   expect(response.status).toBe(415);
+});
+
+it('a PENDING descriptor with no grantId (key absent or null) is decidable by proposalId and digest, and the minted grant is passed back', async () => {
+  for (const stored of [
+    (() => {
+      const { grantId: _omit, ...rest } = descriptor();
+      void _omit;
+      return rest;
+    })(),
+    descriptor({ grantId: null }),
+  ]) {
+    const { app, calls } = build((call) =>
+      call.method === 'GET'
+        ? stored
+        : {
+            accepted: true,
+            state: 'approved',
+            committedEventSequence: 13,
+            grantId: 'grant-minted-1',
+          },
+    );
+    const read = await app.request('/api/expunge/proposals/proposal-1', {
+      headers: auth,
+    });
+    expect(read.status).toBe(200);
+    expect((await read.json()).grantId).toBeNull();
+    const response = await app.request(
+      '/api/expunge/proposals/proposal-1/decision',
+      post({ decision: 'approve', descriptorDigest: hex('d') }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      accepted: true,
+      state: 'approved',
+      committedEventSequence: 13,
+      grantId: 'grant-minted-1',
+    });
+    const forwarded = calls.find((call) => call.method === 'POST');
+    expect(forwarded?.body).toEqual({
+      decision: 'approve',
+      descriptorDigest: hex('d'),
+      approverId: 'stored-owner',
+    });
+    expect(forwarded?.body).not.toHaveProperty('grantId');
+  }
+});
+
+it('still refuses a digest mismatch for a pending descriptor with no grant, without forwarding', async () => {
+  const { app, calls } = build((call) =>
+    call.method === 'GET' ? descriptor({ grantId: null }) : { accepted: true },
+  );
+  const response = await app.request(
+    '/api/expunge/proposals/proposal-1/decision',
+    post({ decision: 'approve', descriptorDigest: hex('x') }),
+  );
+  expect(response.status).toBe(409);
+  expect(calls.every((call) => call.method === 'GET')).toBe(true);
 });

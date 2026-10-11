@@ -163,6 +163,8 @@ const decisionResult = z.object({
     'stale',
   ]),
   committedEventSequence: z.number().int().nonnegative().nullable(),
+  /** Minted by the database when an approval is committed; absent for a decline. */
+  grantId: idParam.nullish(),
 });
 const threadBinding = z.object({ jobId: idParam });
 
@@ -435,7 +437,12 @@ export class HttpExpungeDomainService implements ExpungeDomainService {
       signal,
     );
     if (value === null) return null;
-    return parseWith(approvalDescriptorSchema, value);
+    // A pending descriptor has no grant yet (grants are minted on approval): a missing key is the
+    // same as null, so the stored descriptor is identified by proposalId and descriptorDigest.
+    return parseWith(approvalDescriptorSchema, {
+      grantId: null,
+      ...(value as Record<string, unknown>),
+    });
   }
 
   async decideApproval(
@@ -450,12 +457,12 @@ export class HttpExpungeDomainService implements ExpungeDomainService {
     idParam.parse(proposalId);
     // Fails first, before any network call, when this operator has no approval credential.
     const token = this.writeToken('approval');
-    // The grant and the approver come from the server, never the browser: the stored descriptor
-    // names the grant and the digest the decision must match, and the approver is the operator's
-    // authenticated owner. A decision that cannot name both is refused here.
+    // The approver comes from the server, never the browser, and the stored descriptor names the
+    // digest the decision must match. A pending descriptor has no grant (the database mints it on
+    // approval), so the decision is identified by proposalId and descriptorDigest only.
     const descriptor = await this.readApproval(proposalId, signal);
     if (!descriptor) throw new ExpungeDomainError('not_found', 404);
-    if (!descriptor.grantId || descriptor.state !== 'pending')
+    if (descriptor.state !== 'pending')
       throw new ExpungeDomainError('conflict', 409);
     if (descriptor.descriptorDigest !== input.descriptorDigest)
       throw new ExpungeDomainError('conflict', 409);
@@ -464,7 +471,7 @@ export class HttpExpungeDomainService implements ExpungeDomainService {
       `/internal/projection/proposals/${proposalId}/decision`,
       token,
       signal,
-      { ...input, grantId: descriptor.grantId, approverId: this.ownerId },
+      { ...input, approverId: this.ownerId },
     );
     if (value === null) throw new ExpungeDomainError('not_found', 404);
     return parseWith(decisionResult, value);

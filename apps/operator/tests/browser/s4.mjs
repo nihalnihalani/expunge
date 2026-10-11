@@ -263,13 +263,13 @@ export async function run(browser, cfg) {
       `Tab never leaves the dialog (${labels.join(' | ').slice(0, 120)})`,
     );
     const decline = labels.indexOf('Decline');
-    const approve = labels.indexOf('Approve promotion');
+    const approve = labels.indexOf('Approve this change');
     check(
       decline >= 0 && approve > decline,
       'Decline comes before Approve in the tab order',
     );
     check(
-      labels.filter((l) => l === 'Approve promotion').length >= 1,
+      labels.filter((l) => l === 'Approve this change').length >= 1,
       'Approve is reachable by keyboard',
     );
     await page.keyboard.press('Shift+Tab');
@@ -349,7 +349,7 @@ export async function run(browser, cfg) {
       .waitFor();
     check(
       (await dialog
-        .getByRole('button', { name: 'Approve promotion' })
+        .getByRole('button', { name: 'Approve this change' })
         .count()) === 0,
       `${word}: Approve is removed`,
     );
