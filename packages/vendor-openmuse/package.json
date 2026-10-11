@@ -1,0 +1,22 @@
+{
+  "name": "@expunge/vendor-openmuse",
+  "version": "0.1.0",
+  "description": "Attributed MIT port of OpenMuse tanstackAgent helpers adapted to TanStack AI 0.63.0 / CopilotKit runtime 1.75.0. See THIRD_PARTY.md.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@ag-ui/client": "0.0.59",
+    "@ag-ui/core": "0.0.59",
+    "@ag-ui/mcp-apps-middleware": "0.1.1",
+    "@copilotkit/core": "1.75.0",
+    "@copilotkit/runtime": "1.75.0",
+    "@tanstack/ai": "0.63.0",
+    "@tanstack/ai-anthropic": "0.19.3",
+    "@tanstack/ai-event-client": "0.13.0",
+    "@tanstack/ai-openai": "0.25.1",
+    "@tanstack/openai-base": "0.12.1",
+    "rxjs": "7.8.1",
+    "zod": "4.6.5"
+  }
+}

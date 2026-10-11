@@ -1,0 +1,11 @@
+{
+  "name": "@expunge/grader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/contracts": "0.1.0",
+    "@expunge/fixtures": "0.1.0"
+  }
+}

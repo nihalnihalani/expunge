@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/subagent-report-gate.mjs\"",
+            "timeout": 15,
+            "statusMessage": "Expunge report gate"
+          }
+        ]
+      }
+    ]
+  }
+}

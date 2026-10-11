@@ -1,0 +1,21 @@
+.firecrawl/
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+.DS_Store
+.expunge/
+*.tsbuildinfo
+# Local continuity briefing (may hold private operational context); never committed by default.
+HANDOFF.md
+# Operator SQLite workspace state and local candidate env
+*.sqlite
+*.sqlite-journal
+infra/opendots/.env.candidates.local
+# Sealed/private fixture outputs (marker contract: top-level "expungePrivate": true or .private.* suffix)
+*.private.json
+*.private.jsonl
+*.private.ndjson

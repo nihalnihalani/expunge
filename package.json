@@ -1,0 +1,40 @@
+{
+  "name": "expunge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.13.1 <25.0.0 || >=25.4.0"
+  },
+  "workspaces": [
+    "apps/worker",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node apps/operator/scripts/run-from-root.mjs dev",
+    "operator:start": "node apps/operator/scripts/run-from-root.mjs start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:continuity": "node --test \"scripts/continuity/test/*.test.mjs\"",
+    "checkpoint": "node scripts/continuity/checkpoint.mjs",
+    "checkpoint:verify": "node scripts/continuity/verify-checkpoint.mjs",
+    "checkpoint:restore": "node scripts/continuity/restore-checkpoint.mjs",
+    "test:mongo": "vitest run packages/mongo/test",
+    "setup:mongo": "node --import tsx --env-file-if-exists=.env scripts/setup-mongo.ts",
+    "probe:mongo": "node --import tsx --env-file-if-exists=.env scripts/probe-mongo.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "24.0.0",
+    "eslint": "9.39.5",
+    "globals": "17.13.0",
+    "prettier": "3.9.10",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1",
+    "vitest": "4.1.11"
+  }
+}

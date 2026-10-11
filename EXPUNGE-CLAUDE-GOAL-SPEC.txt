@@ -1,0 +1,595 @@
+EXPUNGE: FULL-SCOPE CLAUDE CODE BUILD SPECIFICATION
+Prepared for the project at /Users/nihalnihalani/Desktop/Github/harness hackathon.
+
+Portable continuation: maintain the proactive checkpoint/handoff protocol in section 20. Claude model/team requirements below apply to Claude Code; user-authorized Codex sessions use section 20's explicit role-preserving engine adapter.
+
+Read this entire specification before making implementation choices. This is the detailed instruction file referenced by the accompanying /goal command. The current chat only prepared this prompt; executing it in Claude Code is the implementation task.
+
+REQUESTED CLAUDE CODE TEAM AND MODEL POLICY
+
+Use native Claude Code Agent Teams with real named teammates, a shared task list, dependency-aware ownership and direct teammate messaging. Use the exact requested model versions:
+- Opus 5.5: claude-opus-5-5.
+- Sonnet 5.5: claude-sonnet-5-5.
+- Haiku 5.5: claude-haiku-5-5.
+
+Run the interactive lead session on Opus 5.5. Agent Teams currently require interactive Claude Code; do not use claude -p or call ordinary unnamed subagents an agent team. Enable CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 in the launch environment if necessary. Use the current officially supported named teammate creation, task and message controls; do not manually fabricate native team config/mailboxes.
+
+Specify the exact model for every teammate. If the installed interface accepts family aliases, pin ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5, ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5-5 and ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5-5 in the launch environment. Inspect actual effective models, account/provider availability, organization allowlists, model-switch hooks and any forced subagent-model override: these can replace a requested model. Report the effective model per role and do not silently substitute another model/version. If a requested model or native teams are blocked, explain the exact constraint before changing that requirement; continue only unaffected work that does not misrepresent the requested team.
+
+Required named roster:
+1. team-lead -- Opus 5.5. Own architecture, dependency/contract freeze, source synthesis, task decomposition, integration decisions, review arbitration and final evidence-backed acceptance. Coordinate implementation instead of monopolizing every task. Authorize commit packets only after relevant gates pass.
+2. mongodb-authority -- Sonnet 5.5. Own Atlas schemas/indexes/roles, query and array semantics, gateway effects/receipts, job fencing, Search/Vector retrieval and database recovery. Produce real transaction/RBAC/revocation evidence.
+3. runtime-raindrop -- Sonnet 5.5. Own OpenMuse execution, OpenBot candidate transport/isolation, durable dispatch, Raindrop tracing/diagnostics/observer/outbox/read-back and supported native vendor integrations.
+4. rsi-evolution -- Sonnet 5.5. Own compiler/evolver/replay, independent fixture/grader integration, fresh admission/promotion, Hider and fresh-base meta campaigns. Respect fixed privileged evaluator/authority boundaries.
+5. ui-ux-improver -- Sonnet 5.5. Own visual system, OpenDots workflow/review/projection, responsive and accessible interactions, browser screenshot inspection and iterative usability/performance improvements. Work with actual domain states, not fabricated happy paths. Review each user-facing vertical slice and send concrete improvements to its owner.
+6. devils-advocate -- Opus 5.5. Independently challenge architecture, unsafe assumptions, fake integration, weak tests, scope leakage, hidden-answer leakage, authority expansion, privacy races, observational causality, benchmark gaming, no-op changes and premature completion. Construct counterexamples and evidence-backed findings, including important alternate hypotheses. Do not rubber-stamp consensus. Clearly separate demonstrated defects, likely risks and speculative concerns.
+7. verifier -- Sonnet 5.5. Independently execute lint/type/build/unit/protocol/integration/security/accessibility/browser/fault/live-provider checks and end-to-end journeys on the actual current code. Verify proof identifiers, current source/artifact hashes, denied actions, honest pending states, restart recovery and final committed-version parity. Do not accept the implementation owner's prose as proof. Route failures to the owner, then reproduce the fix.
+8. commit-steward -- Haiku 5.5. The sole Git index/commit writer. Inventory intended changes, inspect exact staged paths/diffs, check secrets/private data/licenses, confirm dependency coherence and matching verifier/reviewer evidence, create frequent meaningful local commits and record the commit/evidence ledger. This teammate commits all intended verified project work, not just selected showcase files. It does not change code/tests to make gates pass or decide architecture/safety on its own.
+
+The named roles persist logically across phases. Pace active teammates to the available context/spend limits; initially allow up to three concurrent code-editing lanes while review/verification/commit roles run when their dependencies are ready. Schedule the UI lane alongside independent backend work and rotate lanes without removing roles or feature scope. Each spawn must include this specification, its exact objective, owned paths, frozen interfaces, source references, model and completion evidence; teammates do not automatically inherit the lead's conversation.
+
+Maintain a shared dependency graph and explicit one-owner-per-file policy. Lead owns shared contracts/locks or delegates them to one named owner at a time. Verifier and devil's advocate remain independent of the changes they certify. UI improvements are applied by the UI owner, then verified by the verifier. Reviewers send material findings directly to owners and lead; completion requires a reproduced resolution or a clearly blocked requirement, not a majority vote that hides a failing check.
+
+Record role/name/requested/effective model, owned tasks, status and evidence in the team handoff. Use native task dependencies where available. If a teammate's model/provider lacks Task tools, the Opus lead maintains the shared task entries and coordinates that teammate through native messages; keep it a real named teammate. Do not edit native team runtime files by hand. Teammates may use focused ordinary subagents only for bounded subtasks; those do not replace the required named Agent Team roles.
+
+Only the Opus lead creates, assigns and shuts down teammates; do not create nested teams. In-process teammate helper subagents must be unnamed and foreground using supported installed controls: named delegation with teams enabled can launch another teammate, and background helpers are not supported in that mode. After /resume or session restoration, do not assume in-process teammates were restored; the lead reads the persistent task/checkpoint/commit ledger, checks unfinished work and locks, respawns the necessary named roles and reconfirms model/ownership before new edits or commits.
+
+Use officially supported TaskCompleted/TeammateIdle quality-gate hooks, after inspecting their installed schemas, to reject unsupported completion or idling with actionable owned work. Hooks must check actual task-kind evidence rather than always exit successfully. Allow honest dependency-blocked/finished teammates to idle; do not create busy loops. On shutdown/resume, reconstruct ownership/status from the persistent project ledger and native supported team state, then confirm effective models again.
+
+These model assignments concern the Claude Code engineering team. Expunge's runtime worker/improver experiment models remain independently configured and frozen per scientific arm; do not rotate runtime models because a different engineering teammate is doing the implementation.
+
+1. OBJECTIVE AND FINISH LINE
+
+Build the complete Expunge project: a governed database-cleanup agent that evolves its executable harness from measured failures, plus a valid adversarial curriculum and an independently evaluated improver-evolution loop.
+
+Preserve the full scope. Deliver working code, refined UI/UX, real integrations, meaningful tests, independent reviews, reproducible deployment assets, incremental verified local Git commits, and evidence for every claimed capability. Continue through integration and verification; a plan, scaffold, attractive dashboard or passing mock suite does not satisfy the objective.
+
+The fixed model is surrounded by four editable executable surfaces: context construction, workflow/control graph, guardrails and tool-access/prerequisite policy. The full design includes sandboxed discovery/context/critic source plugins, historical replay, fresh evaluation, human-bound authority review, promotion, rollback, privacy lineage, Hider worlds and fresh-base meta experiments.
+
+The product uses synthetic company data for demonstrations and experiments. It supports delete, redact, restrict and tombstone effects under fixed owner eligibility rules. Describe measured coverage accurately; do not claim automatic legal compliance, model-weight improvement or unlimited recursive acceleration.
+
+An implementation can be complete without a positive meta-learning result. An experiment cannot be called complete without executed outcomes. Report ties, regressions, null results and inconclusive comparisons.
+
+2. AUTONOMY, BOUNDARIES AND STATE
+
+Perform authorized reversible implementation, routine dependency installation, local synthetic service setup, tests and local commits without repeatedly asking whether to continue. Resolve ordinary design choices from this specification and verified documentation.
+
+Respect existing permission controls. Do not use a blanket permission bypass or weaken auth, isolation or verification to make a check pass.
+
+Read credentials only from local environment/configuration. Never print values, connection strings, bearer headers, private account identifiers or secrets in tool output, source, logs, screenshots, reports or commits. The user previously said they would configure .env locally; its existence and completeness must be checked, not assumed.
+
+Work in the existing project. Inventory and preserve existing files and user changes; do not wipe the workspace, replace the repository wholesale, reset user commits, discard edits or remove Docker profiles/volumes. Changes already present are an incomplete foundation, not an accepted final implementation.
+
+Public publishing, production deployment, changing an existing live deployment, paid account upgrades, external messaging and destructive real-data operations require explicit authorization. Prepare and verify the concrete result first. Build production deployment configuration and an authenticated local/staging rehearsal where authorized; leave production publication as a separately identified boundary.
+
+Respect configured provider and campaign spend limits. Freeze and expose the estimated episode/token/cost requirements before a large campaign. Do not assume that an API key authorizes unlimited spending. A budget or account constraint changes execution scheduling and recorded status, not the feature scope.
+
+Use persistent project task state, phase checkpoints and a handoff file. Track dependencies, file ownership, decisions, actual checks, remaining work and external blockers. Do not let compaction erase the goal or restart completed verified work.
+
+At each milestone surface in the conversation: current commit/head, completed requirements, exact check commands and exit codes, executed/passed/failed/skipped counts, sanitized run/evidence IDs, remaining requirements and next actions. The /goal evaluator cannot independently read report files or run your commands; file existence alone is not proof.
+
+If credentials, rights, budget or a required external service are genuinely unavailable, complete all unaffected implementation and local verification, then report the exact blocked acceptance items and a resumable handoff. Do not claim ACHIEVED or production-ready integration while required live proof is missing. Avoid endless identical retries and invented substitute services.
+
+3. INITIAL AUDIT AND DOCUMENTATION DISCOVERY
+
+Start with a read-only audit: pwd, Git status/history/remotes, applicable AGENTS.md/CLAUDE.md, package manifests/locks, runtime versions, available tools/skills, existing code, .env variable presence, existing test reports and running project-owned services. Do not expose credential values or kill unrelated processes.
+
+Read:
+- EXPUNGE-IMPLEMENTATION-BLUEPRINT.md
+- docs/expunge/CONTRACTS.md
+- docs/expunge/DATA-MODEL.md
+- docs/expunge/AGENT-TASKS.md
+- docs/expunge/ACCEPTANCE.md
+- docs/expunge/SOURCE-MAP.md
+- docs/expunge/RESOURCE-GUIDE-EVALUATION.md
+- docs/research/blueprint-foundations.md
+- docs/research/blueprint-mongodb.md
+- docs/research/blueprint-raindrop.md
+- docs/research/prompt-mongodb.md
+- docs/research/prompt-raindrop.md
+- docs/research/prompt-rsi.md
+- packages/fixtures/README.md and packages/grader/README.md
+- infra/opendots/README.md and BUILD-A1.md
+- relevant prior research and actual source/tests.
+
+Resolve stale statements in documents from actual evidence. The older BLUEPRINT.md and research sketches describe earlier ideas; Expunge's final contracts and three-database design supersede those sketches. Do not migrate the project back to CaseLaw.
+
+Use Firecrawl for live web discovery and documentation extraction. Use its developer index for API/source questions, research-paper search plus related-paper expansion/body verification for RSI, and search/scrape/map for official sources and UX patterns. Reuse relevant .firecrawl cache before refetching. If a tool fails, report the failure and use a verified alternative without installing unrelated infrastructure.
+
+Use available relevant skills, especially firecrawl, firecrawl-developer-index, firecrawl-research-papers, frontend-design, vercel-react-best-practices, browser-use and the planning/execution skills. Inspect actual installed files; a stale path is not an excuse to skip discovery.
+
+Create a dated source map and Allowed APIs list with exact dependency versions, primary URLs, source sections, actual signatures, unsupported APIs and confidence/gaps. Pin important paper revisions or content hashes rather than borrowing headline scores from mismatched versions. Research is input to engineering, not permission to let retrieved text change authority.
+
+Freshly verify:
+- OpenDots/OpenBot/OpenMuse integration seams and compatible package versions.
+- MongoDB driver transactions, write fencing, Atlas role provisioning, graph/array semantics, change streams, Search/Vector readiness and eventual consistency.
+- Raindrop SDK/OpenAPI, diagnostics execution, provider model-span coverage, Query pagination, late enrichment, native MCP/Experiments and external deletion.
+- RSI evidence admission, per-edit warrant, critic/pruning, structured holdouts, equal-budget controls and fresh-base optimizer comparisons.
+- Official accessibility and production React/browser-testing patterns.
+
+Copy actual documented patterns. Do not invent vendor methods, parameters, SDK adapters or endpoints. A missing API must be investigated before implementing around it.
+
+Research anchors:
+https://code.claude.com/docs/en/goal
+https://code.claude.com/docs/en/agent-teams
+https://code.claude.com/docs/en/model-config
+https://code.claude.com/docs/en/hooks
+https://platform.claude.com/docs/en/about-claude/models/overview
+https://github.com/CopilotKit/OpenDots/tree/625452e06cde74cb25b0ce319e2c1be0488f5a5f
+https://github.com/CopilotKit/openmuse/blob/1ac68f3909f2478ab6280883f1ab5ea65eb5719d/apps/server/src/engine/tanstack-agent.ts
+https://github.com/CopilotKit/OpenBot/blob/a4dce8c47c7253ecd9bd6f4e2626f4205817a104/server/src/computer/gateway.ts
+https://www.mongodb.com/docs/drivers/node/current/crud/transactions/
+https://www.mongodb.com/docs/atlas/security-add-mongodb-roles/
+https://www.mongodb.com/docs/search/performance/index-performance/
+https://raindrop.ai/docs/sdk/typescript
+https://raindrop.ai/docs/query-api/api-reference
+https://query.raindrop.ai/v1/openapi.json
+https://arxiv.org/html/2610.09197#S4.SS3
+https://arxiv.org/html/2609.24130
+https://arxiv.org/abs/2609.24972v3
+https://arxiv.org/html/2607.13083#S4.SS5
+https://arxiv.org/html/2602.22480#S3.SS2
+https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/
+
+4. COHERENT ARCHITECTURE AND FOUNDATION REUSE
+
+Use OpenDots as the operator workspace and authenticated UI/API shell, actual OpenMuse helpers in a separate durable model worker, OpenBot for candidate computer infrastructure, MongoDB as consequential domain/control authority, and Raindrop as the real observed evidence path.
+
+Do not portray three whole apps as automatically interoperable. Native Dot-to-Dot delegation is not supplied; implement explicit authenticated durable orchestration.
+
+Preserve the researched foundations initially:
+- OpenDots: 625452e06cde74cb25b0ce319e2c1be0488f5a5f.
+- OpenMuse: 1ac68f3909f2478ab6280883f1ab5ea65eb5719d.
+- OpenBot main governance reference: a4dce8c47c7253ecd9bd6f4e2626f4205817a104.
+- OpenDots bundled OpenBot computer services: b6932d31a8d6e7896c15139dfc27a6c6911deb27.
+
+Record licenses, copied files, modifications and source pins. Keep new event functionality identifiable separately from foundations and prepared research.
+
+The imported operator uses a standalone upstream lock. The core workspace contains packages and backend apps. Preserve this working boundary unless a documented dependency audit proves a better compatible arrangement. Do not silently resolve drifting peers or independently upgrade shared SDKs. Verify one AG-UI version per in-process runtime.
+
+The researched OpenDots lock uses AG-UI 0.0.59, CopilotKit 1.75.0, TanStack AI 0.63.0 and OpenAI adapter 0.25.1. OpenMuse's helper originated on older runtime/TanStack versions; explicitly adapt and test it.
+
+Use AbstractAgent from @ag-ui/client. Its run returns Observable<BaseEvent>; the inner TanStack factory returns AsyncIterable chunks. An outer Expunge agent must preserve trusted dependencies on clone and construct the wrapped OpenMuse inner agent inside run. Test text/tool/state conversion, cancellation and context composition; do not duplicate runtime-injected context.
+
+OpenDots ExpungeProjectionAgent submits/observes jobs and emits finite acknowledgment/review turns. The durable backend ExpungeExecutionAgent performs the actual model campaign. UI-turn completion or browser disconnection cannot mark a job complete or cancel it. Do not run the full campaign inside the native 90-second UI runner.
+
+Existing OpenBot computer transport does not automatically implement Mongo governance. Port the target-resolution -> policy -> decision ledger -> action -> outcome ordering into a trusted asynchronous gateway. Do not import a nonexistent exported govern() function or await Mongo inside an upstream synchronous policy callback.
+
+Use separate identities/process boundaries for worker, observer/proposer, grader, approval issuer, promoter, privacy controller and fixture builder. The candidate and worker images must exclude private manifest/seed/answer modules and files. The model receives typed capabilities, never connection strings or raw admin MCP access.
+
+5. REPAIR AND VERIFY THE EXISTING FOUNDATION FIRST
+
+Check the actual current source before relying on previous reports. Known gaps requiring early regression tests include:
+- Fixture scope hashing may include extra ActorContext keys; implicit and explicit default scope binding can produce identical worldId with different scopeId. Select exactly {tenantId, env, scopeId}, preserve opaque identifier values unchanged, and use one resolved default binding for both world hashing and emitted registry scope. Test extra actor keys, implicit/explicit default equivalence and tenant/environment isolation.
+- packages/mongo/src/scope.ts rejects '*' paths produced by fixture arrays. Define a typed wildcard/path grammar. Compile read matching and targeted writes separately; blindly deleting '*' from write paths is unsafe. Test fixture -> registry -> discovery -> mixed-array cleanup end to end.
+- packages/mongo/src/provenance.ts silently limits roots/depth without a completeness/frontier result. Complete closure durably or fail closed and block affected retrieval until resolved. Test more than 500 roots, deeper chains, cycles and concurrent derivations.
+- Primitive effect/promotion callbacks and caller-supplied requiresApproval are scaffolds. Final services must derive and require stored-policy checks; HTTP/model callers cannot select their own authorization result.
+- Revocation must cover all evidence, lesson and context inputs, not only the pinned harness hash.
+- Local RBAC test existence/skip logic is not actual Atlas privilege proof.
+- Recheck evolving type errors, test failures and uncommitted partial code; do not assume prior passing counts certify current HEAD.
+
+Preserve repaired grader protections: independently sealed ScopeKey/revision, registry/schema/subject commitments, exact receipt coverage, explicit trusted partial observation before sealing, rejection of malformed nonstring/leading-wildcard recipe paths, and private expected outcomes.
+
+6. DEEP MONGODB INTEGRATION
+
+Use the invitation-based Atlas Hackathon Sandbox required by the resource guide. Confirm its actual identity privately, server version/topology/tier, transaction support, role rights, change-stream capability and Search/Vector features. A local replica set is valuable verification, not proof of invited Atlas deployment.
+
+Use three databases on the same deployment:
+- expunge_world: customers, accounts, messages, events, notes, archives, schema_registry, source-derived identity_edges and world_revisions.
+- expunge_control: jobs/runs, intents/effects/receipts, immutable artifacts, candidates, gate reports/trial rows, approvals, deployments/promotions, evidence/lessons, provenance/eligibility, raw artifacts/subject mappings, telemetry outbox/receipts, observer cursors, projections and privacy/meta/adversary campaigns.
+- expunge_private: fixed fixture specs/manifests, expected poststates, preservation hashes, held-out assignments and private grader results.
+
+Native OpenDots SQLite remains incidental chat/workspace state. It cannot authorize cleanup, issue an Atlas grant or activate a harness.
+
+Implement separate least-privilege Mongo principals. No fallback from missing runtime credentials to setup/admin credentials. Atlas custom roles are provisioned through supported Atlas administration mechanisms; driver createRole/createUser belongs only to local authenticated test tooling, never an Atlas shortcut. Verify additive privileges and actual raw-driver denials.
+
+MongoDB collection RBAC is not document-level RLS. Trusted tools must bind tenant/env/world and admitted collection/field IDs on every query/write, including nested arrays, BSON identity conversions and graph traversal.
+
+Install idempotent strict/error BSON validators and appropriate unique/scoped indexes. Root additionalProperties:false schemas must include _id. Separate canonical JSON artifact payloads from BSON metadata/preimages; preserve string/ObjectId/int64 distinctions. Bind hashes to actual source/compiled bytes, compiler/runtime/vocabulary/floor/policy and sandbox ABI semantics.
+
+Use $lookup for explicit joins and bounded $graphLookup over visible-data edges. Version edges by source/world/scope revisions. Never seed edges from oracle target IDs. Enforce scan/effect/traversal budgets and explicit truncation/continuation. Check actual sharding/tier limitations.
+
+A genuinely new effect transaction must:
+a. Authenticate actor/job access and resolve the stored approved plan.
+b. First return a committed receipt for an identical logical effect key and argument/plan digest, even after terminal job state, lease takeover or advanced world revision.
+c. Recheck the ledger inside the transaction.
+d. Conditionally WRITE the live job owner/fence/lease/not-cancelled row and current world/authorization revision; check the result.
+e. Recheck stored scope, owner eligibility, exact target/preimage/version/prerequisite bindings.
+f. Apply a bounded batch and insert unique effect, action receipt and outbox intent atomically.
+g. Reconcile ambiguous commit acknowledgment through the saved-receipt path.
+
+Use one principal's MongoClient/session, sequential operations and majority/snapshot settings supported by the actual deployment. No Promise.all, model call, HTTP request or vendor effect inside a retried transaction callback. Logical effect identity must not change with a retry's lease fence or tool-call ID.
+
+Implement safe completion with full registered collection/field coverage at a stable scope/world revision and a conditional revision/job write. Preserve unrelated record/field hashes and owner-required retained data. Every controlled writer advances the relevant world revision. Search-index absence cannot certify completion.
+
+Promotion is a separate transaction: verify immutable tested artifact/report versions, independently derive authority change, fence live permission/source eligibility, consume an exact bound unexpired grant if required, CAS the scoped pointer against tested parent/hash/revision, and append receipt/outbox. A stale pointer or failure rolls back grant consumption. Rollback is a new audited transition. Existing runs remain version-pinned but live revocation still applies.
+
+Implement durable change-stream offsets, immutable projection events, ordered deduplication, bounded backlog, reconnect snapshot/backfill and invalidation/expired-token recovery. Treat change streams as wake-ups, not automatic exactly-once processing. TTL is housekeeping, not lease authorization or instantaneous erasure.
+
+Implement both exact structural lesson retrieval and real hybrid retrieval using configured Atlas Search/Vector Search. Pin embeddings/index definitions and test relevance, readiness, scope filters and costs. Search returns candidate IDs; before context assembly, reread authoritative current eligibility, provenance, revision and actual content. An eventually consistent permission flag cannot grant access after revocation. Hybrid retrieval is a mandatory live-proof lane for this full-scope task: if the invited Atlas deployment lacks the necessary feature/rights, exact retrieval remains functional but hybrid acceptance is BLOCKED, never silently waived or faked. Do not switch to an unauthorized personal cluster or buy an upgrade to hide the gap.
+
+Record explain plans for representative query factories and measured scan/operation counts. Add synthetic backup/restore, reconciliation and idempotent migration checks.
+
+7. DURABLE CLEANUP AND TRUSTED COMPLETION
+
+Implement inspect_scope, resolve_subject, discover_references, preview_cleanup, apply_cleanup_batch, verify_registered_scope, complete_cleanup, inspect_harness and report_diagnostic as typed job-bound application tools.
+
+Use the bounded workflow:
+inspect -> resolve -> discover -> preview -> apply -> verify -> complete,
+with explicitly admitted expand/retry/approval branches.
+
+Resolve complete identity/reference targets before destructive effects remove the source links. Store exact plan/preimages/bindings and versioned checkpoints so retry/verification does not lose discovery evidence.
+
+Owner policy selects delete/redact/restrict/tombstone. Exact identity evidence is required; semantic name similarity is insufficient. Preserve other values in mixed arrays and unrelated fields in the same retained record.
+
+Store immutable run binding and current budget. Claim/renew/reclaim through database-time leases and written fences. Propagate cancellation through subscriptions, model/tool calls and action boundaries. Waiting evidence/approval/external jobs release the lease.
+
+Distinguish:
+- A model's narrative.
+- Operational completion in the full registered scope as of a revision, with limitations.
+- Hidden grader correctness over the controlled fixture.
+- Pending or confirmed external erasure.
+
+A registered-but-uninspected path makes registered-scope completion incomplete. A legitimate explicitly partial known registry can produce a truthful scoped receipt while hidden grading still detects a missing target outside that known coverage.
+
+In receipt mode, authoritative terminal text/state is generated from committed receipts. Model messages/state deltas cannot activate completion, deployment or approval. Baseline narrative failures remain visible as clearly labeled untrusted model output alongside the actual verification result.
+
+8. COMPLETE RAINDROP INTEGRATION
+
+Instrument actual worker and improver model/tool episodes, Hider/meta campaigns, verification/admission decisions and relevant orchestration. Correlate role/job/run/world/harness/model profile/evidence/candidate/trial/campaign identities.
+
+Verify actual TanStack provider calls produce model spans; naming an event "model" is insufficient. Include offered tool definitions, actual arguments/outcomes, durations, errors and measured usage while applying explicit sanitization.
+
+Follow inspected SDK signatures for begin, withTool/withSpan object arguments, finish and close. Supply stable explicit event IDs. trackSignal returns void or void[] and is buffered. Published raindrop-ai@1.0.1 finish awaits terminal event ingestion but suppresses some span-flush failures. Neither enqueue nor awaited finish proves full trace/signal delivery.
+
+Commit durable outbox intents with the relevant local outcome, dispatch outside transactions and preserve:
+pending/leased -> SDK enqueued -> terminal ingest accepted -> query visible -> evidence ready,
+plus retry/dead-letter/HOLD and component-specific delivery proofs.
+
+Require real remote read-back of all evidence components needed by a proposal. Track missing spans/signals/enrichment and supported retry/reconciliation; do not fabricate remote spans or assume vendor deduplication. An outage is evidence pending, not "no failures."
+
+Build a separate-key Query observer with explicit project, fixed filter/window identity, bounded pagination, event deduplication, durable cursor/page transactions and pending known event-ID rereads after watermarks. Retain changed evidence revisions when enrichment arrives late.
+
+Use documented property filters and actual meta.cursor/has_more. /v1/signals is a definition catalog; resolve a canonical signal UUID and query matching events. /v1/traces has the inspected 1,000-span cap and no documented continuation cursor; cap-reaching evidence is potentially incomplete.
+
+Wire Self Diagnostics definitions to createSelfDiagnosticsTool().execute(input,context?) through a real TanStack server-tool dispatch. Do not invent forTanStack or merely advertise a tool without execution.
+
+Use actual interaction.subagent carriers and resumeSubagent/withSubagentRun. Carry all returned traceparent/baggage/x-raindrop-handoff headers through authenticated internal dispatch. Missing/disabled carriers remain unlinked; never invent links[] span options. Initialize tracing once per process.
+
+Capture authenticated native MCP tools/list schemas before using Issues/Experiments. Implement actual supported native integrations when entitled, with honest setup/unavailable states otherwise. Native logged-cohort Experiments do not execute agents and do not replace fixed fresh-world evaluation. Do not fabricate endpoints, plan access, sample sufficiency or confidence intervals.
+
+Make remote content cause a change: persist a sanitized read-back EvidenceBundle; the diagnosis and each patch cite actual event/span IDs and permitted witnesses; test trace-informed improvement against equal-budget score-only and wrong-incident conditions. Keep verifier, human, model, classifier, experiment and admission origins distinct.
+
+Sanitization covers model messages, tool results, errors, attributes, attachments, catalogs and screenshots where applicable. redactPii is not universal anonymization. Use protected namespaced telemetry identities and explicit retention.
+
+External deletion uses the exact organization-wide request/status contract. Trusted authorization binds the exact provider organization and namespaced user-ID set; project headers cannot narrow its organization-wide effect. POST requests erasure; GET tracks status; DELETE cancels a pending deletion and keeps data. Never send DELETE as purge. Domain completion and vendor-erasure confirmation remain separate. Treat Intelligence retention as a separate provider boundary with verified capabilities.
+
+9. EXECUTABLE RSI COMPILER AND WORKER EVOLUTION
+
+Implement all four independently typed surfaces and exercise a real mutation of each across recorded generations:
+- Context/schema selection and permitted structural lesson retrieval.
+- Workflow/control graph and bounded branch/retry behavior.
+- Guardrail AST and explicit prerequisites.
+- Tool grants/access policy within the fixed owner ceiling.
+
+Store immutable parent/child bundles, evidence-linked hypotheses, independently computed mutation classes, runtime/compiler/vocabulary/floor/policy hashes and actual executable diffs.
+
+The trusted compiler rejects malformed or unbounded graphs, unknown tools/fields/operators, unsupported bindings/ABI, source/compiled mismatches, authority violations, subject/task literals, hidden-test shortcuts and unnecessary no-op rules. Each retained edit needs individual evidence and attributable effect; a helpful batch cannot launder unrelated restrictions.
+
+Implement branching proposals, critics/pruners, comparison, bounded search scheduling and backtracking. Retain losing candidates, abstentions and real reason codes. Retest accumulated rules to detect interactions and unnecessary complexity.
+
+Implement sandboxed discovery/context/critic source plugins as real executed artifacts, not decorative code diffs. Stage/import through authenticated bounded artifact transport; compile with trusted options; execute only inside restricted OpenBot candidate computers; validate typed output before the gateway. Never dynamically import candidate code into privileged services.
+
+Freeze human-authored primitive vocabulary and disclose it. Keep owner eligibility/floor, evaluator, reference solver, hidden truth, service credentials, global resource caps, terminal status and promotion authority outside editable surfaces.
+
+Use prior-event as-of decision replay without future receipts/outcomes, then mandatory fresh behavior tests. Model-reported class, score or explanation cannot admit a candidate.
+
+10. FIXTURES, FIXED GRADER AND ADMISSION
+
+Implement deterministic synthetic worlds covering direct/nested/array references, aliases, two-hop/reverse/diamond/archive relations, cycles/duplicates, namesakes, mixed eligibility and partial-ack/interruption/retry faults.
+
+Keep independent expected target poststates and preservation hashes private. The reference solver and worker discovery must not share the same incomplete algorithm. Test the grader with deliberately wrong states, blanket deletion/refusal, retention corruption, fabricated completion, scope tampering and hidden-data canaries.
+
+Seal trusted scope/revision/registry/schema/subject commitments, generator/reference/evaluator actual source-byte hashes and split/seed commitments before evolution. Public errors, UI, telemetry and artifact files must not leak held-out answers.
+
+Fresh paired trials run exact tested parent and child on separately reset worlds with equal model settings, primitive tools, budgets and faults. World-instance isolation must include deterministic instance-scoped record _id values: MongoDB _id uniqueness is collection-wide, so a different worldId alone is insufficient. Translate every reference, edge and private manifest consistently while preserving the same structural recipe. Test concurrently seeded worlds with the same seed and different instance namespaces, including reset and cross-world denial. Separate development/train, protected, validation and untouched final partitions.
+
+Admission requires trigger improvement, protected non-regression, structural transfer, correct preservation/retention, truthful reporting, required source eligibility and bounded costs. Failed/cancelled/time-out runs remain in the denominator. A replay score cannot substitute for new execution.
+
+Human authority review is rendered from stored trusted descriptors. Issue a grant binding candidate/parent hashes, parent revision, tenant/env/scope/target, authorization/scope revisions, flip-set/report digests, nonce and expiry. UI returns an ID/decision only. Re-derive and consume exact arguments once.
+
+Implement explicit candidate rejection, stale parent, expired/changed/consumed grant, concurrent promotion and audited rollback.
+
+11. HIDER AND IMPROVER SELF-IMPROVEMENT
+
+Hider proposes bounded WorldSpecs with harder relationships, nesting, identity aliases, eligibility and fault compositions. Fixed generator/reference admission proves solvability and quarantines malformed, impossible, over-budget and duplicate worlds. Reward genuine structural novelty and measured worker limitation. Hider cannot edit the scorer, truth or held-out assignments.
+
+Version the improver's own evidence selection, diagnosis workflow, critic/pruning, proposal ordering and allocation strategy. Produce candidate I1 from permitted past improvement traces and observe that campaign in Raindrop.
+
+For genuine meta evaluation, freeze I1 before new incidents. Reset identical W0 artifacts, world state, memory, lesson eligibility and campaign outputs for I0 and I1. Give identical permitted incident evidence and equal proposal/token/evaluation/wall budgets. Carry no evolved worker or inherited campaign artifacts. Score the workers each produces on further withheld worlds.
+
+Include I0/I0 noise and no-data rewrite controls. Evaluate downstream worker usefulness, preservation and total improvement cost, not optimizer prose. Keep null/negative results and failed attempts. A growing archive or regression suite alone is not improved improvement.
+
+12. PRIVACY AND LEARNING ELIGIBILITY
+
+Register raw sources, protected telemetry mappings, structural lessons, derivation edges and scoped artifact eligibility. Record every context input used by a run.
+
+Retraction disables future use, traverses the full affected closure, revokes/regenerates inappropriate descendants and cancels/restarts runs holding revoked content, including evidence/lessons that are not part of the harness hash. Fence a current source/authorization revision to close read-to-action races.
+
+Handle fanout, deep chains, cycles and concurrent new derivations without silent truncation. Persist traversal frontier/completeness; until complete, fail closed on affected retrieval/authority.
+
+Check retained artifact/lesson bytes for subject literals. Cryptographic hashes and immutability do not justify keeping prohibited personal content. Preserve only owner-permitted nonpersonal audit/structural tombstones. Explicitly distinguish allowed generalized learning from raw source retention.
+
+Keep provider request acknowledgment, pending deadline, completion, rejection and cancellation distinct. Never invent instantaneous purge or unverified Intelligence deletion APIs.
+
+13. UI/UX: A REFINED WORKSPACE FOR ACTION AND EVIDENCE
+
+Use frontend-design and relevant React/accessibility skills after reading their actual installed instructions. Research primary UX/accessibility patterns. Design a coherent Expunge visual system before coding: typography, spacing, colors, semantic states, density, responsive behavior, motion and component rules.
+
+Direction: a precise editorial/technical workspace with readable dense data, restrained surfaces and one meaningful accent. Make the reference graph and verified receipt the memorable interactions. Avoid generic AI gradient hero pages, decorative KPI cards, overwhelming raw logs and fake prefilled success metrics.
+
+Preserve useful OpenDots auth/workspace/chat/review functionality while making Expunge the product's clear workflow.
+
+Required experiences:
+- Setup/readiness with configured/reachable/authorized/evidence-ready distinctions and actionable missing configuration.
+- New cleanup: choose authorized world and exact subject; inspect scope and eligibility; preview effects.
+- Live workbench: current phase, reference graph with textual/table alternative, mixed-record detail, decisions, limits, cancel and explicit coverage.
+- Evidence: actual Raindrop links/event IDs, origins, trace details and missing/truncated evidence state.
+- Candidate: meaningful before/after harness diff, edit hypotheses/evidence, computed authority class and compiler/replay results.
+- Evaluation: paired rows, protected cases, controls, cost, refusals/failures/timeouts and rejection reasons.
+- Approval: accessible stored-descriptor review, clear consequences, expiry/stale handling and safe focus behavior.
+- Receipt: exact job/harness/scope/revision, eligible effect counts, residual/retention/limitations and external erasure state.
+- Lineage/rollback: version graph, tested parent, promotions and rollback receipts.
+- Hider/meta campaigns: validity/novelty, W0 reset proof, equal budgets and genuine measured/null results.
+- Privacy: source derivation graph, retraction progress and provider deletion lifecycle.
+
+Implement loading, empty, error, disconnected, retrying, waiting-evidence, waiting-approval, stale, rejected, cancelled and unavailable states. No client-only authority badge. Reconnect through authoritative snapshot/event sequence without re-running cleanup.
+
+Register frontend HITL review tools through BOTH client hook and backend allowlist. Filter native skill/memory injection through the provenance-aware loader. Model narrative must be visibly distinct from committed status.
+
+Meet WCAG 2.2 AA for the implemented flows: keyboard operation, visible focus, contrast, semantic tables/forms, live-region restraint, accessible dialog names, contained focus, Escape and focus return, reduced motion and non-color status cues. Do not claim compliance from automated tooling alone.
+
+Use responsive layouts at desktop/tablet/mobile sizes, no overflow, virtualized or paginated large data, lazy loading of heavy graphs/traces, bounded event buffers and deliberate update batching. Measure actual performance and define budgets from a recorded baseline; don't fabricate Lighthouse scores.
+
+Browser-test real navigation, cleanup/approval/reconnect/rejection/privacy flows. Capture and visually inspect screenshots around 1440, 1024, 768 and 390 widths plus dark/light modes if offered. Repair clipping, unreadable density, inaccessible focus and stale state. Iterate against actual evidence.
+
+14. PARALLEL DELIVERY AND CHECKPOINTS
+
+Use the required native Agent Team/model roster above. Opus 5.5 leads, Sonnet 5.5 teammates implement/verify/improve UI, Opus 5.5 devil's advocate challenges findings, and Haiku 5.5 alone writes the Git index/commits. Initially allow up to three independent code-editing lanes, respecting available concurrency and the scheduled UI lane. Use fresh contexts where useful, explicit file ownership and frozen interfaces. Share source/API facts; do not let agents independently rewrite contracts/locks.
+
+Suggested dependency waves:
+A: audit/repair foundations; Mongo contracts/authority; fixtures/private grader.
+B: async domain gateway; durable OpenMuse worker/OpenBot sandbox; OpenDots UX/projection/review.
+C: Raindrop tracing/observer; compiler/evolver/replay; fresh admission/approval/promotion/rollback.
+D: Hider; meta-improver experiments; complete privacy/provenance/provider lifecycle.
+E: reliability/containment; independent benchmark; production packaging/UX rehearsal.
+
+Some independent work may start from frozen types, but integrated acceptance waits for actual dependencies. No lane may call its mocks a complete integration.
+
+Each phase includes:
+- Exact source/document patterns to use.
+- Implementation checklist and owned files.
+- Meaningful unit/protocol/integration/browser checks.
+- Independent anti-pattern and code-quality review.
+- Correction of findings.
+- Sanitized evidence report and verified local commit.
+
+Use reviewer/verification agents independently from the implementation owner. Route defects to owners. Review whole data flow and trust boundary, not only code style.
+
+At every phase and integrated vertical slice, require: implementation-owner handoff -> verifier execution -> devil's-advocate challenge -> owner fixes -> verifier reproduction -> UI/UX review for user-facing work -> Opus lead acceptance -> Haiku commit packet. Reviews may run in parallel on a stable snapshot. A passing formatter or attractive screenshot does not bypass behavior, authority or scientific checks.
+
+15. TESTING AND PRODUCTION ENGINEERING
+
+Build a maintainable typed codebase: clear modules, conventional formatting, explicit error taxonomy, validated inputs, bounded payloads/timeouts, cancellation, retry/backoff with jitter, health/readiness, graceful shutdown, rate limits, secure cookies/origin/CSRF where relevant, authenticated internal transport, server-only secrets and dependency/license hygiene.
+
+Preserve working pins; address exploitable relevant advisories with evidence and compatible changes, not blind upgrades. No production mock authority, stub vendor success, unchecked any across trust boundaries, swallowed material errors or critical TODO placeholders.
+
+Add CI and documented commands for lint, typecheck, unit tests, protocol/integration tests, operator/backend builds, browser/accessibility tests, security scans and production smoke checks. Production acceptance fails on unexpected skipped required tests. Local fast lanes may explicitly skip live-service suites with clear reasons.
+
+Required substantive checks:
+- Registry wildcard semantics, mixed-array/field preservation and BSON identities.
+- Scope isolation, forged model/client actor/world, unknown field/tool/query injection.
+- Invalid schema, immutable artifact mutation, hidden-data access/canary leakage.
+- Lease expiry/takeover, cancellation/revocation races and competing world writes.
+- Crash before effect, after commit before acknowledgment, before projection and during restart.
+- Stable effect keys, digest conflicts, concurrent duplicate actions and no partial transaction writes.
+- Same-parent promotion race, expired/changed/reused grants, post-CAS abort and rollback.
+- Token invalidation/resume failure, duplicates, changed stream options and snapshot/backfill.
+- Actual raw-driver RBAC denial with separate local AND Atlas evidence; no broad inherited grants.
+- Candidate network/metadata/private/control access denied; permitted broker/artifact routes work; resource exhaustion contained.
+- Agent clone/context/text/tool/state conversion, actual provider response and cancellation.
+- Raindrop terminal accepted but span flush lost, signals buffered, delayed/enriched/capped traces, 401/403/429/5xx and cursor crash.
+- Actual diagnostic execution and distributed parent/child correlation.
+- Search-index lag after source revocation, full lineage closure and active-context cancellation.
+- Grader rejects known incorrect outcomes; reference admission quarantines impossible worlds.
+- Every editable surface changes actual execution; plugin source really executes only in sandbox.
+- Trace-informed, score-only, wrong-incident, expert-static and meta reset/noise/no-data conditions are genuinely separated.
+- Backend approval plus accessible frontend rendering, reload/reconnect and no forged completion/deployment state.
+- Idempotent migrations/demo reset, backup/restore, graceful restart and production image secret/private-file exclusion.
+
+Use deterministic fakes only for protocol/fault tests and label them. Run actual local replica-set tests plus invited Atlas, real model provider and Raindrop proof. Never replace live evidence with a scripted agent while calling it real.
+
+Continuous end-to-end verification cadence:
+- Every meaningful edit: owner runs the relevant fast checks and regression test for the changed behavior.
+- Every coherent commit packet: verifier runs current lint/typecheck/focused tests and relevant builds on the exact candidate snapshot; record all outputs and unexpected skips.
+- Every cross-service contract or behavioral integration change: verifier runs the affected API/UI/database end-to-end path, including denial/error/retry paths, with real local services where available.
+- Every completed vertical slice: run its real configured Atlas/model/Raindrop smoke path and browser journey within the configured spend budget. Before the entire loop exists, explicitly report which stages were exercised; never claim a partial slice verifies the full product.
+- Every completed dependency wave: run the integrated suite, browser/reconnect checks and security/reliability tests affected by that wave; UI/UX teammate visually inspects actual screenshots and keyboard interactions.
+- Before ACHIEVED: independently run the complete current-version acceptance matrix, actual failure -> remote evidence -> generated mutation -> fresh tests -> grant/promotion -> new pinned run -> receipt path, unsafe-candidate rejection, rollback, restart/crash recovery, privacy revocation, Hider and meta experiments, and the final full protocol. Exercise production-built artifacts with server-only secrets, not merely development routes. Surface evidence in the conversation.
+
+Re-run affected checks whenever source, dependencies, configuration or the tested snapshot changes. Do not re-run an expensive full benchmark after an unrelated documentation commit, but prove the benchmarked executable hashes still match the final committed version. Any executable/evaluator/profile change after freeze requires an honest new or invalidated campaign as specified.
+
+16. SCIENTIFIC CAMPAIGN AND RESOURCE CONTROL
+
+Freeze before evolution: W0/expert-static/I0 profiles, model parameters, compiler/runtime/vocabulary/floor/policy, generator/reference/grader source bytes, split commitments, budgets, faults and admission thresholds.
+
+Use ACCEPTANCE.md's full planned protocol. Record justified amendments to timing, concurrency and measured ceilings before results; reducing mandatory features, conditions, controls or episode counts requires explicit owner authorization and cannot be described as full protocol completion:
+- Six domain collections, up to 500 documents and five reference hops.
+- Initially four parallel episodes, increase only after capability/rate probes.
+- Worker phase/token/tool/wall caps from the frozen profile.
+- Two training triggers with three repeats each.
+- Eight protected and eight validation worlds with two repeats each.
+- Final 24 structurally held-out worlds, three repeats, five conditions: 360 task episodes.
+- Twelve admitted Hider proposals with quarantines retained.
+- Eight new meta incidents, equal bounded proposal budgets, three further worlds/two repeats for each produced worker, plus matching noise/no-data controls.
+
+Implement resumable batches and record actual counts. Don't quietly reduce the experiment to a single demo, manufacture rows, omit timeouts/failures or tune on exposed final results.
+
+Account for input/output tokens, model/tool/evaluation calls, Mongo operations, observer/improver costs, failed calls, total latency and amortization. Unknown pricing is unpriced, not free. A dollar-based gate cannot pass with missing cost coverage.
+
+Record raw paired outcomes and suitable uncertainty. If the expert-static condition ties evolved, say so. Separate configuration effort/adaptation latency from accuracy gains. Preregister a new untouched campaign if final results are used for further tuning.
+
+17. COMMIT, REVIEW AND VERIFY DISCIPLINE
+
+Before changes record the initial file/Git status and preservation inventory. Commit only intended verified project changes; stage explicit paths, inspect staged diff and run secret/private-fixture/license checks. Do not sweep unrelated user files, .env, raw telemetry, private manifests/seeds, database files, caches, node_modules or container volumes into Git.
+
+Initialize a local repository only if needed. Preserve current user branch/history and use a scoped working branch where appropriate. No force push, history rewrite or blanket reset.
+
+Commit often after each coherent verified subtask or vertical slice, not only at the end of a dependency wave. Aim to checkpoint completed verified work within about 20-30 minutes when the corresponding gates have passed; elapsed time never justifies a broken or empty commit. Keep related dependency changes together so each checkpoint is coherent. At wave boundaries ensure all intended verified phase files have been included.
+
+Only the Haiku 5.5 commit-steward stages/commits. Other teammates submit scoped commit packets to it and the Opus lead. Serialize Git-index mutation and briefly freeze owned paths in an accepted packet so concurrent edits cannot invalidate evidence or mix unrelated work.
+
+Each commit packet contains the task IDs, exact intended paths/diff or tree hash, dependency list, verifier commands/results/tested file hashes, devil's-advocate disposition, UI review where relevant, and proposed message. The lead accepts the packet; Haiku checks the staged snapshot against it, runs the approved deterministic pre-commit checks, commits, and records HEAD/paths/check references in COMMIT-LEDGER.md. If files or the dependency snapshot changed since verification, stop staging that packet and request re-verification. Never treat an approval of old bytes as approval of new bytes.
+
+After each coherent verified checkpoint:
+- Run the relevant checks and inspect results.
+- Complete independent review and fix material findings.
+- Inspect diff/staged content.
+- Commit with a concrete problem/behavior description and verification summary.
+- Record commit/hash/check evidence and remaining work.
+
+Do not commit knowingly broken critical paths as a completed phase. A failed check is repaired or explicitly classified; it is never hidden by disabling the test.
+
+The commit-steward performs a project-change reconciliation at each wave and final delivery: every intended source, test, deployment, UI, documentation and sanitized evidence artifact is committed or has a precise documented reason for exclusion. Never use git add -A as a substitute for scope/secret/private-data review. Preserve unrelated user files and intentionally ignored local artifacts.
+
+After each commit, report its hash and relevant verification. After executable integration commits, the verifier performs a committed-artifact smoke check or confirms the verified exact tree/artifact hash; final end-to-end acceptance must match final HEAD. Haiku can rerun deterministic checks but cannot independently overrule a failed verifier or unresolved material devil's-advocate finding. Escalate uncertainty to Opus and the verifier; never downgrade the commit teammate's requested model silently.
+
+Before final completion run the required full acceptance suite on the current integrated code. Commit fixes/reports, ensure the committed code matches tested artifacts, and inspect git status/head. Distinguish permissible pre-existing untracked user files from uncommitted build work; do not claim a clean tree by hiding relevant files.
+
+Local commits are authorized by this task. Remote push/public repo/PR creation is performed only when authorized and targeted to the correct remote. Prepare the reviewed result first.
+
+18. DEPLOYMENT, DEMO AND DELIVERY ARTIFACTS
+
+Provide production build/start commands, environment reference with exact upstream names, idempotent setup/migrations, Docker/service topology, health/readiness, TLS/auth/origin configuration, storage/backup strategy, upgrade/rollback and incident/runbook instructions.
+
+Separate Node operator/worker hosts from the Docker computer host. Only the supervisor mounts Docker socket. No privileged secrets or private grader files in candidate/worker images.
+
+Build an idempotent synthetic demo reset without destroying benchmark evidence. Rehearse the actual loop:
+baseline miss -> real Raindrop trace -> generated executable diff -> protected fresh tests -> committed promotion -> new same-model run -> verified receipt.
+Include an actually rejected unsafe candidate, Hider result, meta result and honest controls/costs.
+
+A recorded-run fallback is labeled recorded/replay and links to real run IDs. No fake remote readiness or fixed success animation.
+
+Respect the resource guide: Statement One is the main claim; use the invitation Atlas Sandbox; attribute foundations and event-built functionality; prepare public-repo/access-demo/one-minute-video/Cerebral Valley checklist. Human attendance/on-site recording/finalist presence cannot be fabricated by an agent. Record owner-provided evidence separately from code verification.
+
+Deliver:
+- README and quickstart.
+- Updated coherent blueprint/contracts/data model/source map.
+- DESIGN.md and accessible UI component/state specification.
+- PREREGISTRATION.md with frozen scientific protocol and hashes.
+- WHAT_IS_REAL.md mapping claims to actual code paths, pins, command results and run IDs.
+- VERIFICATION.md with current-head executed/passed/failed/skipped evidence.
+- PRODUCTION-READINESS.md with defined checks, actual status and material gaps.
+- BUILT_DURING_EVENT.md and THIRD_PARTY.md with original-work/license inventory.
+- Deployment/recovery/privacy/rollback runbooks.
+- Raw sanitized benchmark/control/meta exports and report.
+- PHASE-CHECKPOINTS.md and HANDOFF.md for resumption.
+- Sanitized docs/continuity/PROJECT-STATE.md and TASKS.json, safe ignored WIP checkpoint manifests/patches, and short CLAUDE.md/AGENTS.md resume pointers as specified in section 20.
+- Feature acceptance matrix with separate IMPLEMENTED, LOCALLY_VERIFIED, LIVE_VERIFIED, BLOCKED and NOT_STARTED states.
+
+19. COMPLETION AUDIT
+
+Use an independent reviewer to trace every required feature through real code and evidence. Run all required checks rather than trusting report prose. Inspect model/tool authority, DB principals, private image contents, remote trace evidence, context eligibility, reset isolation, actual promotions and UI state.
+
+Emit one final evidence table in the conversation with:
+requirement -> implementation path -> check command/exit -> sanitized run/artifact/commit ID -> status/limitation.
+
+Print the current HEAD, intended working-tree status, exact startup/demo commands, integration/benchmark counts and remaining external approvals. Keep proof visible to /goal.
+
+Report ACHIEVED only when every mandatory full-scope implementation and required local/live acceptance condition is satisfied at the verified committed version. The actual learning-loop demonstration must include an evidence-linked generated executable mutation, independent admission, committed promotion and subsequent use; failed proposals alone do not satisfy that capability. Positive aggregate final-test or meta-improver gains are not required; complete and honest experiments are. Account-gated optional native vendor capabilities remain explicitly disclosed, never claimed without proof.
+
+If a required external condition prevents completion, report BLOCKED with completed work, exact missing input/right/budget and resumable commands after finishing independent work. Do not relabel BLOCKED as a production-level success.
+
+20. PORTABLE HANDOFF ACROSS LIMITS, CLAUDE ACCOUNTS AND CODEX
+
+Build a repository-backed continuity protocol so a fresh Claude Code account or a user-authorized Codex session can resume the exact current project without the old chat transcript, native team memory, account-specific session IDs or a memory plugin.
+
+This is proactive, not an end-of-task summary. The last known update includes code bytes, Git state, task ownership, actual verification, failed attempts, runtime/campaign state and the next action. Never pretend that a narrative alone saves uncommitted code.
+
+Persistent artifacts:
+- HANDOFF.md: the latest detailed local scratch briefing for a fresh agent. Keep it locally available and ignored from Git by default because it can contain private operational context. No credentials or raw personal data even here.
+- docs/continuity/PROJECT-STATE.md: sanitized, version-controlled project state, current constraints, phase progress, decisions and concrete next steps. Safe for an authorized repository transfer.
+- docs/continuity/TASKS.json: a sanitized export of the current task/dependency/evidence state, including stable task IDs and prior owners. It is a checkpoint mirror of the environment's required canonical task tracker, not a competing source of task truth.
+- .expunge/checkpoints/<UTC timestamp plus nonce>/manifest.json: an immutable checkpoint manifest, source/file hashes, base Git commit/tree and staged/unstaged/approved-untracked inventory.
+- The same ignored checkpoint directory: separate staged.patch and unstaged.patch with binary support, plus copies of approved relevant untracked source/assets and sanitized diagnostic snippets when needed.
+- .expunge/checkpoints/LATEST: atomically updated pointer to the latest complete snapshot.
+- COMMIT-LEDGER.md and PHASE-CHECKPOINTS.md: verified commit/checkpoint history already required by this specification.
+- Short project CLAUDE.md and AGENTS.md bootstrap pointers, preserving any existing instructions, directing future sessions to this specification, HANDOFF.md, PROJECT-STATE.md and checkpoint reconciliation. Do not duplicate the entire long build specification into these bootstrap files.
+
+Keep .expunge checkpoint packs and local HANDOFF.md out of public commits. Commit sanitized continuity documents through the designated commit role after their factual/content checks. Distinguish last_verified_code_commit from a later documentation/checkpoint commit: a tracked document cannot truthfully embed its own not-yet-created commit hash. After a commit changes HEAD, create a NEW immutable checkpoint containing the actual observed HEAD and update the local handoff/LATEST pointer; never mutate an earlier manifest or create endless self-referential commits.
+
+Checkpoint triggers:
+- After every coherent verified commit and completed integration milestone.
+- At least around every 20-30 minutes of active work, and before long-running or expensive actions.
+- Before manual/automatic compaction when possible.
+- Immediately on reliable context/usage-limit warnings, authentication failure, impending account switch, model/session interruption or an explicit user handoff request.
+- Before stopping/shutting down engineering teammates or returning BLOCKED.
+
+Use actual exposed CLI/status/usage signals; do not invent remaining percentages. If reliable context usage is visible, checkpoint while roughly 20% headroom remains rather than at exhaustion. If usage telemetry is unavailable, use milestone/time triggers. A hard account failure may prevent another model turn, so maintain useful recent checkpoints before it occurs.
+
+Inspect supported Claude Code SessionStart, PreCompact, StopFailure and SessionEnd hook contracts before using them. Add small deterministic, secret-safe filesystem snapshot helpers where supported. A hook can capture Git/file state and point to the last semantic handoff; it cannot manufacture current reasoning when no model turn is available. If semantic state is stale, label it STALE/UNKNOWN and require incoming reconciliation. Never loop hooks, bypass permissions or automatically switch accounts/login credentials.
+
+Checkpoint transaction:
+1. The lead declares a short engineering write barrier and gathers each teammate's current task, edited paths, last verification, unfinished edit, failure/reason and next action.
+2. Quiesce old engineering writers and the Git index before the final snapshot. Do not force a broken source commit, reset/stash user changes or kill unrelated processes. Record legitimate ongoing domain jobs, containers, outbox items and campaigns separately; account-switching the coding assistant does not automatically authorize cancelling durable application jobs.
+3. Capture actual repo root/branch/HEAD or UNBORN state, Git status, staged versus unstaged differences, relevant untracked owned files, source/artifact hashes and ownership. Export patches/copies only from approved project paths; exclude .env/auth files, credentials, private manifests/held-out seeds, databases, raw telemetry and dependency/cache/volume directories.
+4. Scan snapshot content for secrets and disallowed private material. If an essential file cannot safely be exported, mark the snapshot incomplete with its recovery requirement; never silently alter code bytes while claiming an exact snapshot.
+5. Write the manifest and briefing through temporary files and atomic rename, then move LATEST only when required snapshot pieces and hashes are consistent. Preserve the previous valid checkpoint if interrupted.
+6. Update HANDOFF.md and sanitized project/task state. The lead owns semantic truth; the commit-steward may collect mechanical metadata but cannot invent passed checks or decisions.
+7. If coherent verified changes are ready, the designated commit role creates the usual gated commit. With writers still quiesced, create a NEW immutable checkpoint for the resulting actual HEAD and remaining WIP, verify its hashes, update HANDOFF.md and atomically move LATEST. Preserve the previous manifest. Unverified WIP remains explicitly unverified in the checkpoint, not falsely made production-ready.
+8. Verify checkpoint existence/hashes and emit a short switch notice: checkpoint ID, base/current HEAD, dirty/WIP status, most recent passed/failed check, active work and the exact resume prompt.
+
+Actual account/tool switch protocol: when the human explicitly initiates a switch, stop or handoff, first complete the checkpoint and persist the active goal's criteria/progress. Then end the outgoing native goal/automatic continuation through documented controls (Claude Code /goal clear), gracefully shut down engineering teammates and project-owned background coding processes, and verify they cannot resume writing after the incoming lead takes ownership. Normal periodic checkpoints release the short write barrier and keep the goal running; they are not switch requests. Preserve durable application jobs and their resume records. If account failure prevents clearing a native goal or confirming shutdown, record that unresolved outgoing state and require a takeover barrier that proves old coding processes/continuation cannot write; do not let two leads proceed concurrently. Do not edit undocumented account/session internals or copy authentication state.
+
+Required HANDOFF.md content:
+- Timestamp/timezone, checkpoint ID, repository root and engine/model used.
+- Full user objective and scope, current permissions, constraints and latest steering. Distinguish recorded history from actual new human authorization.
+- Current branch, HEAD, last verified code commit, exact staged/unstaged/untracked owned inventory and checkpoint/patch locations.
+- What works with command/exit/test counts and verified snapshot/artifact hashes; what is broken or unverified with sanitized exact error excerpts.
+- Files/modules in play and why, interface/dependency/source pins, known invariants and decisions with rationale.
+- Attempts that failed, why, evidence and the current best theory; do not let a new account repeat disproved approaches.
+- Completed/open/blocked tasks, dependencies, previous teammate owners, ready-to-claim work and unresolved reviewer findings.
+- Active engineering writers/locks and project-owned process/container/job/campaign identifiers needed for safe takeover, without secrets or full credential-bearing command lines.
+- Runtime model/profile/compiler/grader/split/seed-commitment/budget hashes, campaign progress, executed counts, pending telemetry/enrichment/grants and privacy/revocation state needed to resume without changing the experiment.
+- Environment variable NAMES required, setup availability and missing privileges/budgets; no values.
+- Concrete ordered next actions with repo-relative file/function paths, exact safe commands and acceptance outcomes.
+- A paste-ready resume instruction and clear labels for Claude-specific native state versus portable project state.
+- Optional memory/search pointers as secondary context. The handoff must remain useful when no memory plugin or old account transcript is available.
+
+Resume protocol:
+1. Start in the correct project root. Read applicable instructions, this specification, HANDOFF.md, PROJECT-STATE.md, task export, commit ledger and the latest manifest before editing.
+2. Inspect actual Git HEAD/status and file hashes. Treat actual current files as evidence; the narrative may be stale. If changes occurred after the checkpoint, reconcile them and update state rather than reset or overwrite them.
+3. On the same workspace, keep existing code and do not reapply patches already present. On a transferred workspace, restore only onto a matching base after patch compatibility/path/hash checks. Preserve newer/user changes and report genuine conflicts. Handle UNBORN repositories explicitly.
+4. Confirm old engineering writers, native goal/automatic continuation, teammate loops and project-owned background coding processes cannot resume writing before taking ownership. Check task/campaign/index locks safely; do not remove live locks or operate two independent leads on the same files/index. Keep legitimate durable application jobs running unless separately authorized to stop them.
+5. Recreate the current environment's required canonical task state from the reconciled export using supported tools. Native team/session/goal objects and task IDs are not assumed portable.
+6. Check configuration availability and actual service health/rights. Re-run cheap changed-surface checks and any invalidated integration proof. Retain still-matching evidence; do not repeat completed expensive campaigns just because the coding account changed.
+7. Preserve experiment hashes, frozen runtime models, world/reset isolation, previous failed rows and total project spend. A new coding account does not reset scientific or budget accounting.
+8. Claim the next unblocked task and continue without rebuilding verified work. Publish an updated checkpoint after recovery.
+
+Engine adaptation:
+- In Claude Code, restore the requested Opus 5.5/Sonnet 5.5/Haiku 5.5 model policy, recreate necessary named teammates, verify effective models and re-establish the native /goal from its completion criteria. The Opus lead manages the team and Haiku remains the sole Git writer.
+- The user explicitly authorizes moving the same work to Codex. In a Codex session, preserve the SAME architectural scope, devil's-advocate/verifier/UI/UX/commit roles, approval gates, file ownership and verification protocol using available Codex models/tools. Record the engine and actual role/model mapping. The designated Codex commit-role agent is the sole Git writer for that session; this is an explicit cross-engine adapter, not a claim that Codex ran Claude/Haiku models.
+- Do not assume Claude slash commands, native teams, hooks or account state work in Codex. Use supported Codex orchestration and the environment's required canonical task tracker, with repository files as the portable checkpoint. When returning to Claude, reinstate the exact requested Claude roster.
+- Do not automatically modify authentication, move account tokens, bypass limits or copy private account configuration. The human chooses/logs into the account/tool; continuation state contains project facts, not credentials.
+
+Verify the continuity feature itself:
+- Recover from a fresh agent/context with no prior transcript using only the portable files.
+- Restore staged/unstaged/approved-untracked WIP in a disposable synthetic checkout and compare exact hashes without applying it twice.
+- Test stale narrative versus newer code, mismatched base commit, interrupted snapshot write, missing/excluded private dependency and an active old-writer lock. Test that an outgoing native goal cannot wake and reclaim files after takeover, and that a post-commit checkpoint creates a new immutable manifest while preserving the previous one.
+- Simulate resuming a partially completed campaign/outbox without repeated logical effects, lost failed rows or changed budgets/models.
+- Verify a Claude -> Codex -> Claude handoff preserves role gates/scope and never claims nonexistent native state or unsupported model identity.
+- Demonstrate that a pre-limit snapshot is still usable if the following model turn fails.
+
+This section is part of full-scope production acceptance. Maintain the portable state during the build, not just at final delivery.
+
+

@@ -1,0 +1,11 @@
+{
+  "name": "@expunge/mongo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/contracts": "0.1.0",
+    "mongodb": "7.7.0"
+  }
+}

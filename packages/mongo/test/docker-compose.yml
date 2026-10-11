@@ -1,0 +1,20 @@
+services:
+  mongo:
+    image: mongo:8.0.15
+    command: ['mongod', '--replSet', 'expunge-local', '--bind_ip_all']
+    ports: ['127.0.0.1:27018:27017']
+    tmpfs: ['/data/db']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'mongosh',
+          '--quiet',
+          '--eval',
+          "try { rs.status().ok } catch (e) { rs.initiate({_id:'expunge-local',members:[{_id:0,host:'localhost:27017'}]}).ok }",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 40
+# Isolated local replica-set protocol tests only. This unauthenticated localhost
+# server does not establish Atlas RBAC/production credential isolation.

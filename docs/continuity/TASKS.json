@@ -1,0 +1,167 @@
+{
+  "exportedAt": "2026-10-11T12:50:00Z",
+  "canonicalTracker": "claude-mem work_state list 'expunge-build' (lead-maintained); this file is a sanitized mirror",
+  "engine": "claude-code-desktop-named-subagents",
+  "leadEffectiveModel": "claude-fable-5-1",
+  "teammates": {
+    "mongodb-authority": { "requested": "claude-sonnet-5-5", "effective": "claude-sonnet-5-5" },
+    "rsi-evolution": { "requested": "claude-sonnet-5-5", "effective": "claude-sonnet-5-5" },
+    "runtime-raindrop": { "requested": "claude-sonnet-5-5", "effective": "claude-sonnet-5-5" },
+    "verifier": { "requested": "claude-sonnet-5-5", "effective": "claude-sonnet-5-5" },
+    "ui-ux-improver": { "requested": "claude-sonnet-5-5", "effective": "claude-sonnet-5-5" },
+    "devils-advocate": { "requested": "claude-opus-5-5", "effective": "claude-opus-5-5" },
+    "commit-steward": { "requested": "claude-haiku-5-5", "effective": "claude-haiku-5-5" }
+  },
+  "barrier": {
+    "active": true,
+    "since": "2026-10-11T11:55:00Z",
+    "matrixCheckpoint": "20261011T104052Z-d8708c42",
+    "pendingReverify": ["packages/runtime", "packages/vendor-openmuse"],
+    "next": [
+      "runtime-raindrop stop report",
+      "GO RUNTIME LANES",
+      "COMMIT CS-1 APPROVED",
+      "RESUME A2-R/B1, RESUME C2, RESUME B3, RESUME B2-2"
+    ]
+  },
+  "tasks": [
+    { "id": "P0-1", "title": "Initial read-only audit", "owner": "team-lead", "status": "done" },
+    {
+      "id": "P0-2",
+      "title": "Root lint/format tooling with exact pins",
+      "owner": "team-lead",
+      "status": "done"
+    },
+    { "id": "P0-3", "title": "Continuity skeleton", "owner": "team-lead", "status": "done" },
+    {
+      "id": "P0-4",
+      "title": "Spawn roster and verify effective models",
+      "owner": "team-lead",
+      "status": "done",
+      "evidence": "all seven reported effective model IDs matching requests; lead is claude-fable-5-1"
+    },
+    {
+      "id": "P0-5",
+      "title": "Baselines package and delivery document skeletons",
+      "owner": "team-lead",
+      "status": "done"
+    },
+    {
+      "id": "A2-R",
+      "title": "Repair and harden packages/mongo and contracts (incl. DA-1 D3-D16, D8, D13, D15, D16, K6)",
+      "owner": "mongodb-authority",
+      "status": "doing",
+      "evidence": "at barrier: tsc 0; live lane 277 passed (local RS + auth RBAC); mg-live 0/12; remaining docs/MONGO.md, 14 eslint, listClaimable scope filter, K8"
+    },
+    {
+      "id": "A3-R",
+      "title": "Repair fixtures and grader (incl. DA-1 D1, DA-2 E1 E2 F1 F2)",
+      "owner": "rsi-evolution",
+      "status": "done",
+      "evidence": "fixtures+grader+baselines+harness-compiler 136/136; detectors at chance; repros not reproduced"
+    },
+    {
+      "id": "B2-1",
+      "title": "Worker runtime, OpenMuse port, ExpungeExecutionAgent, dispatcher, DNS containment",
+      "owner": "runtime-raindrop",
+      "status": "done",
+      "evidence": "119 passed/7 skipped; 125 with local RS; DNS repro not reproduced; live provider smoke BLOCKED"
+    },
+    {
+      "id": "B2-2",
+      "title": "Runtime follow-ups: DA-3 R1 R2 R3, K1-K4, durable wake dedupe, release/listClaimable, token/cost limits, projection persistence",
+      "owner": "runtime-raindrop",
+      "status": "doing",
+      "note": "R1-R3 fixes in progress under barrier"
+    },
+    {
+      "id": "U-0",
+      "title": "Design system, component states, B3 plan, operator audit, safe-console",
+      "owner": "ui-ux-improver",
+      "status": "done"
+    },
+    {
+      "id": "B3",
+      "title": "Operator workbench and review per docs/ui/B3-PLAN.md",
+      "owner": "ui-ux-improver",
+      "status": "doing",
+      "evidence": "S1 server half done: routes, schemas, readiness, principals, telemetry default; operator 328/328"
+    },
+    { "id": "V-1", "title": "Continuity tooling and baseline matrix", "owner": "verifier", "status": "done" },
+    {
+      "id": "V-2",
+      "title": "Telemetry root cause, audits, CT1-CT4 hardening, full matrix on frozen tree",
+      "owner": "verifier",
+      "status": "done",
+      "evidence": "VERIFICATION.md matrix at checkpoint 20261011T104052Z-d8708c42"
+    },
+    {
+      "id": "DA-1",
+      "title": "Foundation challenge",
+      "owner": "devils-advocate",
+      "status": "done",
+      "evidence": "16 demonstrated, 12 fixed in review"
+    },
+    {
+      "id": "DA-2",
+      "title": "Stable surfaces challenge",
+      "owner": "devils-advocate",
+      "status": "done",
+      "evidence": "4 demonstrated (E1 E2 fixed), CT1-CT4 fixed by verifier"
+    },
+    {
+      "id": "DA-3",
+      "title": "Runtime challenge",
+      "owner": "devils-advocate",
+      "status": "done",
+      "evidence": "R1-R3 demonstrated, fixes in progress; wake endpoint and active egress probes deferred to E1"
+    },
+    {
+      "id": "C2",
+      "title": "Compiler, replay, evolver",
+      "owner": "rsi-evolution",
+      "status": "doing",
+      "evidence": "vocabulary foundation only"
+    },
+    {
+      "id": "CS-1",
+      "title": "Baseline commit",
+      "owner": "commit-steward",
+      "status": "doing",
+      "note": "awaiting GO RUNTIME LANES result then COMMIT CS-1 APPROVED"
+    },
+    {
+      "id": "B1",
+      "title": "Domain gateway, worker tools, receipts, operator preview",
+      "owner": "mongodb-authority",
+      "status": "todo",
+      "brief": "docs/continuity/briefs/B1-domain-gateway.md"
+    },
+    {
+      "id": "C1",
+      "title": "Raindrop tracing, outbox, observer, evidence bundles",
+      "owner": "runtime-raindrop",
+      "status": "todo",
+      "brief": "docs/continuity/briefs/C1-raindrop-evidence.md"
+    },
+    {
+      "id": "C3",
+      "title": "Fresh paired admission, approval descriptors, promotion, rollback",
+      "owner": "rsi-evolution",
+      "status": "todo",
+      "brief": "docs/continuity/briefs/C3-admission-promotion.md"
+    }
+  ],
+  "blocked": [
+    {
+      "item": "Live Atlas/model/Raindrop/Intelligence proof",
+      "reason": "root .env missing",
+      "unblockedBy": "human creates root .env with names from .env.example"
+    },
+    {
+      "item": "Node runtime in fixed range",
+      "reason": "installed 22.23.2/24.11.1/25.2.1 all affected by nodejs/node#60717",
+      "unblockedBy": "human runs nvm install 24.13.1"
+    }
+  ]
+}

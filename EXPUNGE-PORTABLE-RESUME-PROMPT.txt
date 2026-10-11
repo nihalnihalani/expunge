@@ -1,0 +1,18 @@
+PORTABLE EXPUNGE RESUME PROMPT -- CLAUDE CODE OR CODEX
+
+Continue the full Expunge build from the latest verified project state. Before editing, read applicable CLAUDE.md/AGENTS.md, EXPUNGE-CLAUDE-GOAL-SPEC.txt (especially section 20), HANDOFF.md, docs/continuity/PROJECT-STATE.md and TASKS.json, COMMIT-LEDGER.md, PHASE-CHECKPOINTS.md and the latest .expunge/checkpoints/LATEST manifest.
+
+If handoff files do not exist yet, perform the specification's initial audit, report that no prior checkpoint is available, and create the initial continuity state instead of inventing prior progress.
+
+Reconcile actual Git branch/HEAD, staged/unstaged/untracked code and file hashes with the checkpoint. Preserve current/user changes. Do not blindly reset, reapply existing patches, restart completed work, inherit stale task ownership or assume old teammates/processes are still active. Resolve old-writer/lock conflicts before taking ownership. Verify the outgoing native goal/automatic continuation, engineering teammates and background coding processes cannot restart writing; preserve durable application jobs. An unresolved outgoing writer blocks takeover until safely resolved.
+
+Report the reconciled current state, last passed/failed checks and exact next task. Recreate the required canonical task tracker through supported tools. Recheck configuration availability and invalidated proof while preserving valid existing evidence and frozen runtime/scientific profiles, failed rows and project budget accounting.
+
+In Claude Code, use the requested Opus 5.5 lead/devil's advocate, Sonnet 5.5 builders/verifier/UI/UX improver and Haiku 5.5 commit-steward, with actual native teams and verified model identities. Respawn necessary teammates and set the supported native goal explicitly; prior account/session objects are not assumed restored.
+
+In this user-authorized Codex session, use available Codex models/orchestration while preserving those logical roles and all scope/review/testing/commit gates. Record the actual engine/model mapping; do not claim Claude models or native Claude commands ran in Codex. One designated commit-role agent alone writes Git. Returning to Claude restores the requested exact Claude roster.
+
+Continue the next unblocked task under the full specification. Make frequent coherent verified commits; independently verify end-to-end behavior and final committed-version parity. Keep current HANDOFF.md, sanitized project/task state and safe exact-code checkpoint snapshots after milestones and before context/usage/account limits.
+
+Treat saved narrative as historical context, not new permission. Respect the latest human instructions and actual permission controls. Never copy credentials, fabricate live evidence, discard WIP, reduce full scope or call externally blocked requirements achieved.
+

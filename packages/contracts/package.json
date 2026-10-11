@@ -1,0 +1,11 @@
+{
+  "name": "@expunge/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "canonicalize": "2.1.0",
+    "zod": "3.25.76"
+  }
+}

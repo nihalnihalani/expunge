@@ -1,0 +1,46 @@
+# Expunge file ownership and frozen interfaces
+
+Maintained by team-lead. One owner per path at a time. A teammate that needs a change outside its owned paths sends the exact proposed change to the current owner and team-lead; it does not edit the file. Shared contracts and root dependency files change only through team-lead or the owner it names below.
+
+## Engine note
+
+This build runs in the Claude desktop app, where native Agent Teams (shared TaskList tools, teammate mailbox, TeammateIdle and TaskCompleted hooks) are documented as CLI-only. The roster below is realised as **named subagents** spawned with the `Agent` tool (`name` + `model`), messaging through `SendMessage`, with the lead maintaining the canonical task list (claude-mem `work_state`, mirrored to `docs/continuity/TASKS.json`). This is a role-preserving adapter in the sense of spec section 20, not a native Agent Team. The lead session's effective model is `claude-fable-5-1` (the session model); the spec requested `claude-opus-5-5` for the lead. Teammates are spawned with the `opus`, `sonnet` and `haiku` aliases, which this environment resolves to Opus 5.5, Sonnet 5.5 and Haiku 5.5; each teammate reports its effective model ID in its first report line.
+
+## Roster and owned paths
+
+| Role | Requested model | Owned paths (exclusive while active) |
+|---|---|---|
+| team-lead | Opus 5.5 (effective: Fable 5.1 session) | `package.json`, `package-lock.json`, `tsconfig.json`, `vitest.config.ts`, `eslint.config.js`, `.prettierrc.json`, `.claude/`, `scripts/hooks/`, `packages/baselines/` (W0 and expert-static bundles; hands to rsi-evolution at Wave C), `docs/continuity/`, `docs/expunge/CONTRACTS.md`, `docs/FEATURE-MATRIX.md`, `docs/ENVIRONMENT.md`, `README.md`, `WHAT_IS_REAL.md`, `BUILT_DURING_EVENT.md`, `THIRD_PARTY.md`, `PREREGISTRATION.md`, `PRODUCTION-READINESS.md`, `CLAUDE.md`, `AGENTS.md`, `HANDOFF.md`, `PHASE-CHECKPOINTS.md`, `.env.example` |
+| mongodb-authority | Sonnet 5.5 | `packages/contracts/` (delegated from lead for Wave A), `packages/mongo/`, `scripts/setup-mongo.ts`, `scripts/probe-mongo.ts`, `docs/MONGO.md`; from Wave B also `packages/domain/`, `packages/governance/` (B1, see briefs/B1-domain-gateway.md) |
+| rsi-evolution | Sonnet 5.5 | `packages/fixtures/`, `packages/grader/`, later `packages/harness-compiler/`, `packages/evolution/`, `packages/gate/`, `packages/deployment/`, `packages/adversary/`, `packages/meta-evolution/` |
+| runtime-raindrop | Sonnet 5.5 | `apps/worker/`, `packages/runtime/`, `packages/vendor-openmuse/`, `packages/observability/`, `packages/observer/`, `packages/privacy/`, `infra/opendots/` (candidate transport only) |
+| ui-ux-improver | Sonnet 5.5 | `apps/operator/src/client/expunge/`, `apps/operator/src/server/expunge/`, `apps/operator/src/shared/expunge.ts`, `apps/operator/tests/expunge-*.test.ts*`, `apps/operator/scripts/run-from-root.mjs`, `apps/operator/package.json` (engines only), `apps/operator/.nvmrc`, `DESIGN.md`, `docs/ui/`; lead-approved upstream edits for B3: `src/server/platform.ts` (agent registration lines), `src/server/index.ts`, `src/server/app.ts` (injection), `src/client/App.tsx`, `index.html`, `src/client/style.css` and `editor.css` (measured AA fixes only). Frozen: `Chat.tsx`, `dot-agent.ts` |
+| verifier | Sonnet 5.5 | `scripts/continuity/`, `tests/reliability/`, `tests/evaluation/` (harness only), `VERIFICATION.md` |
+| devils-advocate | Opus 5.5 | `docs/review/` (findings only; never product code) |
+| commit-steward | Haiku 5.5 | Git index and commits only; `COMMIT-LEDGER.md` |
+
+Unlisted upstream files under `apps/operator/` (OpenDots at pin `625452e06cde74cb25b0ce319e2c1be0488f5a5f`) are frozen; changes to `platform.ts`, `dot-agent.ts`, `app.ts`, `index.ts` require a proposal to team-lead and are then owned by ui-ux-improver for that change.
+
+## Frozen interfaces (change only by team-lead decision recorded in PROJECT-STATE.md)
+
+1. `docs/expunge/CONTRACTS.md` names and shapes, implemented in `packages/contracts/src/index.ts`. Additive exports are allowed by mongodb-authority during Wave A; removals or semantic changes need lead approval.
+2. **Field path grammar** (shared by fixtures, mongo scope compile, discovery): path segments are strings matching `/^[A-Za-z][A-Za-z0-9_]{0,31}$/` or the literal `*`; first segment is never `*`; at most one `*`; length 1..16. `*` means "every element of the array at this position". Read compilation expands `*` to a MongoDB dotted path without the wildcard (matching any element). Write compilation uses positional/filtered array updates and never deletes an array wholesale when the path has a `*`. This grammar lives in `@expunge/contracts` as `isFieldPath`/`parseFieldPath`; both fixtures and mongo import it.
+3. **ScopeKey hashing**: `scopeIdentity` and world/scope hashes select exactly `{tenantId, env, scopeId}`; extra `ActorContext` keys never enter a hash; implicit default binding and the explicit equivalent binding produce identical `worldId` and identical `scopeId`.
+4. **Principals**: `PRINCIPALS` in `packages/mongo/src/client.ts`; env variable names `MONGODB_<PRINCIPAL>_URI`.
+5. **Job/lease/effect protocol**: `JobRepository`, `EffectRepository`, `DeploymentRepository` method signatures as they exist today, plus the changes listed under A2-R in TASKS.json (approval requirement derived from stored policy, not caller-supplied).
+6. **Worker tool IDs**: `inspect_scope`, `resolve_subject`, `discover_references`, `preview_cleanup`, `apply_cleanup_batch`, `verify_registered_scope`, `complete_cleanup`, `inspect_harness`, `report_diagnostic`.
+7. **Projection transport** between operator and worker: `GET /internal/projection/jobs/:jobId` and `.../events?afterSequence=N` as documented in `infra/opendots/README.md`.
+
+## Coding rules that came out of review
+
+1. **Never pass an Error object (especially a ZodError) to console.* or a logger.** Node 24.11 to 24.13.0 and 25.0 to 25.3 throw inside `util.inspect` on ZodError's inherited `errors` getter (nodejs/node#60717, fixed by #61032 in 24.13.1 and 25.4.0). Log `error.name`, `error.message` and, for Zod, `error.issues`. Root `engines.node` is `>=24.13.1 <25.0.0 || >=25.4.0`; `.nvmrc` says 24.13.1. The operator gets a never-throwing console wrapper (see ui-ux-improver B3) because its upstream runtime logs raw errors.
+2. **Reserved envelope fields** (`_id`, `tenantId`, `env`, `worldId`, `_rev`, `eligibility`, `access`, `lifecycle`) are never addressable by registry field paths; model-visible paths live under `data.*` (DA-1 L10).
+3. **Decoys must be isomorphic to targets** in every fixture family; a shape-only detector must score at chance before a world is admitted (DA-1 #1).
+
+## Write barrier protocol (learned 2026-10-11)
+
+When the lead declares a WRITE BARRIER for a commit, every code-editing teammate finishes only its in-progress edit to a green state, stops and reports PARTIAL. A message from any other teammate (including a reviewer's finding) does not lift the barrier; an idle teammate that is resumed by such a message must not edit until the lead's RESUME. Reviewers hold new findings during a barrier and deliver them to the lead, who queues them for after the commit. The verifier's matrix is pinned to the checkpoint taken at barrier time; any path that changed after that checkpoint is either re-verified on a fresh checkpoint or excluded from the commit, never committed on stale evidence.
+
+## Commit protocol
+
+Only commit-steward stages and commits. Standing instruction from the human (2026-10-11): every commit is pushed to `origin main` (https://github.com/nihalnihalani/expunge, private) immediately after it is created; visibility changes remain the human's call. Other teammates submit a commit packet (task IDs, exact paths, verifier command results with exit codes, devils-advocate disposition, proposed message) to team-lead, who accepts it and forwards to commit-steward. Paths in an accepted packet are frozen until the commit lands.
