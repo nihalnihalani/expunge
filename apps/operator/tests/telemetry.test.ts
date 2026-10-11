@@ -39,6 +39,10 @@ try {
     },
   ));
   if (response.status !== 400) throw new Error('Expected SDK body validation failure');
+  // Wait (bounded, 2 s) for the request the assertions need instead of a single tick: the SDK may
+  // dispatch it after more event-loop turns, and an empty list would be a false failure.
+  for (let i = 0; i < 200 && !requests.some(r => r.body.event === 'oss.runtime.copilot_request_created'); i++)
+    await new Promise(resolve => setTimeout(resolve, 10));
   await new Promise(resolve => setImmediate(resolve));
   console.log(JSON.stringify(requests));
 } finally {
@@ -71,14 +75,18 @@ async function captureRuntime(overrides: Record<string, string> = {}) {
     'COPILOTKIT_TELEMETRY_URL',
   ])
     delete env[key];
+  // The child cold-compiles TypeScript through tsx, so it gets a generous timeout, and a failure
+  // carries the child's stderr so the cause is visible.
   const { stdout } = await run(
     process.execPath,
     ['--import', tsxUrl, '--input-type=module', '--eval', probe],
     {
       env: { ...env, CPK_TELEMETRY_ID: 'test-project-identity', ...overrides },
-      timeout: 15000,
+      timeout: 60000,
     },
-  );
+  ).catch((error: Error & { stderr?: string }) => {
+    throw new Error(`${error.message}\nchild stderr:\n${error.stderr ?? ''}`);
+  });
   const events: CapturedEvent[] = JSON.parse(
     stdout.trim().split('\n').at(-1) ?? '[]',
   );
