@@ -26,9 +26,10 @@ async function toRequest(incoming: IncomingMessage, host: string): Promise<Reque
 /** Serves the domain service over HTTP. Bind it to a private interface: it is for the operator server only. */
 export async function listenDomainService(
   service: DomainService,
-  options: { host?: string; port?: number } = {},
+  options: { host?: string; port?: number; log?: (entry: Record<string, unknown>) => void } = {},
 ): Promise<{ server: Server; port: number; close(): Promise<void> }> {
   const host = options.host ?? '127.0.0.1';
+  const log = options.log ?? ((entry: Record<string, unknown>) => console.error(JSON.stringify(entry)));
   const server = createServer(async (incoming, outgoing) => {
     try {
       const request = await toRequest(incoming, host);
@@ -39,7 +40,15 @@ export async function listenDomainService(
       const response = await service.handle(request);
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       outgoing.end(Buffer.from(await response.arrayBuffer()));
-    } catch {
+    } catch (error) {
+      // The client always gets the same generic answer. The log gets the error NAME and CODE only: never the message (it can
+      // carry a connection string or a value), never the stack, never the request.
+      const code = (error as { code?: unknown } | null)?.code;
+      log({
+        event: 'domain_service_error',
+        name: error instanceof Error ? error.name : typeof error,
+        ...(typeof code === 'string' || typeof code === 'number' ? { code } : {}),
+      });
       outgoing.writeHead(500, { 'Content-Type': 'application/json' }).end('{"error":"internal"}');
     }
   });

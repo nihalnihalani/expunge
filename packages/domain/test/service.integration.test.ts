@@ -86,6 +86,67 @@ describeLive('domain service on a real replica set (wake transport is a labeled 
     expect(world.maintenanceMode).toBe(false);
   });
 
+  it('derives the evidence status from the committed outbox: unconfigured until a row exists, then proven times and dead letters', async () => {
+    const outbox = rig.env.service.control.collection('telemetry_outbox');
+    await outbox.deleteMany({});
+    const empty = await call('GET', '/readiness', READ);
+    expect(empty.body.evidence).toEqual({
+      configured: false,
+      writeProvenAt: null,
+      readBackProvenAt: null,
+      deadLetters: 0,
+    });
+    const scope = {
+      tenantId: seeded.binding.tenantId,
+      env: seeded.binding.env,
+      scopeId: seeded.binding.scopeId,
+    };
+    const row = (
+      operationId: string,
+      status: string,
+      attained: Record<string, { at: Date; contentHash: string }>,
+    ) => ({
+      _id: operationId,
+      ...scope,
+      operationId,
+      kind: 'k',
+      dedupeKey: operationId,
+      jobId: 'j',
+      payload: {},
+      status,
+      attempts: 0,
+      nextAttemptAt: new Date(0),
+      lease: { ownerId: '', fence: 0, until: new Date(0), heartbeatAt: new Date(0) },
+      evidenceRequired: [],
+      attained,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const hash = 'a'.repeat(64);
+    await outbox.insertMany([
+      row('op-1', 'pending', {}),
+      row('op-2', 'ingest_accepted', {
+        ingest_accepted: { at: new Date('2026-10-11T10:00:00.000Z'), contentHash: hash },
+      }),
+      row('op-3', 'evidence_ready', {
+        ingest_accepted: { at: new Date('2026-10-11T11:00:00.000Z'), contentHash: hash },
+        query_visible: { at: new Date('2026-10-11T11:30:00.000Z'), contentHash: hash },
+        evidence_ready: { at: new Date('2026-10-11T12:00:00.000Z'), contentHash: hash },
+      }),
+      row('op-4', 'dead_letter', {}),
+      // Another scope's rows never count.
+      { ...row('op-5', 'dead_letter', {}), scopeId: 'other-scope' },
+    ] as never);
+    const live = await call('GET', '/readiness', READ);
+    expect(live.body.evidence).toEqual({
+      configured: true,
+      writeProvenAt: '2026-10-11T11:00:00.000Z',
+      readBackProvenAt: '2026-10-11T12:00:00.000Z',
+      deadLetters: 1,
+    });
+    await outbox.deleteMany({});
+  });
+
   it('previews counts only: the same world gives the same id, and no record id or value is in the answer', async () => {
     const first = await call('POST', '/previews', JOB, { worldId: seeded.world.worldId, subject: subject() });
     expect(first.status).toBe(200);
