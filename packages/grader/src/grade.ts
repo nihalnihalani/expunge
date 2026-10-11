@@ -27,7 +27,7 @@ import {
   type SealedFixture,
 } from '@expunge/fixtures/sealed';
 import { REFERENCE_SOLVER_HASH, runReference } from './reference.js';
-import { plansAgree, referenceSolveIndexed } from './reference2.js';
+import { INDEXED_SOLVER_HASH, plansAgree, referenceSolveIndexed } from './reference2.js';
 
 export const EVALUATOR_VERSION = 'expunge.independent-grader.v1';
 export const EVALUATOR_HASH = contentHash(
@@ -38,8 +38,11 @@ export const EVALUATOR_HASH = contentHash(
     modelJudge: false,
     fixtureGeneratorHash: FIXTURE_GENERATOR_HASH,
     referenceSolverHash: REFERENCE_SOLVER_HASH,
+    // The second solver decides admission of every world (`plansAgree`), so it is part of the evaluator.
+    indexedSolverHash: INDEXED_SOLVER_HASH,
     sources: [
       'grade.ts',
+      'reference2.ts',
       'faults.ts',
       '../../fixtures/src/sealed.ts',
       '../../fixtures/src/paths.ts',
