@@ -12,6 +12,8 @@ import {
   type WakeSender,
 } from './jobs.js';
 import { operatorPreview, previewRequestSchema } from './preview.js';
+import { serveArtifactRoute } from './artifacts.js';
+import { serveProjection } from './projection.js';
 import { listWorlds } from './worlds.js';
 
 const BASE = '/internal/projection';
@@ -82,6 +84,8 @@ function route(method: string, pathname: string): { key: string; id?: string } |
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const MAPPED: Record<string, [ServiceRefusal['status'], string]> = {
   UnknownWorld: [404, 'not_found'],
+  // A page could not be read from one stable epoch (a reset kept happening during the read): try again.
+  StreamEpochUnstable: [503, 'unavailable'],
   WorldInMaintenance: [409, 'world_in_maintenance'],
   StaleWorldBinding: [409, 'conflict'],
   ScanBudgetExceeded: [422, 'scan_budget_exceeded'],
@@ -146,9 +150,31 @@ export function createDomainService(deps: DomainServiceDeps): DomainService {
         if (!body.success) return json(400, { error: 'invalid_request' });
         return json(200, await cancelJob(env, config, matched.id!));
       }
+      case 'GET jobs':
+      case 'GET events': {
+        // Job snapshots, event pages and the job list: committed state under the read principal (projection.ts).
+        const served = await serveProjection(
+          env,
+          config,
+          { key: matched.key as 'GET jobs' | 'GET events', ...(matched.id ? { id: matched.id } : {}) },
+          url,
+        );
+        return json(served.status, served.body);
+      }
+      case 'GET artifacts':
+      case 'GET deployments': {
+        // Completion receipts and the deployment view (artifacts.ts); the other artifact kinds answer 404.
+        const served = await serveArtifactRoute(
+          env,
+          config,
+          { key: matched.key as 'GET artifacts' | 'GET deployments', id: matched.id! },
+          url,
+        );
+        return json(served.status, served.body);
+      }
       default:
-        // Job snapshots, event pages, artifacts, approvals, deployments and threads are served by the projection
-        // layer, which is not part of this package yet.
+        // Proposals (approval descriptors), the decision and threads are served by the projection layer, which is not
+        // part of this package yet.
         return json(501, { error: 'unsupported' });
     }
   }
