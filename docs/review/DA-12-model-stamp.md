@@ -56,3 +56,50 @@ Add these alongside the fixes:
 
 The existing tests prove the happy path only: the stamp lands before any phase, survives the terminal replace, and a
 fake stays fake.
+
+## Re-read of the fix packet (2026-10-11, working tree, 8 files, +165/-27 against HEAD)
+
+The original stamp had already been committed as 020004b before my BLOCK arrived. The team chose to fix forward. I read
+the diff of `packages/runtime/src/{ports,models,session,errors}.ts`, `apps/worker/src/dispatch.ts` and the tests.
+`npx vitest run packages/runtime apps/worker/test/dispatch.test.ts` exits 0: 11 files, 144 tests passed. The run includes
+the four new cases: fail closed, takeover with a different model, a failed takeover stamp, and an overridden base URL.
+
+**Disposition: ACCEPT-WITH-FOLLOWUP.** The BLOCK is lifted for the worker half.
+
+- **M-1 fixed.** `session.ts` now rethrows a failure from `onModelSelected` as `RuntimeError('ModelAttestationFailed')`.
+  It happens before `tanstackAgent` is built and before any model call. An error from `attestModel` itself (a bad spec) is
+  inside the same try. `dispatch.ts` rethrows after logging, and the job-failed event marks the failure retryable. With
+  `revertOnFailure`, a stamp that was never stored is removed from later snapshots. If the write was ambiguous (it
+  committed but the acknowledgement was lost), the result is a stored stamp for a session that made no model call. That
+  is harmless.
+- **M-2 fixed in the worker.** `attestedModels[]` carries `fence` on each entry. A takeover reads the prior entries from
+  the claimed checkpoint and appends its own. An entry for a fence that already has one is not duplicated. A failed
+  takeover write leaves no entry and makes no model call.
+- **M-3 fixed.** The stamp now records `endpoint: 'default' | 'overridden'` and a sha256 of the lower-cased host; the URL
+  is never stored. Attestation and adapter read the same environment (`deps.env`, defaulting to `process.env`, in both
+  `session.ts` and `vendor-openmuse/src/provider.ts:49`). The host hash is unsalted, so it can be matched against a list of
+  known gateways. That is fine, because a host is not a secret.
+
+**Is "append-only" enforced anywhere other than the worker's own code? No.**
+- `JobRepository.checkpoint` replaces the whole field (`$set: { checkpoint }`, `packages/mongo/src/jobs.ts:386-389`).
+  Any session holding the lease could drop earlier entries: a buggy build, an older build, or a mixed fleet.
+  - An older build writing without `attestedModels` would also have a different attested runtime hash, so the gate's
+    `runtime_hash_mismatch` check would catch that case.
+- The `grader` and `promoter` roles also hold UPDATE on `jobs`, so the principal that will verify the stamps can rewrite
+  them.
+- Fences rise by 1 on every claim or takeover (`jobs.ts:346,424`). But a claim that ends before its session starts (for
+  example `HarnessNotDeployed`) leaves no stamp, so "one stamp per fence" cannot be required strictly. Without an
+  independent claim history, the gate cannot detect a removed middle entry.
+
+**Follow-ups, required before the gate half consumes stamps:**
+1. Move run attestations into an insert-only collection, for example `run_attestations` with `_id` set to
+   `(jobId, fence)`. Only `domain_executor` may INSERT; the grader may only FIND; nobody may UPDATE or REMOVE. That makes
+   append-only a database property. A checkpoint copy can stay for display.
+2. Gate rule: HOLD (`fake_evidence`) in each of these cases:
+   - there are no stamps;
+   - the job's final fence has no stamp;
+   - entries disagree with each other or with the freeze;
+   - any `source` other than `provider`;
+   - `endpoint: 'overridden'` with a host hash the freeze does not allowlist.
+3. A runner composed without `onModelSelected` (anything that does not go through `Dispatcher` hooks) is silently
+   unstamped. Rule 2 covers it. Optionally, make the hook mandatory in `ExecutionHooks` for worker sessions.
