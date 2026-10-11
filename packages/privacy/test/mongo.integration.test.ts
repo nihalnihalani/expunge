@@ -5,7 +5,12 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { JobRepository, ProvenanceRepository, type MongoService } from '@expunge/mongo';
+import {
+  ErasureSuppressionRepository,
+  JobRepository,
+  ProvenanceRepository,
+  type MongoService,
+} from '@expunge/mongo';
 import { RaindropQueryClient } from '@expunge/observer';
 import { FakeRaindrop } from '../../observability/test/fake-raindrop.js';
 import {
@@ -262,7 +267,7 @@ describeLive('privacy protocols on a real replica set (local protocol lane)', ()
         sleep: async () => undefined,
       });
       return new ErasureService({
-        store: new MongoErasureStore(privacy),
+        store: new MongoErasureStore(privacy, new ErasureSuppressionRepository(privacy)),
         provider: bindOrganization(client, 'org-1'),
       });
     }
@@ -274,7 +279,10 @@ describeLive('privacy protocols on a real replica set (local protocol lane)', ()
       await erasure.create(SCOPE, request); // idempotent
       expect(await rows().countDocuments({})).toBe(1);
       const submitted = await erasure.submit(SCOPE, request.requestKey);
-      const stored = await new MongoErasureStore(privacy).get(SCOPE, request.requestKey);
+      const stored = await new MongoErasureStore(privacy, new ErasureSuppressionRepository(privacy)).get(
+        SCOPE,
+        request.requestKey,
+      );
       expect(stored).toMatchObject({
         providerStatus: 'pending',
         remoteJobId: submitted.remoteJobId,
@@ -283,8 +291,12 @@ describeLive('privacy protocols on a real replica set (local protocol lane)', ()
       expect(stored?.receivedAt).toBeInstanceOf(Date);
       expect(stored?.history.map((h) => h.status)).toEqual(['unsubmitted', 'submitting', 'pending']);
       // A stale writer (expecting the old history length) loses.
-      expect(await new MongoErasureStore(privacy).replace(stored!, 2)).toBe(false);
-      expect(await new MongoErasureStore(privacy).replace(stored!, 3)).toBe(true);
+      expect(
+        await new MongoErasureStore(privacy, new ErasureSuppressionRepository(privacy)).replace(stored!, 2),
+      ).toBe(false);
+      expect(
+        await new MongoErasureStore(privacy, new ErasureSuppressionRepository(privacy)).replace(stored!, 3),
+      ).toBe(true);
     });
 
     it('two pollers cannot both append the same transition', async () => {
@@ -296,7 +308,10 @@ describeLive('privacy protocols on a real replica set (local protocol lane)', ()
         erasure.poll(SCOPE, request.requestKey),
         erasure.poll(SCOPE, request.requestKey),
       ]);
-      const stored = await new MongoErasureStore(privacy).get(SCOPE, request.requestKey);
+      const stored = await new MongoErasureStore(privacy, new ErasureSuppressionRepository(privacy)).get(
+        SCOPE,
+        request.requestKey,
+      );
       expect(stored?.history.filter((h) => h.status === 'in_progress')).toHaveLength(1);
       expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
     });

@@ -281,7 +281,11 @@ export class RetractionRunner {
       const leak = LEAK_REASONS.has(state.reasonCode);
       // A scan hit means prohibited content sits in these bytes: they are removed (or replaced by a non-personal
       // tombstone) before any owner disposition is considered, and `keep_revoked` never keeps them.
-      if (leak) await this.deps.purger.purge(scope, row.artifactHash, kind, state.reasonCode);
+      if (leak)
+        await this.deps.purger.purge(scope, row.artifactHash, kind, state.reasonCode, {
+          policyHash: state.policyHash,
+          closureId: state.closureId,
+        });
       const disposition =
         leak && policy.disposition(kind) === 'keep_revoked' ? 'delete' : policy.disposition(kind);
       if (disposition === 'delete') {
