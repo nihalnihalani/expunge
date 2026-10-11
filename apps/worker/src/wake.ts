@@ -25,15 +25,17 @@ export type WakeDecision = 'accepted' | 'duplicate';
 /** Idempotency record for wake commands, keyed by commandId. */
 export interface WakeCommandStore {
   accept(command: WakeCommand): Promise<WakeDecision>;
-  /** Forgets a command that was accepted but could not be queued, so the sender's retry is not mistaken for a duplicate. */
+  /**
+   * Best-effort: forget a command that was accepted but could not be queued. The durable Mongo store is insert-only
+   * for the worker principal and cannot do this; delivery then relies on the recovery poll.
+   */
   release(command: WakeCommand): Promise<void>;
 }
 
 /**
- * PARTIAL: process-local dedupe. A restart forgets commandIds, so a replayed wake may be delivered
- * again; that is safe (JobRepository.claim is fenced and returns null for a job that is not claimable)
- * but is not durable idempotency. TODO(mongodb-authority): replace with a `wake_commands` collection with a
- * unique index on commandId (requested; not available yet).
+ * Process-local dedupe for tests and for a worker started without a database. A restart forgets commandIds, so a
+ * replayed wake may be delivered again; that is safe (claim is fenced) but not durable. Production uses
+ * MongoWakeCommandStore (wiring.ts), which stores each commandId once in `wake_commands`.
  */
 export class InMemoryWakeCommandStore implements WakeCommandStore {
   private readonly seen = new Set<string>();
@@ -60,7 +62,9 @@ export function authenticateWake(authorization: string | undefined, expectedToke
 }
 
 export interface WakeTarget {
-  /** Queues the job for the dispatcher. Returns false when the bounded queue is full. */
+  /** True when a wake would be queued now. Checked BEFORE a command id is recorded, so a full queue never burns one. */
+  canAccept(): boolean;
+  /** Queues the job for the dispatcher. Returns false when the bounded queue is full or the worker is stopping. */
   wake(command: WakeCommand): boolean;
 }
 
@@ -123,9 +127,12 @@ export function createWakeServer(options: {
       }
       const command = wakeCommandSchema.safeParse(parsed);
       if (!command.success) return send(res, 400, { error: 'InvalidCommand' });
+      if (!options.target.canAccept()) return send(res, 429, { error: 'Busy' });
       const decision = await options.store.accept(command.data);
       if (decision === 'duplicate') return send(res, 200, { status: 'duplicate' });
       if (!options.target.wake(command.data)) {
+        // A race between canAccept and wake. The id may stay recorded (durable stores are insert-only), which is safe:
+        // the job is still queued and the recovery poll will pick it up.
         await options.store.release(command.data);
         return send(res, 429, { error: 'Busy' });
       }

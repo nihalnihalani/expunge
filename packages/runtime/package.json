@@ -4,7 +4,10 @@
   "description": "ExpungeExecutionAgent: durable AG-UI execution agent over the vendored OpenMuse helper.",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
   "dependencies": {
     "@ag-ui/client": "0.0.59",
     "@ag-ui/core": "0.0.59",

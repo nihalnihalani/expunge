@@ -1,4 +1,4 @@
-import type { Job, JsonValue } from '@expunge/contracts';
+import type { Job, JsonValue, ProjectionPayloadByKind } from '@expunge/contracts';
 import type { RunStats } from '@expunge/runtime';
 
 export type TerminalAction =
@@ -76,9 +76,51 @@ export function terminalCheckpoint(stats: RunStats, action: TerminalAction): Jso
       elapsedMs: stats.elapsedMs,
       decision:
         action.kind === 'finish' ? { status: action.status, reason: action.reason } : { none: action.reason },
+      ...(stats.provenance
+        ? {
+            model: {
+              spec: stats.provenance.spec,
+              ...(stats.provenance.provider ? { provider: stats.provenance.provider } : {}),
+              ...(stats.provenance.model ? { model: stats.provenance.model } : {}),
+              adapterInjected: stats.provenance.adapterInjected,
+              profileHash: stats.provenance.profileHash,
+              boundWorkerProfileHash: stats.provenance.boundWorkerProfileHash,
+            },
+          }
+        : {}),
+      ...(stats.metered ? { usage: stats.metered } : {}),
+      ...(stats.abandonedTools ? { abandonedTools: stats.abandonedTools } : {}),
       ...(stats.narrative
         ? { untrustedModelNarrative: { sha256: stats.narrative.sha256, length: stats.narrative.length } }
         : {}),
     },
   };
+}
+
+type FailureCode = ProjectionPayloadByKind['job_failed']['code'];
+
+/** Maps the dispatcher's short reason codes to the projection's closed failure vocabulary. */
+export function projectionFailureCode(reason: string): FailureCode {
+  switch (reason) {
+    case 'WallTimeExceeded':
+    case 'ToolCallBudgetExceeded':
+    case 'TokenBudgetExceeded':
+    case 'CostBudgetExceeded':
+    case 'PricingUnavailable':
+    case 'PhaseTimeout':
+    case 'StepLimitReached':
+      return 'budget_exhausted';
+    case 'LostLease':
+    case 'JobCancelled':
+      return 'lease_lost';
+    case 'ModelRunFailed':
+    case 'ModelUnavailable':
+      return 'provider_error';
+    case 'NoCompletionReceipt':
+    case 'incomplete_receipt':
+    case 'CompletionReceiptRequired':
+      return 'verification_failed';
+    default:
+      return 'internal_error';
+  }
 }

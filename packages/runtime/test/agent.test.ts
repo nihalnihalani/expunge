@@ -7,10 +7,6 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   ExpungeExecutionAgent,
-  FakeChatModel,
-  fakeHang,
-  fakeText,
-  fakeToolCalls,
   STEP_LIMIT_NOTE,
   JobWaitSignal,
   RuntimeError,
@@ -18,6 +14,7 @@ import {
   type PhaseInfo,
   type SecurityEvent,
 } from '../src/index.js';
+import { FakeChatModel, fakeHang, fakeText, fakeToolCalls } from '../src/testing/index.js';
 import {
   ACTOR,
   FakeArtifactReader,
@@ -43,6 +40,9 @@ type RigOptions = {
   receipt?: CompletionReceipt | null;
   phaseTimeoutMs?: number;
   toolDrainMs?: number;
+  acceptClientState?: boolean;
+  requirePricing?: boolean;
+  pricing?: { inputMicrousdPerMillion?: number; outputMicrousdPerMillion?: number };
   jobOver?: Parameters<typeof makeJob>[1];
   extraBundles?: HarnessBundle[];
 };
@@ -75,10 +75,16 @@ function rig(options: RigOptions) {
     jobs: store,
     artifacts,
     tools: provider,
-    models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: fake.adapter }),
+    models: new FixedModelResolver({
+      spec: 'fake/fake',
+      textAdapter: fake.adapter,
+      pricing: options.pricing,
+    }),
     hooks: options.hooks,
     phaseTimeoutMs: options.phaseTimeoutMs,
     toolDrainMs: options.toolDrainMs,
+    acceptClientState: options.acceptClientState,
+    requirePricing: options.requirePricing,
     receipts: options.receipt === undefined ? undefined : { find: async () => options.receipt ?? null },
   });
   const agent = new ExpungeExecutionAgent(deps, { actor: ACTOR, lease });
@@ -180,6 +186,7 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
           fakeText('done'),
         ],
         extraBundles: [makeBundle({ completionPolicy: 'model_narrative' })],
+        acceptClientState: true, // opt in: exercises the denylist; the default drops client state entirely
         hooks: { onSecurityEvent: (event) => security.push(event) },
       });
       // The client also tries to set authority through input state and forwardedProps.
@@ -300,7 +307,7 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
     });
 
     it('composes context and state through one path: trusted prompt first, each section once', async () => {
-      const r = rig({ script: [fakeText('ok')] });
+      const r = rig({ script: [fakeText('ok')], acceptClientState: true });
       await collect(
         r.agent.run(
           runInput({
@@ -714,7 +721,12 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
           e.type === EventType.CUSTOM &&
           (e as unknown as { name: string }).name === 'expunge.terminal_status',
       ) as unknown as { value: Record<string, unknown> };
-      expect(terminal.value).toEqual({ source: 'no_committed_receipt', modelNarrativeAuthoritative: false });
+      expect(terminal.value).toEqual({
+        source: 'no_committed_receipt',
+        completionPolicy: 'verified_receipt',
+        narrativeLabel: 'model_output_not_authoritative',
+        modelNarrativeAuthoritative: false,
+      });
       expect(eventTexts(events)).toContain('No completion receipt is committed for this job.');
     });
 
@@ -777,7 +789,8 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
       expect(r.log).toEqual(['echo:3']);
       const ids = events
         .filter((e) => e.type === EventType.TEXT_MESSAGE_CHUNK)
-        .map((e) => (e as unknown as { messageId: string }).messageId);
+        .map((e) => (e as unknown as { messageId: string }).messageId)
+        .filter((id) => !id.startsWith('expunge-terminal-'));
       expect(new Set(ids).size).toBe(2);
       expect(r.provider.contexts[0]?.lease).toEqual(r.lease);
     });
@@ -921,5 +934,132 @@ describe('DA-3 regressions', () => {
     const stats = await r.agent.settled();
     expect(stats?.endedBy).toBe('step_limit');
     expect(stats?.narrative).toBeUndefined();
+  });
+});
+
+describe('B2-2 hardening: client state, terminal labels, provenance and metering', () => {
+  const USAGE = { promptTokens: 11, completionTokens: 5, totalTokens: 16 };
+  const callWithUsage = () => ({ ...fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), usage: USAGE });
+
+  it('K4: drops client state entirely by default (nothing reaches the model) and says so', async () => {
+    const security: SecurityEvent[] = [];
+    const r = rig({ script: [fakeText('ok')], hooks: { onSecurityEvent: (e) => security.push(e) } });
+    await collect(r.agent.run(runInput({ state: { note: 'x', harnessHash: 'y', anything: 1 } })));
+    expect(r.fake.calls[0]!.systemPrompts.join('\n')).not.toContain('Application State');
+    expect(r.fake.calls[0]!.systemPrompts.join('\n')).not.toContain('harnessHash');
+    expect(security).toContainEqual({ kind: 'client_state_dropped', keys: 3 });
+  });
+
+  it('K3: a model_narrative bundle gets the committed-status event with an explicit untrusted_narrative label', async () => {
+    const bundle = makeBundle({ completionPolicy: 'model_narrative' });
+    const none = rig({ script: [fakeText('All done!')], bundle, receipt: null });
+    const events = await collect(none.agent.run(runInput()));
+    const terminal = events.find(
+      (e) =>
+        e.type === EventType.CUSTOM && (e as unknown as { name: string }).name === 'expunge.terminal_status',
+    ) as unknown as { value: Record<string, unknown> };
+    expect(terminal.value).toEqual({
+      source: 'no_committed_receipt',
+      completionPolicy: 'model_narrative',
+      narrativeLabel: 'untrusted_narrative',
+      modelNarrativeAuthoritative: false,
+    });
+    expect(eventTexts(events)).toContain('untrusted narrative');
+    expect(eventTexts(events)).toContain('No completion receipt is committed');
+  });
+
+  it('K3: without a receipt reader the event says the status is unavailable instead of staying silent', async () => {
+    const r = rig({ script: [fakeText('x')] });
+    const events = await collect(r.agent.run(runInput()));
+    const terminal = events.find(
+      (e) =>
+        e.type === EventType.CUSTOM && (e as unknown as { name: string }).name === 'expunge.terminal_status',
+    ) as unknown as { value: { source: string } };
+    expect(terminal.value.source).toBe('receipt_status_unavailable');
+  });
+
+  it('K2: records which adapter and model really served the run, and whether the adapter was injected', async () => {
+    const phases: PhaseInfo[] = [];
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('done')],
+      hooks: { onPhaseComplete: async (info) => void phases.push(info) },
+    });
+    await collect(r.agent.run(runInput()));
+    const stats = await r.agent.settled();
+    expect(stats?.provenance).toMatchObject({
+      spec: 'fake/fake',
+      provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
+      model: 'fake-deterministic-1',
+      adapterInjected: true,
+      boundWorkerProfileHash: 'b'.repeat(64),
+    });
+    expect(stats?.provenance?.profileHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(phases[0]?.model).toEqual({
+      provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
+      model: 'fake-deterministic-1',
+    });
+  });
+
+  it('K2: a run that never reached the adapter still records the configured spec, without a provider claim', async () => {
+    const r = rig({ script: [fakeText('x')], jobOver: { cancellationRequested: true } });
+    await collect(r.agent.run(runInput()));
+    expect((await r.agent.settled())?.provenance).toBeUndefined(); // failed before model selection
+  });
+
+  it('meters tokens per call against limits.totalTokens and stops the run when exceeded', async () => {
+    const r = rig({
+      bundle: makeBundle({ limits: { ...makeBundle().limits, totalTokens: 20 } }),
+      script: [callWithUsage(), callWithUsage(), fakeText('never')],
+    });
+    const events = await collect(r.agent.run(runInput()));
+    const stats = await r.agent.settled();
+    expect((events.at(-1) as unknown as { code: string }).code).toBe('TokenBudgetExceeded');
+    expect(stats?.endedBy).toBe('token_budget');
+    expect(stats?.metered).toMatchObject({
+      modelCalls: 2,
+      inputTokens: 22,
+      outputTokens: 10,
+      totalTokens: 32,
+    });
+    expect(r.fake.turnsConsumed).toBe(2);
+  });
+
+  it('meters cost from the profile prices (integer microdollars) and stops at maxCostMicrousd', async () => {
+    const r = rig({
+      bundle: makeBundle({ limits: { ...makeBundle().limits, maxCostMicrousd: 30 } }),
+      pricing: { inputMicrousdPerMillion: 1_000_000, outputMicrousdPerMillion: 2_000_000 },
+      script: [callWithUsage(), callWithUsage(), fakeText('never')],
+    });
+    const events = await collect(r.agent.run(runInput()));
+    const stats = await r.agent.settled();
+    expect((events.at(-1) as unknown as { code: string }).code).toBe('CostBudgetExceeded');
+    expect(stats?.endedBy).toBe('cost_budget');
+    // 11 in at 1 microusd/token + 5 out at 2 microusd/token = 21 per call; two calls = 42 > 30.
+    expect(stats?.metered).toMatchObject({ costMicrousd: 42, unpricedCalls: 0, costCoverage: 'complete' });
+  });
+
+  it('counts unpriced calls instead of treating them as free, and fails closed when pricing is required', async () => {
+    const lenient = rig({ script: [callWithUsage(), fakeText('done')] });
+    await collect(lenient.agent.run(runInput()));
+    expect((await lenient.agent.settled())?.metered).toMatchObject({
+      costMicrousd: 0,
+      unpricedCalls: 2,
+      costCoverage: 'none',
+      totalTokens: 16,
+    });
+
+    const strict = rig({ script: [callWithUsage(), fakeText('never')], requirePricing: true });
+    const events = await collect(strict.agent.run(runInput()));
+    expect((events.at(-1) as unknown as { code: string }).code).toBe('PricingUnavailable');
+    expect(strict.fake.turnsConsumed).toBe(1);
+  });
+
+  it('a call whose provider reported no usage is unpriced even when prices exist', async () => {
+    const r = rig({
+      pricing: { inputMicrousdPerMillion: 1, outputMicrousdPerMillion: 1 },
+      script: [fakeText('x')],
+    });
+    await collect(r.agent.run(runInput()));
+    expect((await r.agent.settled())?.metered).toMatchObject({ unpricedCalls: 1, costCoverage: 'none' });
   });
 });

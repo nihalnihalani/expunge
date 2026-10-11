@@ -1,6 +1,6 @@
 import type { RunStats } from '@expunge/runtime';
 import { describe, expect, it } from 'vitest';
-import { decideTerminal, terminalCheckpoint, type ReceiptFact } from '../src/index.js';
+import { decideTerminal, projectionFailureCode, terminalCheckpoint, type ReceiptFact } from '../src/index.js';
 
 const stats = (over: Partial<RunStats> = {}): RunStats => ({
   endedBy: 'finished',
@@ -115,5 +115,17 @@ describe('decideTerminal (terminal status comes from committed state, never from
     );
     expect(json).toContain('untrustedModelNarrative');
     expect(json).toContain('"length":33');
+  });
+});
+
+describe('projectionFailureCode', () => {
+  it('maps runtime reason codes onto the closed projection vocabulary', () => {
+    expect(projectionFailureCode('WallTimeExceeded')).toBe('budget_exhausted');
+    expect(projectionFailureCode('TokenBudgetExceeded')).toBe('budget_exhausted');
+    expect(projectionFailureCode('CostBudgetExceeded')).toBe('budget_exhausted');
+    expect(projectionFailureCode('LostLease')).toBe('lease_lost');
+    expect(projectionFailureCode('ModelRunFailed')).toBe('provider_error');
+    expect(projectionFailureCode('NoCompletionReceipt')).toBe('verification_failed');
+    expect(projectionFailureCode('SomethingElse')).toBe('internal_error');
   });
 });

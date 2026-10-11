@@ -9,24 +9,41 @@ function sameSecret(first, second) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 function exactPath(raw) {
-  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//') ||
-    raw.includes('?') || raw.includes('#') || raw.includes('%') || raw.includes('\\') ||
-    raw.split('/').some((part) => part === '.' || part === '..')) return false;
+  if (
+    typeof raw !== 'string' ||
+    !raw.startsWith('/') ||
+    raw.startsWith('//') ||
+    raw.includes('?') ||
+    raw.includes('#') ||
+    raw.includes('%') ||
+    raw.includes('\\') ||
+    raw.split('/').some((part) => part === '.' || part === '..')
+  )
+    return false;
   return /^\/[A-Za-z0-9/_-]*$/.test(raw);
 }
 
 /** Restricted reverse proxy, not a general browser/HTTP forward proxy. */
 export function createCandidateProxy(env, transport = fetch) {
   const origin = new URL(env.EXPUNGE_CANDIDATE_BROKER_ORIGIN ?? '');
-  if (!['http:', 'https:'].includes(origin.protocol) || origin.username || origin.password ||
-    origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Broker must be a fixed HTTP(S) origin.');
+  if (
+    !['http:', 'https:'].includes(origin.protocol) ||
+    origin.username ||
+    origin.password ||
+    origin.pathname !== '/' ||
+    origin.search ||
+    origin.hash
+  )
+    throw new Error('Broker must be a fixed HTTP(S) origin.');
   const candidateId = env.EXPUNGE_CANDIDATE_ID ?? '';
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(candidateId)) throw new Error('Set a stored candidate ID.');
   const accessToken = env.EXPUNGE_CANDIDATE_ACCESS_TOKEN ?? '';
   // The proxy-to-broker principal has its OWN name. EXPUNGE_INTERNAL_TOKEN is the operator's read-projection
   // principal and must never be configured here (K10): both services default to :4320.
   if (env.EXPUNGE_INTERNAL_TOKEN !== undefined)
-    throw new Error('EXPUNGE_INTERNAL_TOKEN belongs to the operator; use EXPUNGE_CANDIDATE_BROKER_TOKEN for the proxy.');
+    throw new Error(
+      'EXPUNGE_INTERNAL_TOKEN belongs to the operator; use EXPUNGE_CANDIDATE_BROKER_TOKEN for the proxy.',
+    );
   const serviceToken = env.EXPUNGE_CANDIDATE_BROKER_TOKEN ?? '';
   if (accessToken.length < 24 || serviceToken.length < 24 || accessToken === serviceToken)
     throw new Error('Use distinct candidate and broker transport tokens of at least 24 characters.');
@@ -40,8 +57,11 @@ export function createCandidateProxy(env, transport = fetch) {
   if (operatorTokenSha256 && createHash('sha256').update(accessToken).digest('hex') === operatorTokenSha256)
     throw new Error('The candidate access token must differ from the operator internal token.');
   const allow = JSON.parse(env.EXPUNGE_CANDIDATE_ALLOWED_ROUTES ?? '[]');
-  if (!Array.isArray(allow) || allow.length > 32 || allow.some((route) =>
-    !route || !['GET', 'POST'].includes(route.method) || !exactPath(route.path)))
+  if (
+    !Array.isArray(allow) ||
+    allow.length > 32 ||
+    allow.some((route) => !route || !['GET', 'POST'].includes(route.method) || !exactPath(route.path))
+  )
     throw new Error('Broker allowlist must contain bounded exact GET/POST paths.');
 
   const server = createServer(async (req, res) => {
@@ -51,8 +71,8 @@ export function createCandidateProxy(env, transport = fetch) {
     };
     if (!exactPath(req.url) || !allow.some((route) => route.method === req.method && route.path === req.url))
       return deny(403, 'Candidate route is not admitted.');
-    const bearer = typeof req.headers.authorization === 'string'
-      ? req.headers.authorization.replace(/^Bearer /, '') : '';
+    const bearer =
+      typeof req.headers.authorization === 'string' ? req.headers.authorization.replace(/^Bearer /, '') : '';
     if (!sameSecret(bearer, accessToken)) return deny(401, 'Candidate transport authentication required.');
     if (req.method === 'POST' && !req.headers['content-type']?.startsWith('application/json'))
       return deny(415, 'Use application/json.');
@@ -76,7 +96,8 @@ export function createCandidateProxy(env, transport = fetch) {
         redirect: 'error',
         signal: AbortSignal.timeout(10_000),
       });
-      if (!response.ok) return deny(response.status, 'Candidate broker denied or could not complete the request.');
+      if (!response.ok)
+        return deny(response.status, 'Candidate broker denied or could not complete the request.');
       if (!response.headers.get('content-type')?.includes('application/json'))
         return deny(502, 'Candidate broker returned an invalid response.');
       const reader = response.body?.getReader();
@@ -87,7 +108,10 @@ export function createCandidateProxy(env, transport = fetch) {
         const { done, value } = await reader.read();
         if (done) break;
         outputSize += value.length;
-        if (outputSize > MAX_BYTES) { await reader.cancel(); return deny(502, 'Candidate response exceeds its bound.'); }
+        if (outputSize > MAX_BYTES) {
+          await reader.cancel();
+          return deny(502, 'Candidate response exceeds its bound.');
+        }
         out.push(Buffer.from(value));
       }
       const text = Buffer.concat(out).toString('utf8');

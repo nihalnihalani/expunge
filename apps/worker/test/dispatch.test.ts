@@ -1,12 +1,6 @@
 import { contentHash, type CompletionReceipt, type HarnessBundle, type Job } from '@expunge/contracts';
-import {
-  FakeChatModel,
-  JobWaitSignal,
-  fakeHang,
-  fakeText,
-  fakeToolCalls,
-  type CompletionReceiptReader,
-} from '@expunge/runtime';
+import { JobWaitSignal, type CompletionReceiptReader } from '@expunge/runtime';
+import { FakeChatModel, fakeHang, fakeText, fakeToolCalls } from '@expunge/runtime/testing';
 import { defineTool, type ToolDefinition } from '@expunge/vendor-openmuse';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -18,13 +12,7 @@ import {
   makeJob,
   waitFor,
 } from '../../../packages/runtime/test/fakes.js';
-import {
-  Dispatcher,
-  RingEventSink,
-  workerConfigFromEnv,
-  type JobRunResult,
-  type LogEntry,
-} from '../src/index.js';
+import { Dispatcher, workerConfigFromEnv, type JobRunResult, type LogEntry } from '../src/index.js';
 import { MultiJobStore } from './fakes.js';
 
 const SMALL = {
@@ -74,19 +62,18 @@ function rig(options: {
   script: ConstructorParameters<typeof FakeChatModel>[0];
   bundle?: HarnessBundle;
   tools?: (ctx: { store: MultiJobStore; receipts: FakeReceipts }) => ToolDefinition[];
-  withContextInputs?: boolean;
   env?: Record<string, string>;
   jobIds?: string[];
 }) {
   const bundle = options.bundle ?? makeBundle();
-  const store = new MultiJobStore(options.withContextInputs ?? true);
+  const store = new MultiJobStore();
   const ids = options.jobIds ?? ['job-1'];
   for (const id of ids) store.add(queued(bundle, id));
   const receipts = new FakeReceipts();
   const fake = new FakeChatModel(options.script);
   const logs: LogEntry[] = [];
   const results: JobRunResult[] = [];
-  const events = new RingEventSink();
+  const projected: Array<{ key: unknown; event: Record<string, any> }> = [];
   const dispatcher = new Dispatcher({
     jobs: store,
     resolver: store,
@@ -105,11 +92,11 @@ function rig(options: {
     models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: fake.adapter }),
     receipts,
     config: workerConfigFromEnv({ ...SMALL, ...options.env }),
-    events,
+    projection: { append: async (key: unknown, event: any) => void projected.push({ key, event }) },
     log: (entry) => logs.push(entry),
     onResult: (result) => results.push(result),
   });
-  return { bundle, store, receipts, fake, dispatcher, logs, results, events };
+  return { bundle, store, receipts, fake, dispatcher, logs, results, projected };
 }
 
 describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed state', () => {
@@ -147,7 +134,15 @@ describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed 
     expect(job.status).toBe('failed');
     expect(result.outcome).toBe('failed');
     expect(r.store.named('finish')[0]?.args).toEqual(['failed', []]);
-    expect(r.events.recent('job-1').length).toBeGreaterThan(0);
+    // Committed-state projection: started on claim, failed with a closed-vocabulary code at the end.
+    expect(r.projected.map((p) => p.event.kind)).toEqual(['job_started', 'job_failed']);
+    expect(r.projected[0]?.event.payload).toMatchObject({ jobKind: 'cleanup', attempt: 1 });
+    expect(r.projected[1]?.event.payload).toMatchObject({
+      code: 'verification_failed',
+      retryable: false,
+      phase: null,
+    });
+    expect(r.projected[1]?.key).toEqual({ tenantId: 'tenant-1', env: 'evaluation', scopeId: 'scope-1' });
   });
 
   it('succeeds only with a committed complete receipt, finishing the job when the tool left it running', async () => {
@@ -220,13 +215,6 @@ describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed 
     const result = await r.dispatcher.runJob('job-1');
     expect(result.outcome).toBe('failed');
     expect(r.store.named('finish')[0]?.args).toEqual(['failed', ['rcpt-job-1']]);
-  });
-
-  it('falls back to checkpoint-recorded context inputs when the repository has no recordContextInputs', async () => {
-    const r = rig({ script: [fakeText('x')], withContextInputs: false });
-    await r.dispatcher.runJob('job-1');
-    const first = (r.store.checkpoints.get('job-1') as Array<{ contextInputs?: string[] }>)[0];
-    expect(first?.contextInputs).toEqual([r.store.jobs.get('job-1')!.binding.harnessHash]);
   });
 
   it('renews the lease on a timer while the run is busy, and keeps the fence it claimed', async () => {
@@ -402,5 +390,229 @@ describe('harness pinning', () => {
     });
     await dispatcher.runJob('job-1');
     expect(artifacts.reads.map((read) => read.hash)).toEqual([contentHash(pinned)]);
+  });
+});
+
+describe('B2-2: recovery poll, graceful release, scope binding and projection', () => {
+  const SCOPE = { EXPUNGE_TENANT_ID: 'tenant-1', EXPUNGE_ENV: 'evaluation', EXPUNGE_SCOPE_ID: 'scope-1' };
+
+  it('polls the bound scope for claimable jobs (queued, or lease expired after a crash) and runs them', async () => {
+    const r = rig({
+      script: [fakeText('x'), fakeText('y')],
+      jobIds: ['queued', 'crashed', 'held', 'other-scope'],
+      env: SCOPE,
+    });
+    const crashed = r.store.jobs.get('crashed')!;
+    crashed.status = 'running';
+    crashed.lease = {
+      ownerId: 'dead-worker',
+      fence: 7,
+      until: new Date(Date.now() - 5_000),
+      heartbeatAt: new Date(0),
+    };
+    const held = r.store.jobs.get('held')!;
+    held.status = 'running';
+    held.lease = {
+      ownerId: 'alive',
+      fence: 2,
+      until: new Date(Date.now() + 60_000),
+      heartbeatAt: new Date(),
+    };
+    r.store.jobs.get('other-scope')!.actor = {
+      ...r.store.jobs.get('other-scope')!.actor,
+      scopeId: 'someone-elses',
+    };
+    expect(await r.dispatcher.poll()).toBe(2);
+    await r.dispatcher.idle();
+    expect(r.results.map((x) => x.jobId).sort()).toEqual(['crashed', 'queued']);
+    expect(r.store.jobs.get('crashed')!.lease.fence).toBe(8); // reclaimed under a NEW fence
+    expect(r.store.named('claim', 'held')).toHaveLength(0);
+    expect(r.store.named('claim', 'other-scope')).toHaveLength(0);
+    expect(r.store.named('listClaimable')[0]?.args).toEqual([
+      { tenantId: 'tenant-1', env: 'evaluation', scopeId: 'scope-1' },
+      25,
+    ]);
+  });
+
+  it('does not poll without a scope binding, and never polls after stop()', async () => {
+    const unbound = rig({ script: [fakeText('x')] });
+    expect(await unbound.dispatcher.poll()).toBe(0);
+    expect(unbound.store.named('listClaimable')).toHaveLength(0);
+    const bound = rig({ script: [fakeText('x')], env: SCOPE });
+    await bound.dispatcher.stop();
+    expect(await bound.dispatcher.poll()).toBe(0);
+  });
+
+  it('starts and stops the poll timer from config.pollMs', async () => {
+    const r = rig({ script: [fakeText('x')], env: { ...SCOPE, EXPUNGE_WORKER_POLL_MS: '250' } });
+    r.dispatcher.startPolling();
+    r.dispatcher.startPolling(); // idempotent
+    await waitFor(() => r.store.named('listClaimable').length >= 1, 3000);
+    await r.dispatcher.idle();
+    await r.dispatcher.stop();
+    const calls = r.store.named('listClaimable').length;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(r.store.named('listClaimable')).toHaveLength(calls); // timer cleared
+  });
+
+  it('refuses a job outside the worker scope without claiming it', async () => {
+    const r = rig({ script: [fakeText('x')], env: { ...SCOPE, EXPUNGE_SCOPE_ID: 'a-different-scope' } });
+    const result = await r.dispatcher.runJob('job-1');
+    expect(result.outcome).toBe('out_of_scope');
+    expect(r.store.named('claim')).toHaveLength(0);
+  });
+
+  it('on graceful stop, aborts the run and RELEASES the job (running -> queued) for another worker', async () => {
+    const r = rig({ script: [fakeHang()] });
+    r.dispatcher.wake({ jobId: 'job-1', commandId: 'command-00000001' });
+    await waitFor(() => r.fake.calls.length === 1);
+    await r.dispatcher.stop();
+    expect(r.fake.hangObservedAbort).toBe(true);
+    expect(r.results[0]?.outcome).toBe('released');
+    const job = r.store.jobs.get('job-1')!;
+    expect(job.status).toBe('queued');
+    expect(job.lease.fence).toBe(1); // release does not bump the fence; the next claim does
+    expect(r.store.named('release')).toHaveLength(1);
+    expect(r.projected.map((p) => p.event.kind)).toEqual(['job_started', 'job_status_changed']);
+    expect(r.projected[1]?.event.payload).toMatchObject({
+      from: 'running',
+      to: 'queued',
+      reason: 'worker stopping',
+    });
+    // Another worker can claim it right away.
+    expect((await r.store.claim(job.actor, 'job-1', 'worker-b', 5000))?.lease.fence).toBe(2);
+  });
+
+  it('on stop, waits for an in-flight tool to drain, then releases', async () => {
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'slowtool', args: {} }]), fakeText('never')],
+      bundle: makeBundle({ toolPolicy: { grants: ['slowtool'], prerequisites: [] } }),
+      tools: () => [
+        defineTool({
+          name: 'slowtool',
+          description: 'ignores abort',
+          parameters: z.object({}),
+          execute: () => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 300)),
+        }),
+      ],
+    });
+    r.dispatcher.wake({ jobId: 'job-1', commandId: 'command-00000002' });
+    await waitFor(() => r.fake.turnsConsumed === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await r.dispatcher.stop();
+    expect(r.results[0]?.outcome).toBe('released');
+    expect(r.store.jobs.get('job-1')!.status).toBe('queued');
+  });
+
+  it('on stop, does NOT release while a tool outlasts the drain grace (the lease is left to expire)', async () => {
+    let finished = false;
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'slowtool', args: {} }]), fakeText('never')],
+      bundle: makeBundle({ toolPolicy: { grants: ['slowtool'], prerequisites: [] } }),
+      env: { EXPUNGE_WORKER_TOOL_DRAIN_MS: '20' },
+      tools: () => [
+        defineTool({
+          name: 'slowtool',
+          description: 'ignores abort for much longer than the grace',
+          parameters: z.object({}),
+          execute: () =>
+            new Promise((resolve) =>
+              setTimeout(() => {
+                finished = true;
+                resolve({ ok: true });
+              }, 400),
+            ),
+        }),
+      ],
+    });
+    r.dispatcher.wake({ jobId: 'job-1', commandId: 'command-00000003' });
+    await waitFor(() => r.fake.turnsConsumed === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await r.dispatcher.stop();
+    expect(finished).toBe(false);
+    expect(r.results[0]?.outcome).toBe('aborted');
+    expect(r.results[0]?.stats?.abandonedTools).toBe(1);
+    expect(r.store.named('release')).toHaveLength(0);
+    expect(r.store.jobs.get('job-1')!.status).toBe('running'); // lease expires; a new fence on reclaim
+    await waitFor(() => finished);
+  });
+
+  it('projects yielded, cancelled and succeeded transitions with closed-vocabulary payloads', async () => {
+    const yielded = rig({
+      script: [fakeToolCalls([{ name: 'ask', args: {} }]), fakeText('never')],
+      bundle: makeBundle({ toolPolicy: { grants: ['ask'], prerequisites: [] } }),
+      tools: () => [
+        defineTool({
+          name: 'ask',
+          description: 'a',
+          parameters: z.object({}),
+          execute: async () => {
+            throw new JobWaitSignal('waiting_approval');
+          },
+        }),
+      ],
+    });
+    await yielded.dispatcher.runJob('job-1');
+    expect(yielded.projected.map((p) => p.event.kind)).toEqual(['job_started', 'job_status_changed']);
+    expect(yielded.projected[1]?.event.payload).toMatchObject({ from: 'running', to: 'waiting_approval' });
+
+    const cancelled = rig({ script: [fakeHang()] });
+    const running = cancelled.dispatcher.runJob('job-1');
+    await waitFor(() => cancelled.fake.calls.length === 1);
+    cancelled.store.jobs.get('job-1')!.cancellationRequested = true;
+    await running;
+    expect(cancelled.projected.at(-1)?.event.payload).toMatchObject({ from: 'running', to: 'cancelled' });
+  });
+
+  it('a failed projection append is logged and never breaks the job', async () => {
+    const bundle = makeBundle();
+    const store = new MultiJobStore();
+    store.add(queued(bundle, 'job-1'));
+    const logs: LogEntry[] = [];
+    const fake = new FakeChatModel([fakeText('x')]);
+    const dispatcher = new Dispatcher({
+      jobs: store,
+      resolver: store,
+      artifacts: new FakeArtifactReader(bundle),
+      tools: new FakeToolProvider(() => []),
+      models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: fake.adapter }),
+      receipts: new FakeReceipts(),
+      config: workerConfigFromEnv(SMALL),
+      projection: {
+        append: async () => {
+          throw new Error('mongo down');
+        },
+      },
+      log: (entry) => logs.push(entry),
+    });
+    const result = await dispatcher.runJob('job-1');
+    expect(result.outcome).toBe('failed');
+    expect(store.jobs.get('job-1')!.status).toBe('failed');
+    expect(logs.some((l) => l.message === 'projection append failed')).toBe(true);
+  });
+
+  it('records the adapter that served the run and its usage in the terminal checkpoint and result', async () => {
+    const r = rig({
+      script: [
+        {
+          parts: [{ kind: 'text', text: 'x' }],
+          usage: { promptTokens: 4, completionTokens: 2, totalTokens: 6 },
+        },
+      ],
+    });
+    const result = await r.dispatcher.runJob('job-1');
+    expect(result.stats?.provenance).toMatchObject({
+      provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
+      model: 'fake-deterministic-1',
+      adapterInjected: true,
+    });
+    const last = (
+      r.store.checkpoints.get('job-1') as Array<{ terminal?: { model?: unknown; usage?: unknown } }>
+    ).at(-1);
+    expect(last?.terminal?.model).toMatchObject({
+      provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
+      adapterInjected: true,
+    });
+    expect(last?.terminal?.usage).toMatchObject({ inputTokens: 4, outputTokens: 2, unpricedCalls: 1 });
   });
 });

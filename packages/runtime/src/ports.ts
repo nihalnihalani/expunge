@@ -68,9 +68,17 @@ export interface ToolProvider {
   create(context: ToolContext): ToolDefinition[] | Promise<ToolDefinition[]>;
 }
 
+/** Prices of the frozen worker profile, in integer micro-US dollars per million tokens. Absent means unpriced. */
+export type ModelPricing = {
+  inputMicrousdPerMillion?: number;
+  outputMicrousdPerMillion?: number;
+};
+
 export type ModelSelection = {
   /** "provider/model", e.g. "openai/gpt-5". */
   spec: string;
+  /** The profile's prices. Missing prices make calls unpriced; they are never treated as free. */
+  pricing?: ModelPricing;
   /** TEST ONLY: a ready adapter (the labeled fake provider under src/testing). Production selection leaves it unset. */
   textAdapter?: AnyTextAdapter;
 };
@@ -84,12 +92,15 @@ export type PhaseInfo = {
   toolCalls: number;
   outcome: 'ok' | 'tool_error';
   elapsedMs: number;
+  /** The adapter that actually served the run so far (provider-reported name and model), once known. */
+  model?: { provider: string; model: string };
 };
 
 export type SecurityEvent =
   | { kind: 'protected_state_ignored'; source: 'input_state' | 'model_state_event'; paths: string[] }
   | { kind: 'tool_not_granted'; toolId: string }
   | { kind: 'tools_abandoned'; count: number }
+  | { kind: 'client_state_dropped'; keys: number }
   | { kind: 'client_input_dropped'; systemMessages: number; clientTools: number };
 
 export interface ExecutionHooks {
@@ -124,6 +135,17 @@ export type ExecutionDependencies = {
   readonly phaseTimeoutMs?: number;
   /** Frontend tool names the model may be offered. Default none: a durable worker has no UI. */
   readonly clientToolAllowlist?: readonly string[];
+  /**
+   * Whether client-supplied AG-UI `state` may reach the model at all. Default false: client state is dropped
+   * entirely (nothing about authority or the job comes from it). When true, only a denylist of authority-shaped
+   * keys is stripped, which is defence in depth, not an allowlist.
+   */
+  readonly acceptClientState?: boolean;
+  /**
+   * Fail the run closed when a model call cannot be priced (no profile prices or no reported usage) and the
+   * bundle sets a cost ceiling. Default false: such calls are counted as unpriced and the run is flagged.
+   */
+  readonly requirePricing?: boolean;
   /** Offer AGUISendStateSnapshot/Delta (protected paths are filtered). Default true. */
   readonly modelStateTools?: boolean;
   /** Trusted system prompt for the run. Defaults to `defaultWorkerPrompt`. */
@@ -139,6 +161,8 @@ export type RunEnd =
   | 'finished'
   | 'step_limit'
   | 'tool_budget'
+  | 'token_budget'
+  | 'cost_budget'
   | 'wall_time'
   | 'phase_timeout'
   | 'waiting'
@@ -146,6 +170,28 @@ export type RunEnd =
   | 'lost_lease'
   | 'aborted'
   | 'error';
+
+/** Metered from per-call provider usage. `unpricedCalls` counts calls with no price or no reported usage. */
+export type UsageSummary = {
+  modelCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costMicrousd: number;
+  unpricedCalls: number;
+  costCoverage: 'complete' | 'partial' | 'none';
+};
+
+/** Which provider, model and profile produced a run. `adapterInjected` is true when a caller supplied the adapter. */
+export type RunProvenance = {
+  spec: string;
+  provider?: string;
+  model?: string;
+  adapterInjected: boolean;
+  /** Hash of {spec, pricing}; compared with the job's workerProfileHash once a profile store exists. */
+  profileHash: string;
+  boundWorkerProfileHash: string;
+};
 
 export type RunStats = {
   endedBy: RunEnd;
@@ -155,6 +201,8 @@ export type RunStats = {
   phases: number;
   elapsedMs: number;
   usage?: unknown;
+  metered?: UsageSummary;
+  provenance?: RunProvenance;
   /** sha256 and length of the model's final text; the narrative itself is not retained here. */
   narrative?: { sha256: string; length: number };
   /** Tool executions still running when the drain grace expired; the lease was NOT released in that case. */

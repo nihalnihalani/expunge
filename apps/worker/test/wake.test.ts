@@ -22,6 +22,7 @@ const ready: Readiness = {
     provider: 'configured',
     database: 'configured',
     wakeToken: 'configured',
+    scope: 'configured',
     domainTools: 'configured',
   },
   reachability: 'not_checked',
@@ -54,6 +55,7 @@ function wakeRig(readiness: () => Readiness = () => ready, accept = true) {
     store,
     readiness,
     target: {
+      canAccept: () => accept,
       wake: (c) => {
         if (!accept) return false;
         woken.push(c);
@@ -127,6 +129,7 @@ describe('authenticated wake command', () => {
       store: new InMemoryWakeCommandStore(),
       readiness: () => ready,
       target: {
+        canAccept: () => accepting,
         wake: (c) => {
           if (!accepting) return false;
           woken.push(c);
@@ -188,6 +191,9 @@ describe('readiness reporting', () => {
     EXPUNGE_MODEL_ID: 'gpt-5',
     MONGODB_DOMAIN_EXECUTOR_URI: 'mongodb://user:secret-password@host.example/db',
     EXPUNGE_WAKE_TOKEN: TOKEN,
+    EXPUNGE_TENANT_ID: 'tenant-1',
+    EXPUNGE_ENV: 'evaluation',
+    EXPUNGE_SCOPE_ID: 'scope-1',
   };
 
   it('is READY only when provider, database, wake token and domain tools are all present, and never echoes values', () => {
@@ -209,6 +215,7 @@ describe('readiness reporting', () => {
       'BLOCKED: provider credentials',
       'BLOCKED: database credentials',
       'BLOCKED: wake token',
+      'BLOCKED: scope binding',
     ]);
     const noKey = checkReadiness({ ...full, OPENAI_API_KEY: undefined }, { domainToolsAvailable: true });
     expect(noKey.blockers).toEqual([{ code: 'provider credentials', detail: 'Set OPENAI_API_KEY.' }]);
@@ -251,5 +258,23 @@ describe('worker configuration bounds', () => {
     expect(() => workerConfigFromEnv({ EXPUNGE_WORKER_LEASE_MS: '999999' })).toThrow();
     expect(() => workerConfigFromEnv({ EXPUNGE_WORKER_MAX_CONCURRENT: '0' })).toThrow();
     expect(() => workerConfigFromEnv({ EXPUNGE_WORKER_ID: 'bad id!' })).toThrow();
+  });
+
+  it('binds the worker to one scope from trusted configuration, all-or-nothing', () => {
+    expect(workerConfigFromEnv({}).scope).toBeUndefined();
+    expect(
+      workerConfigFromEnv({ EXPUNGE_TENANT_ID: 't', EXPUNGE_ENV: 'demo', EXPUNGE_SCOPE_ID: 's' }).scope,
+    ).toEqual({ tenantId: 't', env: 'demo', scopeId: 's' });
+    expect(() => workerConfigFromEnv({ EXPUNGE_TENANT_ID: 't' })).toThrow(/must be set together/);
+    expect(() =>
+      workerConfigFromEnv({ EXPUNGE_TENANT_ID: 't', EXPUNGE_ENV: 'prod', EXPUNGE_SCOPE_ID: 's' }),
+    ).toThrow(/EXPUNGE_ENV/);
+  });
+  it('bounds the recovery poll and parses the pricing requirement', () => {
+    expect(workerConfigFromEnv({}).pollMs).toBe(5000);
+    expect(workerConfigFromEnv({ EXPUNGE_WORKER_POLL_MS: '0' }).pollMs).toBe(0);
+    expect(() => workerConfigFromEnv({ EXPUNGE_WORKER_POLL_MS: '10' })).toThrow(/EXPUNGE_WORKER_POLL_MS/);
+    expect(workerConfigFromEnv({ EXPUNGE_WORKER_REQUIRE_PRICING: 'true' }).requirePricing).toBe(true);
+    expect(workerConfigFromEnv({}).requirePricing).toBe(false);
   });
 });

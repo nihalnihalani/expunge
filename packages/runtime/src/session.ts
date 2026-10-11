@@ -6,12 +6,15 @@ import type { Subscriber, Subscription } from 'rxjs';
 import { filterModelStateEvent, stripProtectedKeys } from './authority.js';
 import { RuntimeError, JobWaitSignal, errorCode, isFenceLoss, type RuntimeErrorCode } from './errors.js';
 import { releaseLease } from './lease-release.js';
+import { UsageMeter } from './meter.js';
+import { profileFingerprint } from './models.js';
 import { defaultWorkerPrompt } from './prompt.js';
 import type {
   ExecutionBinding,
   ExecutionDependencies,
   PhaseInfo,
   RunEnd,
+  RunProvenance,
   RunStats,
   WaitStatus,
 } from './ports.js';
@@ -64,6 +67,8 @@ export class RunSession {
   private bundle?: HarnessBundle;
   private job?: Job;
   private usage: unknown;
+  private meter?: UsageMeter;
+  private provenance?: Omit<RunProvenance, 'provider' | 'model'>;
   private stepLimitReached = false;
   private stepLimitNoteExpected = false;
   /** In-flight tool executions (the tool's own promise, not the bounded wrapper). R2: awaited before the lease is released. */
@@ -128,9 +133,30 @@ export class RunSession {
       } catch (error) {
         throw new RuntimeError('ModelUnavailable', { cause: error });
       }
+      const meter = new UsageMeter(bundle.limits, selection.pricing, this.deps.requirePricing ?? false);
+      this.meter = meter;
+      this.provenance = {
+        spec: selection.spec,
+        adapterInjected: selection.textAdapter !== undefined,
+        profileHash: profileFingerprint(selection.spec, selection.pricing),
+        boundWorkerProfileHash: job.binding.workerProfileHash,
+      };
       this.inner = tanstackAgent({
         model: selection.spec,
         textAdapter: selection.textAdapter,
+        // Per-call metering: tokens and cost are checked as each model call ends, not only at run end.
+        onModelCall: (call) => {
+          const verdict = meter.record(call.usage);
+          if (!verdict.ok)
+            this.fail(
+              verdict.code,
+              verdict.code === 'TokenBudgetExceeded'
+                ? 'token_budget'
+                : verdict.code === 'CostBudgetExceeded'
+                  ? 'cost_budget'
+                  : 'error',
+            );
+        },
         env: this.deps.env,
         maxSteps: this.maxSteps,
         tools,
@@ -241,13 +267,21 @@ export class RunSession {
   }
 
   private scopedInput(): RunAgentInput {
-    const state = stripProtectedKeys(this.input.state ?? {});
-    if (state.removed.length)
-      this.deps.hooks?.onSecurityEvent?.({
-        kind: 'protected_state_ignored',
-        source: 'input_state',
-        paths: state.removed,
-      });
+    // Client state: dropped entirely unless the caller explicitly accepts it (then a denylist applies).
+    let state: unknown = {};
+    const supplied =
+      this.input.state && typeof this.input.state === 'object' ? Object.keys(this.input.state).length : 0;
+    if (this.deps.acceptClientState) {
+      const stripped = stripProtectedKeys(this.input.state ?? {});
+      state = stripped.value ?? {};
+      if (stripped.removed.length)
+        this.deps.hooks?.onSecurityEvent?.({
+          kind: 'protected_state_ignored',
+          source: 'input_state',
+          paths: stripped.removed,
+        });
+    } else if (supplied > 0)
+      this.deps.hooks?.onSecurityEvent?.({ kind: 'client_state_dropped', keys: supplied });
     const systemMessages = this.input.messages.filter(
       (message) => message.role === 'system' || message.role === 'developer',
     ).length;
@@ -257,7 +291,7 @@ export class RunSession {
       this.deps.hooks?.onSecurityEvent?.({ kind: 'client_input_dropped', systemMessages, clientTools });
     return {
       ...this.input,
-      state: state.value ?? {},
+      state,
       // Authority-shaped client properties never reach the inner agent.
       forwardedProps: {},
     };
@@ -313,6 +347,7 @@ export class RunSession {
             toolCalls: this.toolCalls,
             outcome,
             elapsedMs: Date.now() - started,
+            ...(this.inner?.identity ? { model: this.inner.identity } : {}),
           });
           if (verdict === 'stop') this.stopRequested = true;
         } catch (error) {
@@ -451,17 +486,28 @@ export class RunSession {
    */
   private async emitTerminalFromReceipt(): Promise<void> {
     const { job, bundle } = this;
-    if (!job || !bundle || bundle.completionPolicy !== 'verified_receipt' || !this.deps.receipts) return;
+    if (!job || !bundle) return;
+    const policy = bundle.completionPolicy;
+    // The model's words are never authoritative under either policy. Label them accordingly.
+    const narrativeLabel =
+      policy === 'model_narrative'
+        ? ('untrusted_narrative' as const)
+        : ('model_output_not_authoritative' as const);
     let receipt = null;
-    try {
-      receipt = await this.deps.receipts.find(this.binding.actor, {
-        jobId: job._id,
-        runId: job.binding.runId,
-        harnessHash: job.binding.harnessHash,
-      });
-    } catch (error) {
-      this.deps.hooks?.onHookError?.('receipt-read', error);
+    let readable = Boolean(this.deps.receipts);
+    if (this.deps.receipts) {
+      try {
+        receipt = await this.deps.receipts.find(this.binding.actor, {
+          jobId: job._id,
+          runId: job.binding.runId,
+          harnessHash: job.binding.harnessHash,
+        });
+      } catch (error) {
+        readable = false;
+        this.deps.hooks?.onHookError?.('receipt-read', error);
+      }
     }
+    const common = { completionPolicy: policy, narrativeLabel, modelNarrativeAuthoritative: false as const };
     const value = receipt
       ? {
           source: 'committed_receipt' as const,
@@ -474,17 +520,26 @@ export class RunSession {
           excludedOrRetainedRecords: receipt.excludedOrRetainedRecords,
           externalErasureStatus: receipt.externalErasureStatus,
           limitations: receipt.limitations,
-          modelNarrativeAuthoritative: false as const,
+          ...common,
         }
-      : { source: 'no_committed_receipt' as const, modelNarrativeAuthoritative: false as const };
+      : {
+          source: readable ? ('no_committed_receipt' as const) : ('receipt_status_unavailable' as const),
+          ...common,
+        };
+    const prefix =
+      policy === 'model_narrative'
+        ? 'Completion policy: model_narrative. The model text above is an untrusted narrative, not a completion record.\n'
+        : '';
     const text = receipt
       ? [
-          `Committed receipt ${receipt.receiptId}: ${receipt.domainStatus}.`,
+          `${prefix}Committed receipt ${receipt.receiptId}: ${receipt.domainStatus}.`,
           `Scope ${receipt.scopeId} at revision ${receipt.scopeRevision}; verified world revision ${receipt.verifiedWorldRevision}.`,
           `Operational residuals: ${receipt.operationalResiduals}. Retained or excluded records: ${receipt.excludedOrRetainedRecords}. External erasure: ${receipt.externalErasureStatus}.`,
           ...receipt.limitations.map((limitation) => `Limitation: ${limitation}`),
         ].join('\n')
-      : 'No completion receipt is committed for this job. Any statement of completion above is unverified model output.';
+      : readable
+        ? `${prefix}No completion receipt is committed for this job. Any statement of completion above is unverified model output.`
+        : `${prefix}Receipt status could not be read. Any statement of completion above is unverified model output.`;
     this.emit({ type: EventType.CUSTOM, name: 'expunge.terminal_status', value } as unknown as BaseEvent);
     this.emit({
       type: EventType.TEXT_MESSAGE_CHUNK,
@@ -570,6 +625,15 @@ export class RunSession {
         ? { narrative: { sha256: this.narrative.digest('hex'), length: this.narrativeLength } }
         : {}),
       ...(abandonedTools > 0 ? { abandonedTools } : {}),
+      ...(this.meter ? { metered: this.meter.summary() } : {}),
+      ...(this.provenance
+        ? {
+            provenance: {
+              ...this.provenance,
+              ...(this.inner?.identity ?? {}),
+            },
+          }
+        : {}),
       release,
     };
   }

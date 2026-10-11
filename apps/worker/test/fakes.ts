@@ -6,8 +6,10 @@ import {
   assertJobAccess,
   type ActorContext,
   type Job,
+  type JobKind,
   type JobStatus,
   type JsonValue,
+  type ScopeKey,
 } from '@expunge/contracts';
 import { ProtocolError } from '@expunge/mongo';
 import type { LeaseBinding, WaitStatus } from '@expunge/runtime';
@@ -18,10 +20,6 @@ export class MultiJobStore implements DispatchJobs, JobResolver {
   readonly calls: Array<{ method: string; jobId: string; args: unknown[] }> = [];
   readonly checkpoints = new Map<string, JsonValue[]>();
   readonly contextInputs = new Map<string, string[]>();
-  /** Pass false to model a repository without recordContextInputs (the PARTIAL fallback path). */
-  constructor(withContextInputs = true) {
-    if (!withContextInputs) (this as { recordContextInputs?: unknown }).recordContextInputs = undefined;
-  }
   add(job: Job): Job {
     this.jobs.set(job._id, job);
     return job;
@@ -98,6 +96,29 @@ export class MultiJobStore implements DispatchJobs, JobResolver {
     for (const hash of hashes) if (!list.includes(hash)) list.push(hash);
     this.contextInputs.set(lease.jobId, list);
     return hashes;
+  }
+  async release(_actor: ActorContext, lease: LeaseBinding): Promise<void> {
+    this.rec('release', lease.jobId);
+    const job = this.live(lease);
+    job.status = 'queued';
+    job.lease.until = new Date(0);
+  }
+  async listClaimable(
+    key: ScopeKey,
+    limit = 25,
+  ): Promise<Array<{ jobId: string; kind: JobKind; priority: number }>> {
+    this.rec('listClaimable', '', key, limit);
+    return [...this.jobs.values()]
+      .filter(
+        (job) =>
+          job.actor.tenantId === key.tenantId &&
+          job.actor.env === key.env &&
+          job.actor.scopeId === key.scopeId &&
+          !job.cancellationRequested &&
+          (job.status === 'queued' || (job.status === 'running' && job.lease.until.getTime() <= Date.now())),
+      )
+      .slice(0, limit)
+      .map((job) => ({ jobId: job._id, kind: job.kind, priority: job.priority }));
   }
   async yield(_actor: ActorContext, lease: LeaseBinding, status: WaitStatus): Promise<void> {
     this.rec('yield', lease.jobId, status);

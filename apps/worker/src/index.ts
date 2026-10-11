@@ -1,10 +1,15 @@
 import { pathToFileURL } from 'node:url';
 import type { Server } from 'node:http';
 import { workerConfigFromEnv, type WorkerConfig } from './config.js';
-import { Dispatcher, RingEventSink, type LogEntry } from './dispatch.js';
+import { Dispatcher, type LogEntry } from './dispatch.js';
 import { loadDomainTools } from './domain-tools.js';
 import { checkReadiness, type Readiness } from './readiness.js';
-import { InMemoryWakeCommandStore, createWakeServer, type WakeTarget } from './wake.js';
+import {
+  InMemoryWakeCommandStore,
+  createWakeServer,
+  type WakeCommandStore,
+  type WakeTarget,
+} from './wake.js';
 import { createMongoWiring } from './wiring.js';
 
 export * from './config.js';
@@ -36,10 +41,12 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
   for (const line of readiness.lines) console.log(line);
 
   let dispatcher: Dispatcher | undefined;
+  let wakeStore: WakeCommandStore = new InMemoryWakeCommandStore();
   let closeMongo: (() => Promise<void>) | undefined;
   if (readiness.status === 'READY') {
     const wiring = createMongoWiring(env);
     closeMongo = () => wiring.service.close();
+    wakeStore = wiring.wakeStore;
     dispatcher = new Dispatcher({
       jobs: wiring.jobs,
       resolver: wiring.resolver,
@@ -49,14 +56,18 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
       receipts: wiring.receipts,
       config,
       env,
-      events: new RingEventSink(),
+      projection: wiring.projection,
       log: logEntry,
     });
+    dispatcher.startPolling();
   }
-  const target: WakeTarget = { wake: (command) => dispatcher?.wake(command) ?? false };
+  const target: WakeTarget = {
+    canAccept: () => dispatcher?.canAccept() ?? false,
+    wake: (command) => dispatcher?.wake(command) ?? false,
+  };
   const server = createWakeServer({
     token: env.EXPUNGE_WAKE_TOKEN ?? '',
-    store: new InMemoryWakeCommandStore(),
+    store: wakeStore,
     target,
     readiness: () => readiness,
   });

@@ -3,7 +3,12 @@ import { providerReadiness } from '@expunge/runtime';
 
 export type Blocker = {
   code:
-    'provider credentials' | 'model configuration' | 'database credentials' | 'wake token' | 'domain tools';
+    | 'provider credentials'
+    | 'model configuration'
+    | 'database credentials'
+    | 'wake token'
+    | 'scope binding'
+    | 'domain tools';
   detail: string;
 };
 
@@ -16,7 +21,7 @@ export type Readiness = {
    * What was actually checked. `configured` means the variable is present and well formed. Nothing here
    * asserts that Atlas or the provider is reachable or authorized; that needs a live probe.
    */
-  checks: Record<'provider' | 'database' | 'wakeToken' | 'domainTools', 'configured' | 'blocked'>;
+  checks: Record<'provider' | 'database' | 'wakeToken' | 'scope' | 'domainTools', 'configured' | 'blocked'>;
   reachability: 'not_checked';
 };
 
@@ -42,6 +47,12 @@ export function checkReadiness(
       code: 'wake token',
       detail: `Set EXPUNGE_WAKE_TOKEN to at least ${MIN_WAKE_TOKEN_LENGTH} characters (operator to worker wake commands only).`,
     });
+  if (!env.EXPUNGE_TENANT_ID?.trim() || !env.EXPUNGE_ENV?.trim() || !env.EXPUNGE_SCOPE_ID?.trim())
+    blockers.push({
+      code: 'scope binding',
+      detail:
+        'Set EXPUNGE_TENANT_ID, EXPUNGE_ENV and EXPUNGE_SCOPE_ID: the worker serves one scope, polls only that scope for crashed-worker recovery and refuses jobs outside it.',
+    });
   if (!options.domainToolsAvailable)
     blockers.push({
       code: 'domain tools',
@@ -61,6 +72,7 @@ export function checkReadiness(
       provider: blocked(['provider credentials', 'model configuration']),
       database: blocked(['database credentials']),
       wakeToken: blocked(['wake token']),
+      scope: blocked(['scope binding']),
       domainTools: blocked(['domain tools']),
     },
     reachability: 'not_checked',
