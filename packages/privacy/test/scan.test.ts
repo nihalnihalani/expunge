@@ -116,7 +116,11 @@ describe('enforcement: immutability and content addressing are not an exemption'
       ],
       guard,
     );
-    const actions = await enforceScan({ eligibility, retraction: runner, purger }, SCOPE, report);
+    const actions = await enforceScan(
+      { eligibility, retraction: runner, purger, policyHash: 'f'.repeat(64) },
+      SCOPE,
+      report,
+    );
     expect(actions.map((a) => [a.artifactId, a.action])).toEqual([
       ['lesson-bad', 'retracted'],
       ['lesson-old', 'bytes_purged'], // P34-2: revoked is not removed

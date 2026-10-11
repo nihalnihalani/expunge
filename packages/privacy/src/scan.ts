@@ -74,7 +74,13 @@ export type EnforcementAction =
  * found it, never the matched text.
  */
 export async function enforceScan(
-  deps: { eligibility: EligibilityStore; retraction: RetractionRunner; purger: ContentPurger },
+  deps: {
+    eligibility: EligibilityStore;
+    retraction: RetractionRunner;
+    purger: ContentPurger;
+    /** The policy hash a tombstone records for bytes removed from an already inactive artifact (the row's own wins). */
+    policyHash: string;
+  },
   scope: ScopeKey,
   report: ScanReport,
 ): Promise<EnforcementAction[]> {
@@ -96,6 +102,7 @@ export async function enforceScan(
             violation.artifactId,
             violation.kind,
             `scan_${violation.code}`,
+            { policyHash: row?.policyHash ?? deps.policyHash, closureId: null },
           ),
         });
         continue;

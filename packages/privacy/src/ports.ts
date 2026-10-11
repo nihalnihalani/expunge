@@ -192,5 +192,7 @@ export interface ContentPurger {
     artifactId: string,
     kind: ArtifactKind,
     reasonCode: string,
+    /** What the tombstone must record: the retraction's policy hash and the provenance closure that reached the content. */
+    extra: { policyHash: string; closureId: string | null },
   ): Promise<'purged' | 'tombstoned' | 'not_found'>;
 }

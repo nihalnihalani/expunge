@@ -2,6 +2,7 @@ export * from './bundle.js';
 export * from './evidence.js';
 export * from './mcp.js';
 export * from './outbox-dispatcher.js';
+export * from './mongo-suppression.js';
 export * from './query-client.js';
 export * from './scan.js';
 export * from './process.js';

@@ -48,10 +48,13 @@ between phases and finalizes the job from committed state only.
   succeeds is not a failure; one that fails on the last attempt is `ModelUnavailable`. The SDK client timeout (600 s) is above every phase
   timeout the runtime allows, so a slow call is ended by the phase watchdog as `PhaseTimeout` (behaviour); an SDK-side timeout that still
   arrives is classified `ModelRunFailed`.
-- **Retries are recorded; a timeout during provider backoff is infrastructure.** A counting `fetch` on the provider client records,
-  per run, the HTTP attempts and the retriable statuses seen (numbers only), into the run stats, the terminal checkpoint
-  (`terminal.providerAttempts`) and the episode result (`providerRetries`). If the phase watchdog fires while the SDK is between
-  attempts (the last response was a retriable status or a connection error and attempts remain), the run ends as `ModelUnavailable`
-  with `failureDetail: 'phase_timeout_during_provider_backoff'`, not `PhaseTimeout`. A call the provider simply never answers within
-  the phase budget stays `PhaseTimeout`.
-
+- **Retries are recorded; a timeout in a window with provider backoff is infrastructure.** A counting `fetch` on the provider client
+  records, per job, the HTTP attempts and the retriable statuses seen (numbers only) into the run stats, the terminal checkpoint
+  (`terminal.providerAttempts`), the episode result (`providerRetries`) and the job's meter carry (`checkpoint.meter.provider`), so a
+  takeover continues the totals instead of restarting them. A per-watchdog-window flag is set by a 429, a 5xx or a connection error
+  (never by 408 or 409, which stay behaviour) and cleared whenever the runtime re-arms its phase watchdog (every model event and every
+  tool phase). If the watchdog fires while the flag is set, the run ends as `ModelUnavailable` with
+  `failureDetail: 'phase_timeout_during_provider_backoff'`, not `PhaseTimeout`: retry-after backoff plus the retried call is the provider's
+  delay. A call the provider never answers within the window, or a stall after a reply that re-armed the watchdog, stays `PhaseTimeout`.
+  Disclosed: the recorder decides from the HTTP status alone, so it ignores an `x-should-retry` response header the SDK may honour to
+  override its own retry decision; a provider that sets it can make the recorded attempts differ from what the SDK did.
