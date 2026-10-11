@@ -31,6 +31,12 @@ export interface DispatchJobs extends JobPort {
   recordContextInputs(actor: ActorContext, lease: LeaseBinding, hashes: string[]): Promise<string[]>;
   /** Graceful release by the lease owner: running -> queued, lease ended, no fence bump. */
   release(actor: ActorContext, lease: LeaseBinding): Promise<void>;
+  /**
+   * Throws `HarnessNotDeployed` unless the scope's deployment pointer names the job's pinned harness now (cleanup jobs
+   * only; the repository itself skips campaign worlds and other kinds). Called after the claim and before any model or tool
+   * call, so a rollback or promotion between creating and claiming a job stops it before it acts.
+   */
+  assertHarnessDeployed(actor: ActorContext, jobId: string): Promise<void>;
   /** `JobRepository.finish` also accepts the caller's transaction, which lets a telemetry intent commit with the state. */
   finish(
     actor: ActorContext,
@@ -115,6 +121,8 @@ export type DispatcherDeps = {
   config: WorkerConfig;
   env?: ProviderEnv;
   projection?: ProjectionSink;
+  /** Hash of the runtime bytes this process loaded (`runtimeHash()` from @expunge/runtime), written into each claimed run's checkpoint. */
+  runtimeHash?: string;
   /** Enables the startup repair of terminal projections lost on a crash (needs `projection`). */
   terminalSweep?: TerminalSweep;
   /** Raindrop episodes. Optional and best effort: it never changes how a job runs or ends. */
@@ -229,8 +237,14 @@ class CheckpointWriter {
     private readonly lease: LeaseBinding,
     /** The cumulative meter an earlier session committed (checkpoint.meter): kept in every snapshot, never reset. */
     priorMeter?: JsonValue,
+    /** This build's observed runtime hash: kept in every snapshot, terminal included. */
+    attestedRuntimeHash?: string,
   ) {
-    this.state = { v: 1, ...(priorMeter !== undefined ? { meter: priorMeter } : {}) };
+    this.state = {
+      v: 1,
+      ...(priorMeter !== undefined ? { meter: priorMeter } : {}),
+      ...(attestedRuntimeHash ? { attestedRuntimeHash } : {}),
+    };
   }
   update(patch: Record<string, JsonValue>): Promise<void> {
     this.state = { ...this.state, ...patch };
@@ -240,15 +254,10 @@ class CheckpointWriter {
     return write;
   }
   replace(value: JsonValue): Promise<void> {
-    // A full replacement (the terminal checkpoint) must not drop the job's meter either.
-    if (
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      !('meter' in value) &&
-      'meter' in this.state
-    )
-      value = { ...value, meter: this.state.meter as JsonValue };
+    // A full replacement (the terminal checkpoint) must not drop the job's meter or the attested runtime hash.
+    if (value && typeof value === 'object' && !Array.isArray(value))
+      for (const key of ['meter', 'attestedRuntimeHash'] as const)
+        if (!(key in value) && key in this.state) value = { ...value, [key]: this.state[key] as JsonValue };
     const write = this.chain.then(() => this.jobs.checkpoint(this.actor, this.lease, value));
     this.chain = write.catch(() => undefined);
     return write;
@@ -416,6 +425,8 @@ export class Dispatcher implements WakeTarget {
       await jobs.release(actor, lease).catch(() => undefined);
       return { jobId, outcome: 'released', reason: 'worker_stopping' };
     }
+    const refusal = await this.refuseIfNotDeployed(actor, lease, claimed);
+    if (refusal) return refusal;
     await this.project(
       actor,
       {
@@ -441,6 +452,71 @@ export class Dispatcher implements WakeTarget {
     return this.deps.telemetry ? this.deps.telemetry.episode(claimed, carrier, execute) : execute();
   }
 
+  /**
+   * After the claim and before any model or tool call: the job's pinned harness must still be the deployed one. A refusal
+   * is a committed failure (terminal checkpoint with the reason, job `failed`, no effects). Any other error from the check
+   * hands the job back untouched, because "could not check" is not "not deployed".
+   */
+  private async refuseIfNotDeployed(
+    actor: ActorContext,
+    lease: LeaseBinding,
+    claimed: Job,
+  ): Promise<JobRunResult | null> {
+    const { jobs } = this.deps;
+    const jobId = lease.jobId;
+    try {
+      await jobs.assertHarnessDeployed(actor, jobId);
+      return null;
+    } catch (error) {
+      if (errorCode(error) !== 'HarnessNotDeployed') {
+        this.log({
+          level: 'warn',
+          message: 'deployment check failed; job handed back',
+          jobId,
+          code: errorCode(error),
+        });
+        await jobs.release(actor, lease).catch(() => undefined);
+        return { jobId, outcome: 'released', reason: 'deployment_check_failed' };
+      }
+    }
+    const meter = (claimed.checkpoint as { meter?: JsonValue } | null)?.meter;
+    try {
+      await jobs.checkpoint(actor, lease, {
+        v: 1,
+        ...(meter !== undefined ? { meter } : {}),
+        ...(this.deps.runtimeHash ? { attestedRuntimeHash: this.deps.runtimeHash } : {}),
+        terminal: {
+          endedBy: 'refused_at_start',
+          toolCalls: 0,
+          phases: 0,
+          elapsedMs: 0,
+          decision: { status: 'failed', reason: 'HarnessNotDeployed' },
+        },
+      });
+      await jobs.finish(actor, lease, 'failed', []);
+    } catch (error) {
+      this.log({
+        level: 'error',
+        message: 'could not finalize a refused job',
+        jobId,
+        code: errorCode(error),
+      });
+      return { jobId, outcome: 'unfinalized', reason: errorCode(error) };
+    }
+    this.log({
+      level: 'warn',
+      message: 'job refused: pinned harness is not the deployed one',
+      jobId,
+      code: 'HarnessNotDeployed',
+    });
+    await this.project(
+      actor,
+      failedEvent(jobId, claimed.binding.runId, claimed.attempt, 'HarnessNotDeployed'),
+      lease,
+    );
+    return { jobId, outcome: 'failed', reason: 'HarnessNotDeployed' };
+  }
+
   private async execute(
     ctx: { jobId: string; actor: ActorContext; lease: LeaseBinding; claimed: Job },
     episode?: EpisodeHandle,
@@ -450,7 +526,15 @@ export class Dispatcher implements WakeTarget {
     // Defensive: onPhaseComplete already carries the meter, but a snapshot written before the first phase (or a
     // replace()) must never drop what an earlier session committed.
     const priorMeter = (claimed.checkpoint as { meter?: JsonValue } | null)?.meter;
-    const writer = new CheckpointWriter(jobs, actor, lease, priorMeter);
+    const writer = new CheckpointWriter(jobs, actor, lease, priorMeter, this.deps.runtimeHash);
+    // Observed, not supplied by any caller: written at claim time so the run's committed checkpoint names the build.
+    if (this.deps.runtimeHash) {
+      try {
+        await writer.update({});
+      } catch (error) {
+        this.log({ level: 'warn', message: 'attestation checkpoint failed', jobId, code: errorCode(error) });
+      }
+    }
     const hooks: ExecutionHooks = {
       onContextInputs: async (hashes) => void (await jobs.recordContextInputs(actor, lease, hashes)),
       onPhaseComplete: async (info) => {

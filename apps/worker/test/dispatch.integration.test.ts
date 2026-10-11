@@ -26,6 +26,7 @@ import {
   openEnvironment,
   waitFor,
   type LiveEnvironment,
+  deployWorker,
 } from '../../../packages/mongo/test/support.js';
 import { FakeToolProvider, FixedModelResolver, makeBundle } from '../../../packages/runtime/test/fakes.js';
 import {
@@ -60,7 +61,7 @@ describeLive('Dispatcher with the real JobRepository (local replica-set protocol
   }, 30_000);
   beforeEach(async () => {
     await env.reset();
-    await new ArtifactRepository(setup).insert(bundle);
+    await deployWorker(setup, bundle); // stores the artifact and points the scope's deployment at it
     await setup.control.collection('artifact_eligibility').insertOne({
       tenantId: actor.tenantId,
       env: actor.env,
@@ -130,6 +131,44 @@ describeLive('Dispatcher with the real JobRepository (local replica-set protocol
     expect(job.checkpoint.terminal.decision).toEqual({ status: 'failed', reason: 'NoCompletionReceipt' });
     expect(JSON.stringify(job.checkpoint)).not.toContain('All records deleted');
     expect(fake.turnsConsumed).toBe(2);
+  });
+
+  it('refuses to start a job whose pinned harness stopped being the deployed one between create and claim: a committed failure, no model call, no effect', async () => {
+    const id = await createJob(setup, { harnessHash });
+    // A rollback or promotion moves the scope's deployment pointer after the job was created.
+    const moved = await setup.control
+      .collection('deployments')
+      .updateMany({ tenantId: actor.tenantId, env: actor.env, scopeId: actor.scopeId } as never, {
+        $set: { activeHash: 'e'.repeat(64) },
+      });
+    expect(moved.modifiedCount).toBe(1);
+    let toolRan = false;
+    const { dispatcher, fake } = dispatcherFor(
+      [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('never')],
+      () => [
+        defineTool({
+          name: 'echo',
+          description: 'e',
+          parameters: z.object({ v: z.number() }),
+          execute: async () => ((toolRan = true), { ok: true }),
+        }),
+      ],
+    );
+    const result = await dispatcher.runJob(id);
+    expect(result).toMatchObject({ outcome: 'failed', reason: 'HarnessNotDeployed' });
+    expect(fake.turnsConsumed).toBe(0);
+    expect(toolRan).toBe(false);
+    const job = await stored(id);
+    expect(job.status).toBe('failed');
+    expect(job.checkpoint.terminal.decision).toEqual({ status: 'failed', reason: 'HarnessNotDeployed' });
+    expect(job.contextInputs ?? []).toEqual([]); // nothing was placed in model context
+    const events = await new ProjectionRepository(setup).read(
+      { tenantId: actor.tenantId, env: actor.env, scopeId: actor.scopeId },
+      0,
+      id,
+    );
+    expect(events.map((e) => e.kind)).toEqual(['job_failed']);
+    expect(events[0]?.payload).toMatchObject({ code: 'policy_denied', message: 'HarnessNotDeployed' });
   });
 
   it('refuses to run when the pinned harness is not permitted in the job scope', async () => {

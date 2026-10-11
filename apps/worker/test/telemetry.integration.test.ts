@@ -29,6 +29,7 @@ import {
   liveSuite,
   openEnvironment,
   type LiveEnvironment,
+  deployWorker,
 } from '../../../packages/mongo/test/support.js';
 import { FakeRaindrop } from '../../../packages/observability/test/fake-raindrop.js';
 import { FakeToolProvider, FixedModelResolver, makeBundle } from '../../../packages/runtime/test/fakes.js';
@@ -69,7 +70,7 @@ describeLive(
     beforeEach(async () => {
       fake.reset();
       await env.reset();
-      await new ArtifactRepository(setup).insert(bundle);
+      await deployWorker(setup, bundle); // stores the artifact and points the scope's deployment at it
       await setup.control.collection('artifact_eligibility').insertOne({
         tenantId: actor.tenantId,
         env: actor.env,

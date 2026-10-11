@@ -1,8 +1,9 @@
 import { pathToFileURL } from 'node:url';
 import type { Server } from 'node:http';
 import { workerConfigFromEnv, type WorkerConfig } from './config.js';
+import { runtimeHash } from '@expunge/runtime';
 import { Dispatcher, type LogEntry } from './dispatch.js';
-import { loadDomainTools } from './domain-tools.js';
+import { createDomainToolWiring } from './domain-wiring.js';
 import { checkReadiness, type Readiness } from './readiness.js';
 import {
   InMemoryWakeCommandStore,
@@ -15,7 +16,9 @@ import { createMongoWiring, createTelemetryWiring } from './wiring.js';
 export * from './committed.js';
 export * from './config.js';
 export * from './dispatch.js';
-export * from './domain-tools.js';
+export * from './domain-wiring.js';
+export * from './episode-host.js';
+export * from './episode-port.js';
 export * from './readiness.js';
 export * from './receipts.js';
 export * from './telemetry.js';
@@ -38,8 +41,9 @@ const logEntry = (entry: LogEntry) => console.log(JSON.stringify({ at: new Date(
  */
 export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise<RunningWorker> {
   const config = workerConfigFromEnv(env);
-  const tools = loadDomainTools();
-  const readiness = checkReadiness(env, { domainToolsAvailable: tools.available });
+  // The typed gateway tools are built in-process from the worker's own domain_executor client; their availability is
+  // static (the module is part of the worker), so readiness only blocks on configuration.
+  const readiness = checkReadiness(env, { domainToolsAvailable: true });
   for (const line of readiness.lines) console.log(line);
   for (const note of readiness.notes ?? []) console.log(`NOTE: ${note}`);
 
@@ -57,7 +61,8 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
       jobs: wiring.jobs,
       resolver: wiring.resolver,
       artifacts: wiring.artifacts,
-      tools: tools.provider,
+      tools: createDomainToolWiring(wiring.service, { log: logEntry }).provider,
+      runtimeHash: runtimeHash(),
       models: wiring.models,
       receipts: wiring.receipts,
       config,
@@ -101,7 +106,7 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
 async function main(): Promise<void> {
   if (process.argv.includes('--readiness')) {
     // Readiness only: no network, no database, no secret values printed.
-    const readiness = checkReadiness(process.env, { domainToolsAvailable: loadDomainTools().available });
+    const readiness = checkReadiness(process.env, { domainToolsAvailable: true });
     for (const line of readiness.lines) console.log(line);
     for (const note of readiness.notes ?? []) console.log(`NOTE: ${note}`);
     console.log(

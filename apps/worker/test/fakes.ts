@@ -20,6 +20,9 @@ export class MultiJobStore implements DispatchJobs, JobResolver {
   readonly calls: Array<{ method: string; jobId: string; args: unknown[] }> = [];
   readonly checkpoints = new Map<string, JsonValue[]>();
   readonly contextInputs = new Map<string, string[]>();
+  /** Job ids whose pinned harness is not the deployed one, and ids whose deployment check itself fails. */
+  readonly undeployed = new Set<string>();
+  readonly deploymentCheckFails = new Set<string>();
   add(job: Job): Job {
     this.jobs.set(job._id, job);
     return job;
@@ -102,6 +105,11 @@ export class MultiJobStore implements DispatchJobs, JobResolver {
     const job = this.live(lease);
     job.status = 'queued';
     job.lease.until = new Date(0);
+  }
+  async assertHarnessDeployed(_actor: ActorContext, jobId: string): Promise<void> {
+    this.rec('assertHarnessDeployed', jobId);
+    if (this.deploymentCheckFails.has(jobId)) throw new ProtocolError('DeploymentLookupFailed');
+    if (this.undeployed.has(jobId)) throw new ProtocolError('HarnessNotDeployed');
   }
   async listClaimable(
     key: ScopeKey,
