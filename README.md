@@ -2,31 +2,30 @@
 
 # Expunge
 
-**A database-cleanup agent that learns where records hide, rewrites its own harness, and has to prove its work to MongoDB.**<br/>
-A fixed model cleans a subject out of a MongoDB dataset. An independent grader catches what it missed. Raindrop evidence feeds a typed harness change. A gate tests it on fresh paired worlds, and MongoDB promotes only a version that cleans more **without** touching data it must keep.
+**A self-improving database-cleanup agent that learns where records hide and has to prove every cleanup to MongoDB.**<br/>
+A fixed model cleans a subject out of a MongoDB dataset. An independent grader catches what it missed. Raindrop evidence drives a typed change to the agent's own harness. A gate tests that change on fresh paired worlds, and MongoDB promotes only a version that cleans more **without** touching data it must keep.
 
-[![Statement One: Recursive Harnessing](https://img.shields.io/badge/Statement%20One-Recursive%20Harnessing-111827?style=for-the-badge)](#how-it-works)
-[![Data and control plane on MongoDB](https://img.shields.io/badge/Data%20%26%20control-MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](#mongodb-the-authority-layer)
-[![Traces on Raindrop](https://img.shields.io/badge/Traces-Raindrop-1E6FFF?style=for-the-badge)](#raindrop-evidence-for-the-improver)
-[![Operator on CopilotKit OpenDots](https://img.shields.io/badge/Operator-CopilotKit%20OpenDots-6430AB?style=for-the-badge)](#foundations-opendots-openmuse-openbot)
+[![Statement One: Recursive Harnessing](https://img.shields.io/badge/Statement%20One-Recursive%20Harnessing-111827?style=for-the-badge)](#hackathon-submission)
+[![Authority layer on MongoDB Atlas](https://img.shields.io/badge/Authority%20layer-MongoDB%20Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](#mongodb-the-authority-layer)
+[![Evidence from Raindrop](https://img.shields.io/badge/Evidence-Raindrop-1E6FFF?style=for-the-badge)](#raindrop-evidence-for-the-improver)
+[![Fixed model from OpenAI](https://img.shields.io/badge/Fixed%20model-OpenAI-412991?style=for-the-badge&logo=openai&logoColor=white)](#how-it-works)
 
 [![Harness surfaces](https://img.shields.io/badge/harness%20surfaces-4%20evolvable-6E40C9?style=flat-square)](#the-harness-what-evolves)
 [![Domain tools](https://img.shields.io/badge/domain%20tools-9-2EA44F?style=flat-square)](packages/domain/src/tools)
 [![Mongo principals](https://img.shields.io/badge/Mongo%20principals-10%20least--privilege-47A248?style=flat-square)](docs/expunge/DATA-MODEL.md#principals)
 [![Compiler rejection codes](https://img.shields.io/badge/compiler%20rejection%20codes-61-2EA44F?style=flat-square)](packages/harness-compiler)
-[![Live model run](https://img.shields.io/badge/live%20model%20run-pending-lightgrey?style=flat-square)](#project-status)
-[![Live Raindrop trace](https://img.shields.io/badge/live%20Raindrop%20trace-pending-lightgrey?style=flat-square)](#project-status)
+[![Grader](https://img.shields.io/badge/grader-independent%2C%20no%20LLM%20judge-2EA44F?style=flat-square)](packages/grader)
+[![Live loop](https://img.shields.io/badge/live%20loop-in%20progress-yellow?style=flat-square)](#project-status)
 <br/>
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)](tsconfig.json)
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A524.13-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](package.json)
 [![MongoDB driver](https://img.shields.io/badge/mongodb%20driver-7.7-47A248?style=flat-square&logo=mongodb&logoColor=white)](packages/mongo/package.json)
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](apps/operator)
-[![CopilotKit](https://img.shields.io/badge/CopilotKit-1.75-6430AB?style=flat-square)](apps/operator/package.json)
 [![Raindrop SDK](https://img.shields.io/badge/raindrop--ai-1.0.1-1E6FFF?style=flat-square)](packages/observability/package.json)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](apps/operator)
 [![Vitest](https://img.shields.io/badge/Vitest-4-6E9F18?style=flat-square&logo=vitest&logoColor=white)](vitest.config.ts)
-[![Sandbox](https://img.shields.io/badge/sandbox-Docker%20%2B%20OpenBot-2496ED?style=flat-square&logo=docker&logoColor=white)](infra/opendots)
+[![Sandbox](https://img.shields.io/badge/sandbox-Docker%2C%20default--deny%20egress-2496ED?style=flat-square&logo=docker&logoColor=white)](infra)
 
-[How it works](#how-it-works) · [Architecture](#architecture) · [The harness](#the-harness-what-evolves) · [MongoDB](#mongodb-the-authority-layer) · [Raindrop](#raindrop-evidence-for-the-improver) · [Quick start](#quick-start) · [Status](#project-status) · [Docs](#documentation)
+[Hackathon](#hackathon-submission) · [How it works](#how-it-works) · [Architecture](#architecture) · [The harness](#the-harness-what-evolves) · [MongoDB](#mongodb-the-authority-layer) · [Raindrop](#raindrop-evidence-for-the-improver) · [Quick start](#quick-start) · [Status](#project-status) · [Docs](#documentation)
 
 </div>
 
@@ -40,25 +39,42 @@ Expunge treats that failure as the training signal, under three rules:
 - **The harness evolves, not the model.** The model stays fixed. What changes is its harness: context policy, workflow graph, guardrails and tool access. Each change is a typed, evidence-cited patch that a trusted compiler can check.
 - **MongoDB holds the authority.** A candidate harness is admitted only by fresh paired trials against its parent. It is promoted only by an atomic compare-and-swap that consumes a bound human grant when authority expands. A version that cleans more but breaks protected or unrelated data is rejected.
 
+## Hackathon submission
+
+| | |
+|---|---|
+| **Event** | Harness Engineering & Model Wrangling Hackathon · Shack15, San Francisco · 11 October 2026 |
+| **Track** | Statement One: **Recursive Harnessing**. The agent rewrites its own rules, context policy, guardrails and tool access from measured failures. |
+| **MongoDB Atlas** | The authority layer: three databases, ten least-privilege principals, fenced exactly-once effects, compare-and-swap promotion, change streams |
+| **Raindrop** | The evidence layer: model and tool traces, read back through the Query API, are what every harness change must cite |
+| **Team** | [@nihalnihalani](https://github.com/nihalnihalani) · [@charliegillet](https://github.com/charliegillet) |
+
+How Expunge maps to the judging criteria:
+
+- **Technical demo.** The operator console shows each step of the loop as stored state: the incomplete receipt, the evidence bundle, the candidate's typed diff, the paired gate evaluation and the version lineage, including rejected candidates.
+- **Implementation difficulty.** It combines ten least-privilege MongoDB principals, fenced exactly-once effects, transactional promotion with grant consumption, and a trusted harness compiler with MongoDB/TypeScript parity and 61 rejection codes. A paired-trial gate holds out validation, protected and final splits.
+- **Impact.** Every organization that stores personal data eventually has to delete some of it. Expunge turns "deleted" into a verified, receipted claim, and improves its own procedure without weakening protections.
+- **Creativity.** The agent's harness evolves, not its weights, under a dual constraint: clean more, and damage nothing that must be kept.
+
 ## How it works
 
 | | Step | Powered by |
 |---|---|---|
-| **1** | **Request.** The owner asks for a subject to be cleaned. The job is created already pinned to the currently deployed harness version. | ![CopilotKit](https://img.shields.io/badge/-CopilotKit%20OpenDots-6430AB?style=flat-square) ![MongoDB](https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) |
-| **2** | **Clean.** The worker runs the fixed model through a gateway that enforces the harness. It exposes nine domain tools: resolve subject, inspect scope, discover references, preview, apply batch, verify registered scope, complete, inspect harness and report diagnostic. Every write is a fenced, exactly-once MongoDB transaction with a receipt. | ![OpenMuse](https://img.shields.io/badge/-OpenMuse%20port-111827?style=flat-square) ![MongoDB](https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) |
+| **1** | **Request.** The owner asks for a subject to be cleaned. The job is created already pinned to the currently deployed harness version. | ![Operator](https://img.shields.io/badge/-Operator%20console-111827?style=flat-square) ![MongoDB](https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) |
+| **2** | **Clean.** The worker runs the fixed model through a gateway that enforces the harness. It exposes nine domain tools: resolve subject, inspect scope, discover references, preview, apply batch, verify registered scope, complete, inspect harness and report diagnostic. Every write is a fenced, exactly-once MongoDB transaction with a receipt. | ![OpenAI](https://img.shields.io/badge/-OpenAI-412991?style=flat-square&logo=openai&logoColor=white) ![MongoDB](https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) |
 | **3** | **Grade.** The independent grader reads committed state and a sealed manifest. It reports targeted residuals, retention and preservation violations, unrelated-record changes, and whether the completion claim was truthful. | ![MongoDB](https://img.shields.io/badge/-MongoDB%20private%20DB-47A248?style=flat-square&logo=mongodb&logoColor=white) |
 | **4** | **Trace.** Model and tool spans flow through a transactional outbox to Raindrop. The observer reads them back through the Query API into a leak-guarded evidence bundle. | ![Raindrop](https://img.shields.io/badge/-Raindrop-1E6FFF?style=flat-square) |
 | **5** | **Propose.** The evolver writes a typed patch to one harness surface and cites the evidence IDs behind it. The trusted compiler validates it, classifies the authority change, and replays past decisions against it. | Expunge evolution + compiler |
 | **6** | **Gate.** Parent and candidate run on 38 fresh paired worlds with the same model, budget and fault plan, across train, validation and protected splits. The final split is never read. Admission needs at least two extra training successes, zero retention or preservation violations, and no protected regressions. | ![MongoDB](https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) |
-| **7** | **Promote.** An admitted candidate moves the deployment pointer in one MongoDB transaction, consuming a human grant when its authority class requires one. The next job is pinned to the new harness, and rollback is a stored receipt. | ![MongoDB](https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) ![CopilotKit](https://img.shields.io/badge/-HITL%20approval-6430AB?style=flat-square) |
+| **7** | **Promote.** An admitted candidate moves the deployment pointer in one MongoDB transaction, consuming a human grant when its authority class requires one. The next job is pinned to the new harness, and rollback is a stored receipt. | ![MongoDB](https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white) ![Operator](https://img.shields.io/badge/-Human%20approval-111827?style=flat-square) |
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-  subgraph OPERATOR["Operator · apps/operator · CopilotKit OpenDots fork"]
+  subgraph OPERATOR["Operator console · apps/operator"]
     UI["Expunge workbench<br/>Jobs · New cleanup · Workbench · Evidence<br/>Candidate · Evaluation · Receipt<br/>Lineage · Campaign · Privacy · Setup"]
-    CHAT["CopilotKit chat<br/>HITL proposal-review card"]
+    CHAT["Assistant chat<br/>human-in-the-loop proposal review"]
     OPSRV["Operator server<br/>owner auth · origin allowlist · readiness"]
   end
 
@@ -70,12 +86,12 @@ flowchart TB
 
   subgraph WORKER["Worker · apps/worker"]
     DISP["Durable dispatcher<br/>fenced leases · wake dedupe · crash recovery"]
-    AGENT["ExpungeExecutionAgent<br/>packages/runtime + OpenMuse port"]
+    AGENT["ExpungeExecutionAgent<br/>packages/runtime · provider adapters · metering"]
   end
 
   LLM(["Fixed model<br/>OpenAI or Anthropic"])
 
-  subgraph MONGO["MongoDB · packages/mongo · 10 least-privilege principals"]
+  subgraph MONGO["MongoDB Atlas · packages/mongo · 10 least-privilege principals"]
     WORLD[("world DB<br/>customers · accounts · messages<br/>events · notes · archives · invoices")]
     CTRL[("control DB<br/>jobs · effects · receipts · candidates<br/>gate reports · deployments · approvals<br/>telemetry outbox · projection events")]
     PRIV[("private DB<br/>sealed post-states · preservation hashes<br/>held-out assignments")]
@@ -96,7 +112,7 @@ flowchart TB
     DEP["Deployment<br/>CAS promotion · rollback"]
   end
 
-  SBX["OpenBot candidate computer<br/>infra/opendots · default-deny egress"]
+  SBX["Candidate sandbox<br/>infra · default-deny egress"]
 
   UI --> OPSRV
   CHAT --> OPSRV
@@ -130,7 +146,7 @@ flowchart TB
   class GATE,DEP,SBX wip
 ```
 
-<sub>Dashed boxes are built but not yet merged to `main`: the gate and deployment services (`packages/gate`, `packages/deployment`) and the sandboxed plugin path (`packages/plugin-sandbox`). The candidate-computer overlay in `infra/opendots` is on `main`.</sub>
+<sub>Dashed boxes are built but still being merged to `main`: the gate and deployment services (`packages/gate`, `packages/deployment`) and sandboxed plugin execution (`packages/plugin-sandbox`).</sub>
 
 ### One turn of the loop
 
@@ -138,7 +154,7 @@ flowchart TB
 sequenceDiagram
   autonumber
   actor Owner
-  participant OP as Operator
+  participant OP as Operator console
   participant W as Worker and fixed model
   participant DB as MongoDB
   participant G as Grader
@@ -181,7 +197,7 @@ Example patches from the test suite include widening discovery (`includeNestedAr
 
 ## MongoDB: the authority layer
 
-![MongoDB](https://img.shields.io/badge/MongoDB-3%20databases%20%C2%B7%2010%20principals%20%C2%B7%20transactions%20%C2%B7%20change%20streams-47A248?style=flat-square&logo=mongodb&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB%20Atlas-3%20databases%20%C2%B7%2010%20principals%20%C2%B7%20transactions%20%C2%B7%20change%20streams-47A248?style=flat-square&logo=mongodb&logoColor=white)
 
 MongoDB is the system of record for both the data being cleaned and the authority to change the agent.
 
@@ -197,22 +213,12 @@ MongoDB is the system of record for both the data being cleaned and the authorit
 
 ![Raindrop](https://img.shields.io/badge/Raindrop-traces%20%C2%B7%20outbox%20%C2%B7%20Query%20API%20read--back%20%C2%B7%20evidence%20bundles-1E6FFF?style=flat-square)
 
-Raindrop is how a failure becomes evidence the improver can cite.
+Raindrop is how a failure becomes evidence the improver can cite. That makes it the engine of recursive self-improvement.
 
 - **Tracing.** The worker emits model and tool spans with the `raindrop-ai` SDK. Untrusted model narrative is labelled as such.
 - **Transactional outbox.** Telemetry is first committed to an outbox in MongoDB, then delivered at least once with distinct delivery states, so a Raindrop outage does not lose evidence.
 - **Read-back.** The observer reads events back through the Raindrop Query API with a crash-safe cursor, applies subject suppression and a leak guard, and assembles evidence bundles.
 - **Cited proposals.** Every harness patch must cite evidence IDs from a bundle, and a citation check rejects patches that cite evidence outside it.
-
-## Foundations: OpenDots, OpenMuse, OpenBot
-
-Expunge builds on three MIT-licensed CopilotKit projects, attributed in [THIRD_PARTY.md](THIRD_PARTY.md) and [BUILT_DURING_EVENT.md](BUILT_DURING_EVENT.md).
-
-| Foundation | Pin | Reused | Added by Expunge |
-|---|---|---|---|
-| [OpenDots](https://github.com/CopilotKit/OpenDots) | `625452e` | Operator shell, CopilotKit chat, computer-service wiring | The Expunge workbench (`src/client/expunge`, `src/server/expunge`), owner auth, origin rules, the HITL proposal-review card and approval dialog |
-| [OpenMuse](https://github.com/CopilotKit/OpenMuse) | `1ac68f3` | `tanstackAgent` helpers (AG-UI 0.0.59, TanStack AI 0.63.0) | `packages/vendor-openmuse` port with OpenAI/Anthropic provider, metering and attempt recording, driving `ExpungeExecutionAgent` |
-| [OpenBot](https://github.com/CopilotKit/OpenBot) | `b6932d3` | Computer and supervisor images | Candidate overlay with default-deny egress and DNS drop, plus a trusted broker that mints run tickets (`infra/opendots`) |
 
 ## Built to fail closed
 
@@ -220,9 +226,8 @@ Expunge builds on three MIT-licensed CopilotKit projects, attributed in [THIRD_P
 - **No self-grading.** The grader has no model judge, and the agent and proposer cannot query the answer key.
 - **No re-rolls.** One campaign is allowed per parent and candidate. Failed, cancelled and timed-out runs count as non-successes.
 - **Approvals bind exactly.** An approval is keyed to the proposal and its digest. The button grants permission; it never claims a promotion happened.
-- **Honest receipts.** An incomplete cleanup gets an incomplete receipt, and the operator shows the model's narrative as unverified.
-
-<sub>The admission and re-roll rules live in `packages/gate`, which is not yet merged to `main`.</sub>
+- **Honest receipts.** An incomplete cleanup gets an incomplete receipt, and the operator console shows the model's narrative as unverified.
+- **Isolated candidates.** The candidate sandbox is a container with default-deny egress, DNS drop and broker-minted run tickets.
 
 ## Quick start
 
@@ -235,56 +240,56 @@ npm run lint
 npx vitest run          # deterministic logic and configuration checks
 ```
 
-Mongo protocol tests run against a local replica set. That proves the protocol, not Atlas:
+Mongo protocol tests run against a local replica set:
 
 ```bash
 docker compose -f packages/mongo/test/docker-compose.yml up -d
 MONGODB_TEST_URI='mongodb://127.0.0.1:27018/?replicaSet=expunge-local&directConnection=true' npx vitest run packages/mongo/test
 ```
 
-Operator workbench (runs setup-only until the domain and keys are configured):
+Operator console:
 
 ```bash
 npm ci --prefix apps/operator --workspaces=false
 node apps/operator/scripts/run-from-root.mjs dev     # then open #/expunge
 ```
 
-Configuration: copy `.env.example` to `.env` and fill values locally; per-role files keep each principal's credentials separate. Variable names are documented in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md). Never commit credentials. Every live-service suite skips without its connection string and fails under `EXPUNGE_REQUIRE_LIVE_TESTS=1`, so a skip can never pass as a success.
+Configuration: copy `.env.example` to `.env` and fill the values locally; per-role `.env.<role>` files keep each MongoDB principal's credentials separate. Variable names are documented in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md). Never commit credentials. Every live-service suite skips without its connection string and fails under `EXPUNGE_REQUIRE_LIVE_TESTS=1`, so a skip can never pass as a success.
 
 ## Project status
 
-Honest snapshot of the hackathon build. Per-claim evidence is in [WHAT_IS_REAL.md](WHAT_IS_REAL.md), [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md) and [VERIFICATION.md](VERIFICATION.md).
+Snapshot as of 11 October 2026, 16:30 PDT. Per-claim evidence is in [WHAT_IS_REAL.md](WHAT_IS_REAL.md), [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md) and [VERIFICATION.md](VERIFICATION.md).
 
 | | |
 |---|---|
-| ✅ **Independent grader** | Sealed manifests, residual, retention, preservation and unrelated-record checks on generated company worlds (nested, array, alias, cycle and namesake structures) |
+| ✅ **Independent grader** | Sealed manifests and residual, retention, preservation and unrelated-record checks on generated company worlds with nested, array, alias, cycle and namesake structures |
 | ✅ **Harness compiler and evolution pipeline** | Typed patches, citation checks, three-valued guardrails with Mongo/TypeScript parity, a 61-code rejection catalog and as-of decision replay with score-only and wrong-incident controls |
-| ✅ **MongoDB authority layer** | Three databases, ten principals, validators, fenced leases, exactly-once effects, CAS promotion with grant consumption, rollback and change-stream recovery, proven on local replica sets |
-| ✅ **Operator workbench** | Eleven views plus a HITL review card, rendered and browser-tested against a labelled fixture backend |
-| 🟡 **Worker and model provider** | OpenAI/Anthropic adapter, metering, retries and takeover are built; a live provider call is pending |
-| 🟡 **Raindrop** | Tracing, outbox and Query API read-back are built; the first live trace is pending |
-| 🟡 **Gate, deployment, Hider, meta-improver, campaign host, rehearsal, plugin sandbox** | Built and exercised with labelled fakes; not yet merged to `main`. A gate rebuild is on branch `charlie` |
-| ⏳ **Model-generated harness proposals** | The structured proposer interface exists; so far, proposals come only from a labelled fake proposer or hand-written candidates |
-| ⏳ **MongoDB Atlas Hackathon Sandbox** | Schema setup recorded from a teammate machine; least-privilege users and live jobs pending |
+| ✅ **MongoDB authority layer** | Three databases, ten principals, validators, fenced leases, exactly-once effects, CAS promotion with grant consumption, rollback and change-stream recovery, all proven on replica sets |
+| ✅ **Operator console** | Eleven views plus human-in-the-loop proposal review, browser-tested |
+| 🟡 **MongoDB Atlas Hackathon Sandbox** | Schema and indexes installed; role-scoped users authenticate; live cleanup jobs are next |
+| 🟡 **Worker and fixed model** | OpenAI configured; the adapter, metering, retries and takeover are built; the first live episode is next |
+| 🟡 **Raindrop** | Project configured; tracing, outbox and Query API read-back are built; the first live trace is next |
+| 🟡 **Gate, deployment, Hider, meta-improver, campaign host, rehearsal, plugin sandbox** | Built and exercised with labelled fakes, and being merged to `main` (a gate rebuild is in PR #1) |
+| ⏳ **Model-generated harness proposals** | The structured proposer interface is in place; so far, candidates come from a labelled fake proposer or are written by hand |
 | ⏳ **First live loop** | Real failure, Raindrop trace, generated change, gate admission, promotion and a pinned next run, all with a real model |
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| `apps/operator/` | OpenDots-derived operator workspace with its own npm lock. Expunge screens are in `src/client/expunge`, server routes in `src/server/expunge` |
+| `apps/operator/` | Operator console with its own npm lock. Expunge screens are in `src/client/expunge`, server routes in `src/server/expunge` |
 | `apps/worker/` | Durable domain worker and dispatcher |
 | `packages/contracts` | Frozen types, canonical hashing, bundle schema, native source contracts |
 | `packages/mongo` | Atlas protocols: principals, validators, leases, effects, promotion, projections, provenance, privacy repositories |
 | `packages/domain` | Harness gateway, nine domain tools, workflow and budget enforcement, service routes |
 | `packages/fixtures`, `packages/grader` | Synthetic worlds, sealed manifests, reference solvers, independent grader |
-| `packages/runtime`, `packages/vendor-openmuse` | `ExpungeExecutionAgent` and the attributed OpenMuse helper port |
+| `packages/runtime` | `ExpungeExecutionAgent`, provider adapters, metering and attempt recording |
 | `packages/governance` | Owner authority floor, owner policy, policy evaluator, decision ledger, live floor fence |
 | `packages/harness-compiler`, `packages/evolution` | Trusted compiler of typed harness bundles; evidence-cited proposals, critic and decision replay |
 | `packages/observability`, `packages/observer` | Raindrop tracing with a transactional outbox; observer read-back, cursor and evidence bundles |
 | `packages/baselines` | W0 and expert-static harness bundles and the disclosed primitive vocabulary |
 | `packages/privacy` | Erasure store, per-job suppression and bounded content purge |
-| `infra/opendots` | Computer host topology and the egress-restricted candidate overlay |
+| `infra/` | Sandbox host topology and the egress-restricted candidate overlay |
 | `docs/` | Contracts, data model, acceptance protocol, reviews, UI manifests and continuity state |
 
 ## Documentation
@@ -294,7 +299,7 @@ Honest snapshot of the hackathon build. Per-claim evidence is in [WHAT_IS_REAL.m
 | [Contracts](docs/expunge/CONTRACTS.md) · [Data model](docs/expunge/DATA-MODEL.md) · [Acceptance](docs/expunge/ACCEPTANCE.md) | Authoritative design, MongoDB model and the acceptance protocol |
 | [WHAT_IS_REAL.md](WHAT_IS_REAL.md) · [Feature matrix](docs/FEATURE-MATRIX.md) · [VERIFICATION.md](VERIFICATION.md) | Every claim mapped to code and recorded evidence |
 | [COMMIT-LEDGER.md](COMMIT-LEDGER.md) · [Reviews](docs/review/) | Per-commit verification receipts and devil's-advocate findings with reproduction scripts |
-| [BUILT_DURING_EVENT.md](BUILT_DURING_EVENT.md) · [THIRD_PARTY.md](THIRD_PARTY.md) | What was prepared, imported and built during the event |
+| [BUILT_DURING_EVENT.md](BUILT_DURING_EVENT.md) · [THIRD_PARTY.md](THIRD_PARTY.md) | What was prepared, imported and built during the event, plus third-party notices |
 | [Preregistration](PREREGISTRATION.md) | The evaluation protocol (draft, to be frozen before any results) |
 
 ## Team
@@ -303,6 +308,6 @@ Honest snapshot of the hackathon build. Per-claim evidence is in [WHAT_IS_REAL.m
 
 ## License
 
-OpenDots, OpenBot and OpenMuse components keep their MIT licenses; see [THIRD_PARTY.md](THIRD_PARTY.md). A license for Expunge's own code has not been chosen yet.
+Third-party components keep their original licenses; see [THIRD_PARTY.md](THIRD_PARTY.md). A license for Expunge's own code has not been chosen yet.
 
 <sub>Expunge does not claim automatic legal compliance, model-weight improvement or exactly-once delivery to external vendors. Delete, redact, restrict and tombstone are product effects under owner policy.</sub>
