@@ -109,6 +109,22 @@ Administration API; driver `createRole` is used only by the local RBAC test.
   (`ApprovalRepository.issueRollback`) is consumed once in the same transaction when approval is required. Refusals are
   written to `rollback_refusals`.
 
+## Campaign results, the meta draw record, privacy stores and splits (PKT-62)
+- `campaign_artifacts` and `campaign_artifact_rows` hold a meta or Hider campaign's immutable result: the grader inserts,
+  nobody updates or removes, the projection reader and the domain service read. `commitRow` announces each row on the
+  stream `campaign:<campaignId>` in the same transaction; a different payload under an existing row or summary is a typed
+  conflict. `adversary_campaigns` and `adversary_trials` are grader insert-only.
+- `meta_draw_commitments` has three insert-only rows per campaign (`commitment`, `i1`, `freeze`), each inserted with a
+  server-assigned ObjectId (`forceServerObjectId`), so the time of each row is the server's and no UPDATE is granted. The
+  repository refuses a row unless the previous one exists and the server clock is more than a second past it. A raw writer
+  could still insert the rows in another order or sooner; the grants cannot narrow that, the repository enforces it.
+- `world_splits` is one insert-only row per world written at seed time; `splitOfJob` reads it (observer, grader).
+- `raw_artifacts`, `subject_tokens`, `lessons` and `erasure_suppressions` belong to the privacy controller. A purge replaces
+  a raw row or a lesson with a tombstone (UPDATE), which keeps no content, hash or size. The observer and the domain
+  service read `erasure_suppressions` (keyed by provider organization and user) and nothing of `external_deletions`.
+- The RBAC lane also runs these repositories with each principal's real privileges (`serviceFor`), which is how a missing
+  read grant on a path (for example the grader's read of `deployments` for the campaign-scope check) shows up.
+
 ## Residuals that collection-level RBAC cannot close (application-enforced, with the test that covers each)
 Atlas privileges are per collection and per verb, never per field or value. Three grants are therefore broader than the rule
 they serve, and the rule lives in code:

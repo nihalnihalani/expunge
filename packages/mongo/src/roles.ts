@@ -69,6 +69,11 @@ export function atlasRoleManifests(
         // The campaign fault plan and campaign artifact permits are read only for a campaign world's run.
         'world_faults',
         'campaign_artifact_permits',
+        // Served read-only by the operator-facing service.
+        'campaign_artifacts',
+        'campaign_artifact_rows',
+        'rollback_refusals',
+        'erasure_suppressions',
         ...DOMAIN_STEP_COLLECTIONS,
       ]),
       control('INSERT', [
@@ -106,6 +111,9 @@ export function atlasRoleManifests(
         'observer_cursors',
         'projection_events',
         'stream_offsets',
+        // The export gate's narrow read: users under erasure, and which split a job's world belongs to.
+        'erasure_suppressions',
+        'world_splits',
       ]),
       control('INSERT', [
         'jobs',
@@ -150,12 +158,23 @@ export function atlasRoleManifests(
         'artifacts',
         'artifact_eligibility',
         'provenance_edges',
+        // assertCampaignScope: a campaign scope has no production deployment pointer.
+        'deployments',
         'campaign_freezes',
         'gate_claims',
         'gate_attempts',
         'gate_held_runs',
         'world_faults',
         'campaign_artifact_permits',
+        'campaign_artifacts',
+        'campaign_artifact_rows',
+        'adversary_campaigns',
+        'adversary_trials',
+        'meta_draw_commitments',
+        'world_splits',
+        // The campaign repository announces rows on the projection stream.
+        'projection_events',
+        'projection_sequences',
         // Read-only: the campaign port reads the fault-plan attestation row (kind 'fault') the gateway wrote.
         'domain_steps',
       ]),
@@ -167,6 +186,11 @@ export function atlasRoleManifests(
         'gate_attempts',
         'gate_held_runs',
         'campaign_artifact_permits',
+        // Insert-only results of a campaign: rows, the summary, the adversary's campaign and trial rows.
+        'campaign_artifacts',
+        'campaign_artifact_rows',
+        'adversary_campaigns',
+        'adversary_trials',
         'public_trial_rows',
         'gate_reports',
         'projection_events',
@@ -225,6 +249,8 @@ export function atlasRoleManifests(
         'promotions',
         'public_trial_rows',
         'rollback_refusals',
+        'campaign_artifacts',
+        'campaign_artifact_rows',
         'stream_offsets',
       ]),
       control('CHANGE_STREAM', ['projection_events']),
@@ -244,8 +270,14 @@ export function atlasRoleManifests(
         'jobs',
         'evidence',
         'telemetry_outbox',
+        'lessons',
+        'erasure_suppressions',
       ]),
       control('UPDATE', [
+        // A tombstone replaces a raw row or a lesson; a suppression flips `active`.
+        'raw_artifacts',
+        'lessons',
+        'erasure_suppressions',
         'artifact_eligibility',
         'provenance_closures',
         'external_deletions',
@@ -259,6 +291,10 @@ export function atlasRoleManifests(
         'provenance_closures',
         'external_deletions',
         'provenance_edges',
+        'raw_artifacts',
+        'subject_tokens',
+        'lessons',
+        'erasure_suppressions',
         'telemetry_outbox',
         'projection_events',
         'projection_sequences',
@@ -281,13 +317,22 @@ export function atlasRoleManifests(
       ]),
       action('FIND', names.private, PRIVATE_COLLECTIONS),
       action('INSERT', names.private, PRIVATE_COLLECTIONS),
-      control('FIND', ['jobs', 'artifacts', 'artifact_eligibility', 'campaign_freezes']),
+      control('FIND', [
+        'jobs',
+        'artifacts',
+        'artifact_eligibility',
+        'campaign_freezes',
+        'meta_draw_commitments',
+      ]),
       control('INSERT', [
         'jobs',
         'artifacts',
         // Written once before a campaign runs; the fault plan of a campaign world.
         'campaign_freezes',
         'world_faults',
+        // Insert-only: the meta draw record (server-assigned ids) and the split of each seeded world.
+        'meta_draw_commitments',
+        'world_splits',
         'projection_events',
         'projection_sequences',
         'provenance_edges',

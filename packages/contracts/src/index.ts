@@ -42,6 +42,11 @@ export type FieldDescriptor = {
   bsonTypes: string[];
   isArray: boolean;
   sanitized: boolean;
+  /**
+   * True for a field that carries the subject's exact identity (an id, an alias, an e-mail). Only these seed bindings.
+   * Emitted by the world generator; absent means "decided by the owner policy's identity list".
+   */
+  identity?: boolean;
 };
 export type ReferenceDeclaration = {
   edgeId: string;
@@ -50,6 +55,14 @@ export type ReferenceDeclaration = {
   toCollectionId: string;
   toFieldId: string;
   identityRule: 'same_bson_type' | 'string_to_objectId' | 'objectId_to_string';
+  /**
+   * Which side's record owns the other side's, for discovery and the subject's erase set (the edge is declared
+   * from.field -> to.field). `'to'`: the referenced (TO) record owns the records that point at it, so discovery walks the
+   * edge INCOMING from the owner (a customer owns its accounts). `'from'`: the referencing (FROM) record owns the one
+   * it points at, so discovery walks OUTGOING (an order owns its private address). `'none'`: a shared parent or lookup
+   * (an organisation): never walked to reach a target. Absent: undeclared, handled by the domain's undeclared-owner rule.
+   */
+  owner?: 'from' | 'to' | 'none';
 };
 export type ScopeRegistry = ScopeKey & {
   revision: number;
@@ -279,6 +292,7 @@ export type Job = {
   cancellationRequested: boolean;
   lease: Lease;
   commitSeq: number;
+  /** Count of fenced projection appends for this job; incremented by the worker's fenced append as a write-conflict guard. */
   eventSeq: number;
   attempt: number;
   priority: number;
@@ -417,6 +431,8 @@ export type EvidenceBundle = {
    * `values`: raw tool values and failure witnesses were withheld because the split is not `train`.
    */
   withheld?: { freeText: boolean; values: boolean };
+  /** True when the bundle was cut at a size limit, so a consumer never reads a cut bundle as complete. */
+  truncated?: boolean;
 };
 export type OutboxState =
   | 'pending'
@@ -471,7 +487,15 @@ export type ExternalErasureJob = ScopeKey & {
   receivedAt: Date;
   dueBy: Date | null;
   completedAt: Date | null;
-  providerStatus: 'unsubmitted' | 'pending' | 'in_progress' | 'completed' | 'rejected' | 'cancelled';
+  providerStatus:
+    | 'unsubmitted'
+    | 'submitting'
+    | 'submission_ambiguous'
+    | 'pending'
+    | 'in_progress'
+    | 'completed'
+    | 'rejected'
+    | 'cancelled';
   subjectEntries: Array<{ user_id: string; requested_on: string; revoked_at: string | null }>;
   providerSnapshot: JsonValue | null;
   history: Array<{ at: Date; status: string; snapshotHash: string }>;

@@ -124,3 +124,17 @@ The service suite uses a recorded stand-in for the wake transport, labelled in i
   one and the other subject's reference then shows up as a residual (pinned by a KNOWN GAP test); PKT-16b adds
   `ReferenceDeclaration.owner`. (Overlap) When two `apply_cleanup_batch` calls for one batch overlap, the loser returns
   the saved receipt with the right `receiptId` and exactly one effect, but reports `replayed: false`.
+
+## Dependencies worth knowing
+
+- **zod 4 inside this package only.** `packages/domain` declares `zod` 4.6.5 because `@expunge/vendor-openmuse`'s
+  `defineTool` and `@expunge/runtime` take zod 4 schemas. It uses zod for its own tool arguments and service request bodies.
+  `@expunge/contracts` is on zod 3 and no contracts schema object or `ZodError` crosses the boundary: domain imports only
+  types and pure functions from contracts.
+- **Discovery never turns around.** An outgoing chain and an incoming chain are walked separately, over the edges the
+  subject owns in that direction (`ReferenceDeclaration.owner`: `'to'` is walked incoming from the owner, `'from'` outgoing,
+  `'none'` never). A record behind an edge the subject does not own is not a target and not a binding; it is listed as
+  retained with reason `not_subject_owned`. Until the generator emits owners, an undeclared owner keeps the legacy
+  behaviour (see the open gaps above).
+- **`Job.eventSeq`** counts the fenced projection appends for a job; the worker's fenced append increments it as a
+  write-conflict guard. It is not a stream sequence: those are per job in `projection_sequences`.
