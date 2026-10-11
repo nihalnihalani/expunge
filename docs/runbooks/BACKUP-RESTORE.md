@@ -24,13 +24,32 @@ Tools: `infra/services/backup/backup-mongo.mjs`, `restore-mongo.mjs`, `restore-d
    a fingerprint of the source (per collection: document count, order-independent document hash, validator hash, index hash).
 4. Copy the set off the host; keep the manifest with the archives. Restart workers.
 
+## Erasure, retention and the setup principal
+
+- A backup holds data that may later be erased (including subject literals and records under an erasure request). The manifest
+  carries `expiresAt` (default 30 days; `--retention-days`). Restore refuses an expired set (`BackupExpired`). Keep backups no
+  longer than the shortest erasure deadline you owe, and delete the sets and their off-host copies at expiry; a pruning job is
+  not provided, delete expired sets by hand.
+- A restore can resurrect records erased after the backup. Restore therefore refuses to run unless you pass
+  `--reapply-erasures-after-restore`, and prints `MUST_DO_NEXT`: re-apply every erasure suppression and purge recorded after the
+  backup's `createdAt` (from the privacy controller's erasure records and the provider's own erasure jobs), reconcile effects and
+  receipts against the owner source, and reset projection streams. **The tool does not do these steps**; no runner exists that
+  replays them from a restored database, so this is a manual obligation until one is built. Do not return the restored system to
+  service before it is done.
+- The backup and restore principals are dedicated; the tools refuse a URI equal to `MONGODB_SETUP_URI` (`SetupPrincipalRefused`).
+  The Atlas setup user must not be used for either (BLOCKED: the two Atlas users and their read-only / restore roles are not
+  created; names to create: `expunge_backup` read on the three databases, `expunge_restore` write on the target databases).
+- Archives and the manifest are written mode 0600 by the invoking non-root user (the tools container runs as your uid with a
+  read-only root and no capabilities). After the dump the source is fingerprinted again; a difference deletes the set
+  (`SourceChangedDuringBackup`) so a torn backup cannot be mistaken for a good one.
+
 ## Restore (SUPPORTED, drilled locally)
 
 1. Stop every service that holds a runtime principal. Never restore under a running worker: leases and fences would race the data.
 2. The target databases must be empty (a typo cannot overwrite live data: the tool refuses non-empty targets unless `--drop`, and
    requires the target names to be repeated in `--confirm-databases`). To recover in place, drop the damaged databases first from
    the operator machine; to recover beside, use `--map old=new,...` and repoint the services.
-3. `EXPUNGE_RESTORE_URI=... node infra/services/backup/restore-mongo.mjs --manifest <file> --confirm-databases a,b,c`
+3. `EXPUNGE_RESTORE_URI=... node infra/services/backup/restore-mongo.mjs --manifest <file> --confirm-databases a,b,c --reapply-erasures-after-restore`
 4. The tool verifies each archive's sha256 against the manifest, restores with the same pinned image, then fingerprints the target and
    compares it with the manifest. Exit 0 means validators, indexes and every document hash are identical; exit 4 lists differences.
 5. Run `npm run setup:mongo` once (idempotent) to re-assert validators, indexes and the authority rows, then start services.
@@ -49,9 +68,8 @@ node infra/services/backup/restore-drill.mjs
 ```
 
 It seeds throwaway databases through `scripts/setup-mongo.ts` and the repositories, backs up, drops the databases, restores,
-compares validators/indexes/documents, proves the restored validators reject an invalid insert (code 121) and the unique index
-rejects a duplicate (code 11000), and runs four negative controls (changed document detected, checksum mismatch refused,
-non-empty target refused, wrong confirmation refused). It refuses a non-local URI and drops its databases at the end. Run it before
+compares validators/indexes/documents, checks archive modes (0600), proves the restored validators reject an invalid insert (code 121) and the unique index
+rejects a duplicate (code 11000), and runs negative controls (changed document detected, checksum mismatch, non-empty target, wrong confirmation, missing re-apply acknowledgement, expired backup, setup principal refused). It refuses a non-local URI and drops its databases at the end. Run it before
 every release and after any change under `packages/mongo/src/validators*.ts` or `setup.ts`.
 
 Limits: the drill is a local replica set with 16 seeded documents across 74 collections; it proves the tooling and the validator
