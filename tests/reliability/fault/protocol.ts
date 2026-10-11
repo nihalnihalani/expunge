@@ -7,7 +7,7 @@
  * Faults are injected from outside the product, by wrapping the repository methods the Dispatcher calls and the tool
  * body at named points; no product code carries a failpoint.
  */
-import type { ActionIntent } from '@expunge/contracts';
+import type { ActionIntent, Environment } from '@expunge/contracts';
 import { deriveArgsDigest, deriveDecisionId, deriveEffectKey, deriveTargetHash } from '@expunge/mongo';
 
 export type FaultAction = 'kill' | 'stop' | 'exit';
@@ -30,7 +30,7 @@ export type ChildConfig = {
   harnessHash: string;
   workerId: string;
   leaseMs: number;
-  scope: { tenantId: string; env: 'dev' | 'evaluation' | 'demo'; scopeId: string };
+  scope: { tenantId: string; env: Environment; scopeId: string };
   /** `run`: claim and run the named job directly. `poll`: rely on the dispatcher's recovery poll to find it. */
   mode: 'run' | 'poll';
   faults: FaultSpec[];
