@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { defineTool } from '@expunge/vendor-openmuse';
 import { z } from 'zod';
-import { ExpungeExecutionAgent, FakeChatModel, fakeText, fakeToolCalls } from '../src/index.js';
+import { ExpungeExecutionAgent } from '../src/index.js';
+import { FakeChatModel, fakeText, fakeToolCalls } from '../src/testing/index.js';
 import {
   ACTOR,
   FakeArtifactReader,

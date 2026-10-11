@@ -22,7 +22,7 @@ describe('attribution and license handling for the OpenMuse port', () => {
       expect(doc).toContain(
         `https://github.com/CopilotKit/openmuse/blob/1ac68f3909f2478ab6280883f1ab5ea65eb5719d/apps/server/src/${file === 'config.ts' ? '' : 'engine/'}${file}`,
       );
-    for (let i = 1; i <= 12; i++) expect(doc).toContain(`| M${i} |`);
+    for (let i = 1; i <= 14; i++) expect(doc).toContain(`| M${i} |`);
     expect(doc).toContain('625452e06cde74cb25b0ce319e2c1be0488f5a5f');
   });
 

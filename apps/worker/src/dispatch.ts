@@ -1,6 +1,6 @@
-import type { BaseEvent } from '@ag-ui/core';
 import { EventType } from '@ag-ui/core';
-import type { ActorContext, Job, JsonValue } from '@expunge/contracts';
+import type { ActorContext, Job, JobKind, JsonValue, ScopeKey } from '@expunge/contracts';
+import type { ProjectionEventInput } from '@expunge/mongo';
 import {
   ExpungeExecutionAgent,
   errorCode,
@@ -16,42 +16,39 @@ import {
 import type { ProviderEnv } from '@expunge/vendor-openmuse';
 import type { Subscription } from 'rxjs';
 import type { WorkerConfig } from './config.js';
-import { decideTerminal, terminalCheckpoint, type ReceiptFact } from './terminal.js';
+import { decideTerminal, projectionFailureCode, terminalCheckpoint, type ReceiptFact } from './terminal.js';
 import type { WakeCommand, WakeTarget } from './wake.js';
 
 /** `JobRepository` (packages/mongo/src/jobs.ts) satisfies this structurally; wiring.ts checks it at compile time. */
 export interface DispatchJobs extends JobPort {
   claim(actor: ActorContext, jobId: string, ownerId: string, durationMs?: number): Promise<Job | null>;
   renew(actor: ActorContext, lease: LeaseBinding, durationMs?: number): Promise<Job>;
-  /** Present once mongodb-authority's A2-R lands. Absent: hashes are written through checkpoint (PARTIAL). */
-  recordContextInputs?(actor: ActorContext, lease: LeaseBinding, hashes: string[]): Promise<string[]>;
+  /** Fenced, permission-checked record of the hashes a run puts in model context (Job.contextInputs). */
+  recordContextInputs(actor: ActorContext, lease: LeaseBinding, hashes: string[]): Promise<string[]>;
+  /** Graceful release by the lease owner: running -> queued, lease ended, no fence bump. */
+  release(actor: ActorContext, lease: LeaseBinding): Promise<void>;
+  /** Job ids this principal could claim now (queued, or running with an expired lease). Used to recover from crashed workers. */
+  listClaimable(
+    key: ScopeKey,
+    limit?: number,
+  ): Promise<Array<{ jobId: string; kind: JobKind; priority: number }>>;
 }
 
 /**
  * Trusted dispatcher read of a job by ID, before any actor is known (a wake carries only jobId and commandId).
- * PARTIAL: until `JobRepository.resolveForDispatch` exists this is `jobs.collection.findOne({_id})` (see wiring.ts).
+ * Backed by `JobRepository.resolveForDispatch`. Returns null when the job does not exist.
  */
 export interface JobResolver {
   resolve(jobId: string): Promise<Job | null>;
 }
 
-export interface EventSink {
-  record(jobId: string, event: BaseEvent): void | Promise<void>;
-}
-
-/** PARTIAL: bounded in-memory diagnostics buffer. Projection persistence and Raindrop tracing arrive with packages/observability. */
-export class RingEventSink implements EventSink {
-  private readonly events = new Map<string, BaseEvent[]>();
-  constructor(private readonly perJob = 200) {}
-  record(jobId: string, event: BaseEvent): void {
-    const list = this.events.get(jobId) ?? [];
-    list.push(event);
-    if (list.length > this.perJob) list.shift();
-    this.events.set(jobId, list);
-  }
-  recent(jobId: string): BaseEvent[] {
-    return [...(this.events.get(jobId) ?? [])];
-  }
+/**
+ * Persists sanitized projection events (`ProjectionRepository.append`). These are committed-state facts the operator
+ * UI replays, not the model's AG-UI stream. Appends are best-effort after the job transition they describe (not in
+ * the same transaction); a failed append is logged and the UI recovers from the authoritative job snapshot.
+ */
+export interface ProjectionSink {
+  append(key: ScopeKey, event: ProjectionEventInput): Promise<unknown>;
 }
 
 export type LogEntry = { level: 'info' | 'warn' | 'error'; message: string; jobId?: string; code?: string };
@@ -59,6 +56,7 @@ export type LogEntry = { level: 'info' | 'warn' | 'error'; message: string; jobI
 export type JobOutcome =
   | 'unknown_job'
   | 'unsupported_kind'
+  | 'out_of_scope'
   | 'terminal'
   | 'not_claimable'
   | 'succeeded'
@@ -67,6 +65,7 @@ export type JobOutcome =
   | 'yielded'
   | 'lost_lease'
   | 'aborted'
+  | 'released'
   | 'unfinalized';
 
 export type JobRunResult = { jobId: string; outcome: JobOutcome; stats?: RunStats; reason?: string };
@@ -80,13 +79,23 @@ export type DispatcherDeps = {
   receipts: CompletionReceiptReader;
   config: WorkerConfig;
   env?: ProviderEnv;
-  events?: EventSink;
+  projection?: ProjectionSink;
   log?: (entry: LogEntry) => void;
   onResult?: (result: JobRunResult) => void;
 };
 
-const MAX_CONTEXT_INPUTS = 4096;
 const BEGIN = (jobId: string) => `Begin cleanup job ${jobId}.`;
+
+type WaitState = 'waiting_evidence' | 'waiting_approval' | 'waiting_external';
+type FinalizeInput = {
+  jobId: string;
+  actor: ActorContext;
+  lease: LeaseBinding;
+  claimed: Job;
+  stats: RunStats;
+  writer: CheckpointWriter;
+  renewalFailed: boolean;
+};
 
 /** Serializes checkpoint writes for one lease and merges state so every write is a complete snapshot. */
 class CheckpointWriter {
@@ -121,16 +130,68 @@ export class Dispatcher implements WakeTarget {
   private readonly running = new Map<string, () => void>();
   private waiters: Array<() => void> = [];
   private stopping = false;
+  private polling = false;
+  private pollTimer?: ReturnType<typeof setInterval>;
 
   constructor(private readonly deps: DispatcherDeps) {}
 
   wake(command: WakeCommand): boolean {
+    return this.enqueue(command.jobId);
+  }
+
+  /** True when a wake would be queued (not stopping, queue not full). Checked before a command id is recorded. */
+  canAccept(): boolean {
+    return !this.stopping && this.queue.length < this.deps.config.maxQueued;
+  }
+
+  private enqueue(jobId: string): boolean {
     if (this.stopping) return false;
-    if (this.queue.includes(command.jobId) || this.running.has(command.jobId)) return true; // already pending: idempotent
+    if (this.queue.includes(jobId) || this.running.has(jobId)) return true; // already pending: idempotent
     if (this.queue.length >= this.deps.config.maxQueued) return false;
-    this.queue.push(command.jobId);
+    this.queue.push(jobId);
     this.pump();
     return true;
+  }
+
+  /**
+   * Crashed-worker recovery: asks the repository for jobs this principal could claim now (queued, or running with an
+   * expired lease) and queues them. Wake commands are an optimization; this poll makes delivery at-least-once.
+   */
+  async poll(): Promise<number> {
+    if (this.stopping || this.polling) return 0;
+    this.polling = true;
+    try {
+      const { scope } = this.deps.config;
+      if (!scope) return 0; // polling is bound to the worker's configured scope; without one it cannot run
+      const room = this.deps.config.maxQueued - this.queue.length;
+      if (room <= 0) return 0;
+      const candidates = await this.deps.jobs.listClaimable(
+        scope,
+        Math.min(room, this.deps.config.pollBatch),
+      );
+      let queued = 0;
+      for (const candidate of candidates)
+        if (
+          candidate.kind === 'cleanup' &&
+          !this.running.has(candidate.jobId) &&
+          this.enqueue(candidate.jobId)
+        )
+          queued++;
+      return queued;
+    } catch (error) {
+      this.log({ level: 'warn', message: 'claimable poll failed', code: errorCode(error) });
+      return 0;
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  /** Starts the recovery poll (config.pollMs; 0 disables). Safe to call once. */
+  startPolling(): void {
+    const { pollMs, scope } = this.deps.config;
+    if (pollMs <= 0 || !scope || this.pollTimer) return;
+    this.pollTimer = setInterval(() => void this.poll(), pollMs);
+    this.pollTimer.unref?.();
   }
 
   /** Resolves when nothing is queued or running. */
@@ -139,9 +200,14 @@ export class Dispatcher implements WakeTarget {
     return new Promise((resolve) => this.waiters.push(resolve));
   }
 
-  /** Graceful stop: no new work, running jobs are aborted (their leases expire or the run released them). */
+  /**
+   * Graceful stop: no new work; running jobs are aborted and then RELEASED (running -> queued, no fence bump) so
+   * another worker can claim them at once, unless a tool is still running (then the lease expires instead).
+   */
   async stop(): Promise<void> {
     this.stopping = true;
+    clearInterval(this.pollTimer);
+    this.pollTimer = undefined;
     this.queue.length = 0;
     for (const abort of this.running.values()) abort();
     await this.idle();
@@ -180,6 +246,14 @@ export class Dispatcher implements WakeTarget {
     const { jobs, config } = this.deps;
     const stored = await this.deps.resolver.resolve(jobId);
     if (!stored) return { jobId, outcome: 'unknown_job' };
+    const bound = config.scope;
+    if (
+      bound &&
+      (stored.actor.tenantId !== bound.tenantId ||
+        stored.actor.env !== bound.env ||
+        stored.actor.scopeId !== bound.scopeId)
+    )
+      return { jobId, outcome: 'out_of_scope' };
     if (stored.kind !== 'cleanup') return { jobId, outcome: 'unsupported_kind' };
     if (['succeeded', 'failed', 'cancelled'].includes(stored.status)) return { jobId, outcome: 'terminal' };
 
@@ -188,21 +262,29 @@ export class Dispatcher implements WakeTarget {
     const actor = claimed.actor;
     const lease: LeaseBinding = { jobId, ownerId: config.ownerId, fence: claimed.lease.fence };
     this.log({ level: 'info', message: 'job claimed', jobId });
+    if (this.stopping) {
+      // stop() arrived between queueing and claiming: hand the job straight back instead of running it.
+      await jobs.release(actor, lease).catch(() => undefined);
+      return { jobId, outcome: 'released', reason: 'worker_stopping' };
+    }
+    await this.project(actor, {
+      eventId: `${jobId}:started:${claimed.attempt}`,
+      jobId,
+      runId: claimed.binding.runId,
+      artifactIds: [claimed.binding.harnessHash],
+      kind: 'job_started',
+      payload: {
+        jobKind: claimed.kind,
+        harnessHash: claimed.binding.harnessHash,
+        worldId: claimed.binding.worldId,
+        scopeRevision: claimed.binding.scopeRevision,
+        attempt: claimed.attempt,
+      },
+    });
 
     const writer = new CheckpointWriter(jobs, actor, lease);
-    const contextInputs = new Set<string>();
-    const sink = this.deps.events;
     const hooks: ExecutionHooks = {
-      onContextInputs: async (hashes) => {
-        if (typeof jobs.recordContextInputs === 'function') {
-          await jobs.recordContextInputs(actor, lease, hashes);
-          return;
-        }
-        // PARTIAL fallback until Job.contextInputs/recordContextInputs land: durable, fenced, but only in the checkpoint.
-        for (const hash of hashes) contextInputs.add(hash);
-        if (contextInputs.size > MAX_CONTEXT_INPUTS) throw new Error('ContextInputsBounds');
-        await writer.update({ contextInputs: [...contextInputs] });
-      },
+      onContextInputs: async (hashes) => void (await jobs.recordContextInputs(actor, lease, hashes)),
       onPhaseComplete: async (info) => {
         try {
           await writer.update({
@@ -211,6 +293,7 @@ export class Dispatcher implements WakeTarget {
             lastTool: info.toolId,
             lastOutcome: info.outcome,
             lastPhaseMs: info.elapsedMs,
+            ...(info.model ? { model: info.model } : {}),
           });
         } catch (error) {
           // complete_cleanup commits the receipt AND the terminal job state in one transaction, so the
@@ -223,7 +306,6 @@ export class Dispatcher implements WakeTarget {
         }
         return 'continue';
       },
-      onEvent: (event) => sink?.record(jobId, event),
       onHookError: (hook, error) =>
         this.log({ level: 'warn', message: `hook ${hook} failed`, jobId, code: errorCode(error) }),
     };
@@ -238,6 +320,8 @@ export class Dispatcher implements WakeTarget {
         hooks,
         env: this.deps.env,
         phaseTimeoutMs: config.phaseTimeoutMs,
+        requirePricing: config.requirePricing,
+        toolDrainMs: config.toolDrainMs,
       },
       { actor, lease },
     );
@@ -321,15 +405,74 @@ export class Dispatcher implements WakeTarget {
     }
   }
 
-  private async finalize(input: {
-    jobId: string;
-    actor: ActorContext;
-    lease: LeaseBinding;
-    claimed: Job;
-    stats: RunStats;
-    writer: CheckpointWriter;
-    renewalFailed: boolean;
-  }): Promise<JobRunResult> {
+  private async finalize(input: FinalizeInput): Promise<JobRunResult> {
+    const result = await this.finalizeState(input);
+    await this.projectOutcome(input, result);
+    return result;
+  }
+
+  private async project(actor: ActorContext, event: ProjectionEventInput): Promise<void> {
+    if (!this.deps.projection) return;
+    try {
+      await this.deps.projection.append(
+        { tenantId: actor.tenantId, env: actor.env, scopeId: actor.scopeId },
+        event,
+      );
+    } catch (error) {
+      this.log({
+        level: 'warn',
+        message: 'projection append failed',
+        jobId: event.jobId,
+        code: errorCode(error),
+      });
+    }
+  }
+
+  /** Committed-state facts only; the model's stream and narrative never become projection events here. */
+  private async projectOutcome(input: FinalizeInput, result: JobRunResult): Promise<void> {
+    const { jobId, actor, claimed, stats } = input;
+    const base = { jobId, runId: claimed.binding.runId, artifactIds: [] as string[] };
+    const status = (to: 'succeeded' | 'cancelled' | 'queued' | WaitState, reason: string) =>
+      this.project(actor, {
+        ...base,
+        eventId: `${jobId}:status:${claimed.attempt}:${to}`,
+        kind: 'job_status_changed',
+        payload: { from: 'running', to, reason },
+      });
+    switch (result.outcome) {
+      case 'failed': {
+        const code = projectionFailureCode(result.reason ?? 'internal_error');
+        await this.project(actor, {
+          ...base,
+          eventId: `${jobId}:failed:${claimed.attempt}`,
+          kind: 'job_failed',
+          payload: {
+            code,
+            retryable: code === 'provider_error' || code === 'lease_lost',
+            phase: null,
+            message: (result.reason ?? 'internal_error').slice(0, 200),
+          },
+        });
+        return;
+      }
+      case 'succeeded':
+        if (result.reason === 'receipt_committed') await status('succeeded', 'completion receipt committed');
+        return;
+      case 'cancelled':
+        await status('cancelled', 'cancellation requested');
+        return;
+      case 'yielded':
+        if (stats?.waitStatus) await status(stats.waitStatus, 'a tool requested a wait');
+        return;
+      case 'released':
+        await status('queued', 'worker stopping');
+        return;
+      default:
+        return;
+    }
+  }
+
+  private async finalizeState(input: FinalizeInput): Promise<JobRunResult> {
     const { jobs, receipts } = this.deps;
     const { jobId, actor, lease, claimed, stats, writer } = input;
     const stored = await jobs.readAuthorized(actor, jobId).catch(() => null);
@@ -358,6 +501,25 @@ export class Dispatcher implements WakeTarget {
       receipt,
       renewalFailed: input.renewalFailed,
     });
+    if (
+      action.kind === 'none' &&
+      this.stopping &&
+      stats.endedBy === 'aborted' &&
+      stats.release === 'none' &&
+      !stats.abandonedTools &&
+      stored?.status === 'running' &&
+      stored.lease.fence === lease.fence
+    ) {
+      // Graceful shutdown: hand the job back (running -> queued) instead of leaving it to lease expiry.
+      try {
+        await jobs.release(actor, lease);
+        this.log({ level: 'info', message: 'job released for shutdown', jobId });
+        return { jobId, outcome: 'released', stats, reason: 'worker_stopping' };
+      } catch (error) {
+        this.log({ level: 'warn', message: 'release on shutdown failed', jobId, code: errorCode(error) });
+        return { jobId, outcome: 'lost_lease', stats, reason: errorCode(error) };
+      }
+    }
     if (action.kind === 'none') {
       const outcome: JobOutcome =
         stats.release === 'yielded'

@@ -18,6 +18,12 @@ import { map, mergeMap, type Observable } from 'rxjs';
 import { adapter as selectAdapter, type ProviderEnv } from './provider.js';
 import { stateTools } from './state-tools.js';
 
+/** One model call as seen at the adapter boundary. `usage` is the provider-reported TokenUsage, untouched. */
+export type ModelCallRecord = { usage: unknown; completed: boolean };
+
+/** The adapter actually used for a run: what the provider reported, not what a caller claimed. */
+export type ModelIdentity = { provider: string; model: string };
+
 export type TanStackAgentOptions = {
   /** "provider/model" string, e.g. "openai/gpt-5". Ignored when `textAdapter` is supplied. */
   model: string;
@@ -33,6 +39,12 @@ export type TanStackAgentOptions = {
    * before the note is emitted. Lets a host learn the ending without matching text the model could forge.
    */
   onStepLimit?: () => void;
+  /**
+   * M13: called once per model call (one `adapter.chatStream` invocation), when its stream ends, with the usage the
+   * provider reported on that call's RUN_FINISHED (undefined when none was reported). Lets a host meter tokens and
+   * cost per call instead of trusting a run-end aggregate.
+   */
+  onModelCall?: (call: ModelCallRecord) => void;
   /** M2: provider credentials come from this injected environment, never from ambient globals. */
   env?: ProviderEnv;
   /** M3: a ready text adapter replaces provider selection. Production code leaves this unset. */
@@ -51,6 +63,7 @@ export type TanStackAgentOptions = {
  */
 export class TanStackAgent {
   private readonly agent: BuiltInAgent;
+  private resolvedIdentity?: ModelIdentity;
   constructor(private readonly options: TanStackAgentOptions) {
     const serverTools: ToolDefinition[] = [
       ...options.tools,
@@ -63,8 +76,11 @@ export class TanStackAgent {
       type: 'tanstack',
       factory: ({ input, abortController }) => {
         const converted = convertInputToTanStackAI(scopeInput(input, allowedClientTools));
+        const base = options.textAdapter ?? selectAdapter(options.model, options.env);
+        // M14: record the identity of the adapter that really serves this run (adapter.name / adapter.model).
+        this.resolvedIdentity = { provider: base.name, model: base.model };
         return chat({
-          adapter: options.textAdapter ?? selectAdapter(options.model, options.env),
+          adapter: options.onModelCall ? tapAdapter(base, options.onModelCall) : base,
           messages: converted.messages,
           // M8: ONE composition path. Runtime 1.75.0's converter already appends the AG-UI
           // context entries and application state to `converted.systemPrompts`; upstream built
@@ -105,6 +121,11 @@ export class TanStackAgent {
 
   abortRun(): void {
     this.agent.abortRun();
+  }
+
+  /** Set once the run has built its adapter; undefined before that (e.g. a missing credential). */
+  get identity(): ModelIdentity | undefined {
+    return this.resolvedIdentity;
   }
 
   /** A fresh wrapper with the same options (a BuiltInAgent cannot run twice at once). */
@@ -212,4 +233,40 @@ export function splitTextAtToolCalls(events: Observable<BaseEvent>) {
       return event;
     }),
   );
+}
+
+/**
+ * M13: observes every `chatStream` call of an adapter without changing it. The Proxy forwards everything else
+ * (bound to the real adapter so private fields keep working).
+ */
+function tapAdapter(adapter: AnyTextAdapter, onCall: (call: ModelCallRecord) => void): AnyTextAdapter {
+  return new Proxy(adapter, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property === 'chatStream')
+        return (options: Parameters<AnyTextAdapter['chatStream']>[0]) =>
+          tapStream(target.chatStream(options), onCall);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+async function* tapStream<T>(
+  stream: AsyncIterable<T>,
+  onCall: (call: ModelCallRecord) => void,
+): AsyncGenerator<T> {
+  let usage: unknown;
+  let completed = false;
+  try {
+    for await (const chunk of stream) {
+      const record = chunk as { type?: string; usage?: unknown };
+      if (record.type === 'RUN_FINISHED') {
+        completed = true;
+        if (record.usage !== undefined) usage = record.usage;
+      }
+      yield chunk;
+    }
+  } finally {
+    onCall({ usage, completed });
+  }
 }

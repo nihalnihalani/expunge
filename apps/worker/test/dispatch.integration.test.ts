@@ -6,8 +6,15 @@
  */
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { contentHash } from '@expunge/contracts';
-import { ArtifactRepository, JobRepository, type MongoService } from '@expunge/mongo';
-import { FakeChatModel, JobWaitSignal, fakeHang, fakeText, fakeToolCalls } from '@expunge/runtime';
+import {
+  ArtifactRepository,
+  JobRepository,
+  ProjectionRepository,
+  WakeCommandRepository,
+  type MongoService,
+} from '@expunge/mongo';
+import { JobWaitSignal } from '@expunge/runtime';
+import { FakeChatModel, fakeHang, fakeText, fakeToolCalls } from '@expunge/runtime/testing';
 import { defineTool, type ToolDefinition } from '@expunge/vendor-openmuse';
 import { z } from 'zod';
 import {
@@ -25,6 +32,8 @@ import {
   Dispatcher,
   MongoCompletionReceiptReader,
   MongoJobResolver,
+  MongoWakeCommandStore,
+  asProjectionSink,
   asArtifactReader,
   asDispatchJobs,
   workerConfigFromEnv,
@@ -71,6 +80,7 @@ describeLive('Dispatcher with the real JobRepository (local replica-set protocol
   function dispatcherFor(
     script: ConstructorParameters<typeof FakeChatModel>[0],
     tools: () => ToolDefinition[],
+    config: Record<string, string> = {},
   ) {
     const jobs = new JobRepository(executor);
     const fake = new FakeChatModel(script);
@@ -81,7 +91,15 @@ describeLive('Dispatcher with the real JobRepository (local replica-set protocol
       tools: new FakeToolProvider(() => tools()),
       models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: fake.adapter }),
       receipts: new MongoCompletionReceiptReader(executor),
-      config: workerConfigFromEnv({ EXPUNGE_WORKER_ID: 'worker-int-1', EXPUNGE_WORKER_LEASE_MS: '600' }),
+      projection: asProjectionSink(new ProjectionRepository(executor)),
+      config: workerConfigFromEnv({
+        EXPUNGE_WORKER_ID: 'worker-int-1',
+        EXPUNGE_WORKER_LEASE_MS: '600',
+        EXPUNGE_TENANT_ID: actor.tenantId,
+        EXPUNGE_ENV: actor.env,
+        EXPUNGE_SCOPE_ID: actor.scopeId,
+        ...config,
+      }),
     });
     return { jobs, fake, dispatcher };
   }
@@ -184,5 +202,74 @@ describeLive('Dispatcher with the real JobRepository (local replica-set protocol
     const result = await dispatcher.runJob(id);
     expect(result.outcome).toBe('not_claimable');
     expect((await stored(id)).lease.ownerId).toBe('someone-else');
+  });
+
+  const scopeKey = { tenantId: actor.tenantId, env: actor.env, scopeId: actor.scopeId };
+
+  it('persists committed-state projection events through ProjectionRepository with contiguous sequences', async () => {
+    const id = await createJob(setup, { harnessHash });
+    const { dispatcher } = dispatcherFor([fakeText('Done!')], makeTools);
+    await dispatcher.runJob(id);
+    const events = await new ProjectionRepository(executor).read(scopeKey, 0, id);
+    expect(events.map((e) => [e.sequence, e.kind])).toEqual([
+      [1, 'job_started'],
+      [2, 'job_failed'],
+    ]);
+    expect(events[1]?.payload).toMatchObject({ code: 'verification_failed', retryable: false, phase: null });
+    // Re-running the append with the same event id is idempotent (same payload returns the stored row).
+    const again = await new ProjectionRepository(executor).append(scopeKey, {
+      eventId: `${id}:started:1`,
+      jobId: id,
+      runId: `run-${id}`,
+      artifactIds: [harnessHash],
+      kind: 'job_started',
+      payload: events[0]!.payload as never,
+    });
+    expect(again.sequence).toBe(1);
+  });
+
+  it('dedupes wake commands durably: a second store instance (a restart) still sees the id as a duplicate', async () => {
+    const first = new MongoWakeCommandStore(new WakeCommandRepository(executor));
+    const command = { jobId: 'job-x', commandId: 'command-durable-0001' };
+    expect(await first.accept(command)).toBe('accepted');
+    expect(await first.accept(command)).toBe('duplicate');
+    const afterRestart = new MongoWakeCommandStore(new WakeCommandRepository(executor));
+    expect(await afterRestart.accept(command)).toBe('duplicate');
+    expect(await afterRestart.accept({ ...command, commandId: 'command-durable-0002' })).toBe('accepted');
+  });
+
+  it('recovers a crashed worker: poll finds the lease-expired job via listClaimable and reclaims it under a new fence', async () => {
+    const id = await createJob(setup, { harnessHash });
+    const { dispatcher, jobs } = dispatcherFor([fakeText('x')], makeTools);
+    const dead = await jobs.claim(actor, id, 'dead-worker', 150);
+    expect(dead?.lease.fence).toBe(1);
+    expect(await dispatcher.poll()).toBe(0); // lease still live: not claimable yet
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(await dispatcher.poll()).toBe(1);
+    await dispatcher.idle();
+    const job = await stored(id);
+    expect(job.lease.fence).toBe(2);
+    expect(job.lease.ownerId).toBe('worker-int-1');
+    expect(job.status).toBe('failed'); // fake model narrates; no receipt, so the job is failed truthfully
+  });
+
+  it('on graceful stop, RELEASES the running job (running -> queued) so another worker can claim at once', async () => {
+    const id = await createJob(setup, { harnessHash });
+    const { dispatcher, jobs, fake } = dispatcherFor([fakeHang()], makeTools);
+    dispatcher.wake({ jobId: id, commandId: 'command-stop-0001' });
+    await waitFor(async () => fake.calls.length === 1);
+    await dispatcher.stop();
+    const job = await stored(id);
+    expect(job.status).toBe('queued');
+    expect(job.lease.fence).toBe(1);
+    expect(new Date(job.lease.until).getTime()).toBe(0);
+    expect((await jobs.claim(actor, id, 'worker-int-2', 5000))?.lease.fence).toBe(2);
+  });
+
+  it('refuses a job outside the configured scope without claiming it', async () => {
+    const id = await createJob(setup, { harnessHash });
+    const { dispatcher } = dispatcherFor([fakeText('x')], makeTools, { EXPUNGE_SCOPE_ID: 'another-scope' });
+    expect((await dispatcher.runJob(id)).outcome).toBe('out_of_scope');
+    expect((await stored(id)).status).toBe('queued');
   });
 });

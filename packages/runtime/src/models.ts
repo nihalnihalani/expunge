@@ -1,11 +1,11 @@
-import type { HarnessBundle, Job } from '@expunge/contracts';
+import { contentHash, type HarnessBundle, type Job } from '@expunge/contracts';
 import {
   adapter,
   parseModelSpec,
   requiredCredentialVariable,
   type ProviderEnv,
 } from '@expunge/vendor-openmuse';
-import type { ModelResolver, ModelSelection } from './ports.js';
+import type { ModelPricing, ModelResolver, ModelSelection } from './ports.js';
 
 /**
  * Model selection from the process environment: EXPUNGE_MODEL_PROVIDER (openai | anthropic) and
@@ -19,12 +19,35 @@ export function modelSpecFromEnv(env: ProviderEnv): string | null {
   return `${provider}/${id}`;
 }
 
+function microusd(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** Prices from EXPUNGE_MODEL_PRICE_INPUT/OUTPUT_MICROUSD_PER_MILLION. Missing or malformed means unpriced, never zero. */
+export function pricingFromEnv(env: ProviderEnv): ModelPricing | undefined {
+  const inputMicrousdPerMillion = microusd(env.EXPUNGE_MODEL_PRICE_INPUT_MICROUSD_PER_MILLION);
+  const outputMicrousdPerMillion = microusd(env.EXPUNGE_MODEL_PRICE_OUTPUT_MICROUSD_PER_MILLION);
+  if (inputMicrousdPerMillion === undefined && outputMicrousdPerMillion === undefined) return undefined;
+  return {
+    ...(inputMicrousdPerMillion !== undefined ? { inputMicrousdPerMillion } : {}),
+    ...(outputMicrousdPerMillion !== undefined ? { outputMicrousdPerMillion } : {}),
+  };
+}
+
+/** Hash of the runtime-visible profile (model string and prices). Recorded with each run next to the job's pin. */
+export function profileFingerprint(spec: string, pricing: ModelPricing | undefined): string {
+  return contentHash({ spec, pricing: pricing ?? null }, 'worker-profile');
+}
+
 export class EnvModelResolver implements ModelResolver {
   constructor(private readonly env: ProviderEnv) {}
   select(_job: Job, _bundle: HarnessBundle): ModelSelection {
     const spec = modelSpecFromEnv(this.env);
     if (!spec) throw new Error('ModelNotConfigured');
-    return { spec };
+    const pricing = pricingFromEnv(this.env);
+    return { spec, ...(pricing ? { pricing } : {}) };
   }
 }
 

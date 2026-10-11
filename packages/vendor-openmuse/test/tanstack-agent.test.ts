@@ -13,12 +13,7 @@ import {
   type ToolDefinition,
 } from '../src/index.js';
 // The fake provider lives with the runtime package (it is the shared protocol-test double).
-import {
-  FakeChatModel,
-  fakeHang,
-  fakeText,
-  fakeToolCalls,
-} from '../../runtime/src/testing/fake-chat-model.js';
+import { FakeChatModel, fakeHang, fakeText, fakeToolCalls } from '../../runtime/src/testing/index.js';
 import { collect, runInput, types } from './helpers.js';
 import { of } from 'rxjs';
 

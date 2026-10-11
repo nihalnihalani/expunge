@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ExpungeExecutionAgent, FakeChatModel } from '../src/index.js';
+import { ExpungeExecutionAgent } from '../src/index.js';
+import { FakeChatModel } from '../src/testing/index.js';
 import {
   ACTOR,
   FakeArtifactReader,

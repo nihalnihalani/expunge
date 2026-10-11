@@ -45,6 +45,8 @@ This package is an **attributed port** of helper code from OpenMuse, adapted to 
 | M10 | `splitTextAtToolCalls` is retained unchanged and now has a test pair: runtime 1.75.0 still uses one message ID per stream, and the helper still splits per step. | Upstream marked it removable once the converter starts a new ID per step; that has not happened at 1.75.0. |
 | M11 | Reformatted with the repository's Prettier configuration (print width 110, trailing commas) and converted from double to single quotes. No behavior change. | Repository formatting policy; line-level diffs against the raw upstream copy are therefore noisy, so compare by function. |
 | M12 | `reportStepLimit` takes an optional `onLimit` callback and `TanStackAgentOptions.onStepLimit` forwards it. The callback fires, out of band, exactly when the step limit ended the run, just before the note is emitted. | A host must not infer the ending by matching text: a model can emit the note's exact words (devils-advocate DA-3 R3). |
+| M13 | `onModelCall` observes each `adapter.chatStream` call through a Proxy and reports the provider-reported usage of that call. | Per-call token/cost metering for `ResourceLimits.totalTokens` / `maxCostMicrousd`; the run-end aggregate is too late to stop a run. |
+| M14 | `TanStackAgent.identity` exposes the `name` and `model` of the adapter that actually served the run. | Stored run evidence must show which provider/model produced it (devils-advocate DA-3 K2). |
 
 Version adaptation facts (verified against installed declarations/source):
 

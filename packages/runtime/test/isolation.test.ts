@@ -13,17 +13,31 @@ function sources(dir: string): string[] {
 }
 
 describe('the labeled fake provider stays out of production code', () => {
-  it('is imported by no production source under apps/worker/src or packages/{runtime,vendor-openmuse}/src except the runtime testing module and its re-export', () => {
+  it('is imported or re-exported by no production source under apps/worker/src or packages/{runtime,vendor-openmuse}/src, including the package entry', () => {
     const production = [
       ...sources(join(root, 'apps/worker/src')),
       ...sources(join(root, 'packages/runtime/src')),
       ...sources(join(root, 'packages/vendor-openmuse/src')),
     ].filter((path) => !path.includes('/src/testing/'));
-    const offenders = production.filter((path) => {
-      if (path.endsWith('packages/runtime/src/index.ts')) return false; // the single, explicit re-export
-      return /FakeChatModel|fake-chat-model|fakeText|fakeToolCalls|fakeHang/.test(readFileSync(path, 'utf8'));
-    });
+    const offenders = production.filter((path) =>
+      /FakeChatModel|fake-chat-model|testing\/index|fakeText|fakeToolCalls|fakeHang|FAKE_PROVIDER_NAME/.test(
+        readFileSync(path, 'utf8'),
+      ),
+    );
     expect(offenders).toEqual([]);
+  });
+
+  it('is reachable only through the @expunge/runtime/testing subpath, never the production entry', async () => {
+    const manifest = JSON.parse(readFileSync(join(root, 'packages/runtime/package.json'), 'utf8')) as {
+      exports: Record<string, string>;
+    };
+    expect(manifest.exports['.']).toBe('./src/index.ts');
+    expect(manifest.exports['./testing']).toBe('./src/testing/index.ts');
+    const production = (await import('../src/index.js')) as Record<string, unknown>;
+    for (const name of ['FakeChatModel', 'fakeText', 'fakeToolCalls', 'fakeHang', 'FAKE_PROVIDER_NAME'])
+      expect(name in production, name).toBe(false);
+    const testing = (await import('../src/testing/index.js')) as Record<string, unknown>;
+    expect(typeof testing.FakeChatModel).toBe('function');
   });
 
   it('is clearly labeled as a fake in its own source', () => {
