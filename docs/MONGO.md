@@ -174,6 +174,18 @@ describes the server it ran against and is not evidence about an Atlas custom ro
 - Grants added: grader FIND on `completion_receipts`, `effects`, `preview_plans` (it already reads `world_revisions`); projection reader
   FIND on `gate_reports`; fixture builder FIND `deployments` and INSERT/FIND `campaign_authority` (+ INSERT `campaign_authority_touches`); `domain_executor` and `promoter`
   FIND `campaign_authority` and FIND/UPDATE `campaign_authority_touches` (the fence counter only).
+- `run_attestations` (`AttestationRepository.record/list`): one insert-only row per (job, fence) holding the lease holder's model
+  attestation. `record` runs in one transaction with the job fence, so a fenced-out holder cannot attest; an identical repeat returns
+  the row, a different stamp for the same fence is `AttestationConflict`. The worker inserts; the grader and projection reader read;
+  nobody updates or removes, so principals that can UPDATE `jobs` cannot rewrite the stamp the gate checks.
+- `guard_exports` (`GuardExportRepository.record/latest`): insert-only leak-guard export generations written by the privacy
+  controller and read by the observer, which holds on a guard file older than `latest` (by maximum generation) or whose
+  export does not cover the current subject set (G-1: `subject_set_generations` is bumped by `SubjectTokenRepository.put` in the
+  same transaction that registers a subject, an export records the subject-set generation it read BEFORE it read the subject
+  list, and `status()` is `covered` only when the latest export's generation is not behind the current one). G-4: `record` takes
+  the latest generation the caller saw and refuses `GuardExportRaced` otherwise, and refuses an unconditional call. A lower generation
+  than the newest, or a subject-set generation older than the previous export's, is `GuardGenerationRegression`; claiming a
+  generation ahead of the current one is `InvalidGuardExport`.
 
 | Residual | Detail |
 |---|---|

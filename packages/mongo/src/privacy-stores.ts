@@ -1,3 +1,4 @@
+import { bumpSubjectSetGeneration } from './guard-exports.js';
 import type { ClientSession, Document } from 'mongodb';
 import { contentHash, type JsonValue, type ScopeKey } from '@expunge/contracts';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
@@ -168,24 +169,30 @@ export class SubjectTokenRepository {
   private get rows() {
     return this.service.control.collection<Document & { _id: string }>('subject_tokens');
   }
+  /**
+   * Registers one subject token entry and, in the SAME transaction, bumps the scope's subject-set generation, so a guard
+   * export that read an older generation is visibly behind the moment this commits. An entry that already exists changes
+   * nothing and bumps nothing.
+   */
   async put(scope: ScopeKey, entry: SubjectTokenEntry): Promise<'created' | 'exists'> {
     requirePrivacy(this.service);
     assertIdentifier(entry.provider);
+    const _id = rowId(
+      'token',
+      scope,
+      `${entry.subjectHandle}\u0000${entry.provider}\u0000${entry.tokenGeneration}`,
+    );
     try {
-      await this.rows.insertOne({
-        _id: rowId(
-          'token',
-          scope,
-          `${entry.subjectHandle}\u0000${entry.provider}\u0000${entry.tokenGeneration}`,
-        ),
-        ...scopeFilter(scope),
-        ...entry,
+      return await this.service.transaction(async (session) => {
+        if (await this.rows.findOne({ _id }, { session, projection: { _id: 1 } })) return 'exists' as const;
+        await this.rows.insertOne({ _id, ...scopeFilter(scope), ...entry }, { session });
+        await bumpSubjectSetGeneration(this.service, scope, session);
+        return 'created' as const;
       });
     } catch (error) {
       if (isDuplicate(error)) return 'exists';
       throw error;
     }
-    return 'created';
   }
   async list(scope: ScopeKey, limit = 1000): Promise<SubjectTokenEntry[]> {
     requirePrivacy(this.service);
