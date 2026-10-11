@@ -111,6 +111,7 @@ export class RunSession {
       const read = readMeterCarry(job.checkpoint);
       if ('invalid' in read) throw new RuntimeError('CheckpointInvalid');
       this.carried = read.carry;
+      if (read.carry.provider) this.attempts.seed(read.carry.provider); // per-JOB totals across takeovers
       const modelCallsLeft = bundle.limits.modelCalls - this.carried.modelCalls;
       const wallLeft = bundle.limits.wallTimeMs - this.carried.wallTimeMs;
       this.maxSteps = Math.max(1, modelCallsLeft);
@@ -422,13 +423,14 @@ export class RunSession {
 
   /** Model phases: if nothing happens for one phase bound while no tool runs, the run is stopped. */
   private armWatchdog(): void {
+    this.attempts.clearWindow(); // a new watchdog window starts with no provider retry on record
     clearTimeout(this.watchdog);
     if (this.finalized || this.innerFinished || this.stopping) return;
     this.watchdog = setTimeout(() => {
       if (this.activeTools !== 0) return;
       // A provider retry/backoff was pending (the last attempt got a retriable status or a connection error and the SDK is
       // sleeping before its next attempt): the delay is the provider's, so it ends as ModelUnavailable, not PhaseTimeout.
-      if (this.attempts.retryPending) {
+      if (this.attempts.retriedSinceArm) {
         this.attempts.markBackoffTimeout();
         this.fail('ModelUnavailable', 'phase_timeout');
       } else this.fail('PhaseTimeout', 'phase_timeout');
@@ -442,7 +444,9 @@ export class RunSession {
 
   /** The job's cumulative usage now: earlier sessions plus this one. */
   private currentCarry(): MeterCarry {
-    return (this.meter as UsageMeter).carry(this.carried.wallTimeMs + (Date.now() - this.startedAt));
+    const carry = (this.meter as UsageMeter).carry(this.carried.wallTimeMs + (Date.now() - this.startedAt));
+    const provider = this.attempts.snapshot();
+    return provider.attempts > 0 ? { ...carry, provider } : carry;
   }
 
   private fail(code: RuntimeErrorCode | string, end: RunEnd): void {
