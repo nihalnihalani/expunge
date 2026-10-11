@@ -5,11 +5,14 @@ import { z } from 'zod';
 import type { EvidenceDelivery, ProjectionEventKind } from './projection.js';
 
 export * from './projection.js';
+export * from './source.js';
 
 export const CONTRACT_VERSION = 1 as const;
 export const GUARDRAIL_MAX_DEPTH = 8;
 export const GUARDRAIL_MAX_NODES = 2048;
-export type Environment = 'dev' | 'evaluation' | 'demo';
+export const ENVIRONMENTS = ['dev', 'evaluation', 'demo', 'staging', 'production'] as const;
+export type Environment = (typeof ENVIRONMENTS)[number];
+export const environmentSchema = z.enum(ENVIRONMENTS);
 export type TargetKind = 'worker' | 'improver' | 'hider';
 export type EffectKind = 'delete' | 'redact' | 'restrict' | 'tombstone';
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
