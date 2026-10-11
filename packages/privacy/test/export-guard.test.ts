@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -88,5 +89,14 @@ describe('exportGuardFile', () => {
       exportGuardFile({ tokens: store(0) }, SCOPE, path, { providerOrganizationId: 'org-1' }),
     ).rejects.toMatchObject({ code: 'MissingForbiddenLiterals' });
     expect(() => statSync(path)).toThrow();
+  });
+  it('removes its temp file and leaves the previous file untouched when the rename fails', async () => {
+    const target = join(dir, 'is-a-dir');
+    mkdirSync(target); // renaming a file over a directory fails
+    await expect(
+      exportGuardFile({ tokens: store(1) }, SCOPE, target, { providerOrganizationId: 'org-1' }),
+    ).rejects.toThrow();
+    expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    expect(statSync(target).isDirectory()).toBe(true);
   });
 });

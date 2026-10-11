@@ -39,6 +39,18 @@ export async function exportGuardFile(
     throw error;
   }
   closeSync(fd);
-  renameSync(temp, path);
+  try {
+    renameSync(temp, path);
+  } catch (error) {
+    unlinkSync(temp); // never leave a plaintext temp file behind when the rename fails
+    throw error;
+  }
+  // Make the rename itself durable: fsync the directory entry.
+  const dirFd = openSync(dirname(path), 'r');
+  try {
+    fsyncSync(dirFd);
+  } finally {
+    closeSync(dirFd);
+  }
   return { literals: guard.forbiddenLiterals.length, privateIdHashes: guard.privateIds?.hashes.length ?? 0 };
 }
