@@ -142,6 +142,9 @@ const RETRYABLE_CODES = new Set([
   'StaleTarget',
   'StaleWorldRevision',
   'PartialEffect',
+  // Injected by the campaign fault layer (before commit; after commit with the acknowledgement lost).
+  'TransientFault',
+  'AcknowledgementLost',
 ]);
 const isRetryable = (error: unknown): boolean =>
   (error instanceof ProtocolError && RETRYABLE_CODES.has(error.code)) ||

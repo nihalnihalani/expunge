@@ -1,3 +1,4 @@
+import { injectAfterCommit, injectBeforeCommit } from '../faults.js';
 import { z } from 'zod';
 import { contentHash, type ActionIntent, type AppliedEffect, type PolicyDecision } from '@expunge/contracts';
 import {
@@ -172,6 +173,8 @@ export async function applyCleanupBatch(
     decisionId: decision.decisionId,
   };
   const scopes: ScopeRepository = rt.env.scopes;
+  // Fault layer: a no-op unless a trusted, stored fault plan exists for this campaign world.
+  if (ordinal >= prepared.committedPrefix) await injectBeforeCommit(rt, ordinal);
   const receipt = await rt.env.effects.commitEffect({
     actor: rt.actor,
     lease: rt.lease,
@@ -212,6 +215,7 @@ export async function applyCleanupBatch(
       return applied;
     },
   });
+  if (ordinal >= prepared.committedPrefix) await injectAfterCommit(rt, ordinal);
   const replayed = ordinal < prepared.committedPrefix;
   // Events describe committed state; the receipt id is stable across a replay, so a repeat appends nothing new.
   const byCollection = new Map<string, string[]>();
