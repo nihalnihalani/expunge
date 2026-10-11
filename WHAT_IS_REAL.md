@@ -4,6 +4,22 @@ Maps every claim Expunge makes to the code path that implements it, the upstream
 
 Last updated: 2026-10-11 12:16Z real UTC. Git HEAD: e2e1db1 (42 commits, pushed). Rows marked "commit pending" are verified on a checkpoint and in the steward's queue; rows marked "owner-reported" have no verifier row yet.
 
+## Demo snapshot (2026-10-11, about 23:45Z, branch charlie)
+
+This section supersedes older rows where they disagree. Walkthrough: `docs/demo/DEMO.md`.
+
+| Demo claim | Code path | Evidence | Real today? |
+|---|---|---|---|
+| Worker runs a cleanup against the invited Atlas Sandbox with a real model provider | `apps/worker/`, `packages/domain/`, `packages/runtime/` | job `job_eea9d347…` (decision 22): 5 calls, receipt `a685d993…` incomplete, `run_attestations` row written | Yes, real Atlas and real provider; synthetic seeded world, not owner data |
+| Atlas enforces least-privilege roles for nine principals | `packages/mongo/src/roles.ts`, `scripts/atlas-roles-apply.ts`, `scripts/atlas-rbac-probe.ts` | apply: 8 roles patched additions-only, users untouched (DA-17); probe: 2,844 outcomes equal the manifest, 0 surprises, 0 writes (DA-18) | Yes for find/insert/update/remove on 79 collections; a full privilege-set comparison (DA-18 RP-1) is open |
+| A run without a model stamp fails closed; the gate reads stamps only from insert-only `run_attestations` | `apps/worker/src/dispatch.ts`, `packages/gate/src/job-evidence.ts` | `ModelAttestationFailed` run on Atlas before the roles granted INSERT; gate live 167/167, then 222/222 with part 2 | Yes |
+| Candidate harness compiled by the real harness-compiler with a computed authority class | `scripts/demo/candidate.ts`, `packages/harness-compiler/` | `docs/demo/candidate.md`: child `f1eb5184…` (schema mode all registered fields, nested arrays, traversal depth 5), class behavioral, no grant required | Compile is real; the edit is operator-authored and its evidence citation is an operator transcription, not verified evidence; the evolver has no real model adapter |
+| Baseline vs candidate on fresh worlds with the real model | `scripts/demo/pilot.ts` | `docs/demo/pilot.md`: 12 episodes, all receipts verified, 0 collateral; W0 0/6 useful, candidate `f1eb5184…` 3/6 (all on `direct_nested`; both arms fail `alias_two_hop`); a second run gave the same split | Pilot only, not admission; 6 pairs, no statistics; operator-written eligibility rows as demo setup |
+| Approval descriptor, single-use grant, atomic promotion, pinned run, rollback | `packages/deployment/`, `scripts/demo/promote.ts` | `docs/demo/promotion.md`: promotion revision 0 to 1 with the grant consumed in the same transaction, rollback 1 to 2; one real-model job per arm on identically seeded fresh worlds: W0 5 targeted residuals (receipt incomplete), child 0 (receipt complete_in_registered_scope), 0 collateral, child about 2.5 times the tokens | Mechanics real; the admit report is a labelled TEST FIXTURE, not a real admission; one run per arm is an anecdote, not a measurement |
+| Admission of a candidate by the gate with real episodes | `packages/gate/` | not run (needs 38 paired trials) | Not demonstrated |
+| Worker episode traced to Raindrop and read back as evidence | `packages/observability/`, `packages/observer/` | baseline job: subject registered (generation 1), leak guard exported (generation 1), outbox `evidence_ready`, event read back via the Query API (trace `7002add2…`, 20 spans) | Yes for one episode; the subject was registered by hand (submit-time registration not wired) |
+| Real owner data, Hider, meta-improver, the 360-episode protocol | | | BLOCKED or out of demo scope |
+
 ## Claims
 
 | Claim | Code path | Upstream pin | Evidence | Real today? |
