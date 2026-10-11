@@ -132,11 +132,11 @@ describe('classifyModelFailure: structured fields decide, text never does', () =
 
   it('does not inspect message text or unbounded causes, and terminates on cycles', () => {
     expect(classifyModelFailure({ status: 503, cause: { message: 'ETIMEDOUT ERR_INVALID_URL' } })).toBe(
-      'ModelUnavailable',
+      'ProviderServerError',
     );
     let deep: Record<string, unknown> = { code: 'ETIMEDOUT' };
     for (let i = 0; i < 4; i++) deep = { cause: deep };
-    expect(classifyModelFailure({ status: 503, cause: deep })).toBe('ModelUnavailable');
+    expect(classifyModelFailure({ status: 503, cause: deep })).toBe('ProviderServerError');
     const cycle: Record<string, unknown> = {};
     cycle.cause = cycle;
     expect(classifyModelFailure(cycle)).toBe('ModelRunFailed');
