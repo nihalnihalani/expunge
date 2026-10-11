@@ -22,10 +22,12 @@ import {
   generateSealedFixture,
   isHighEntropySeed,
   shapeLeaks,
+  type Derivation,
   type FixtureManifest,
   type SealedFixture,
 } from '@expunge/fixtures/sealed';
 import { REFERENCE_SOLVER_HASH, runReference } from './reference.js';
+import { plansAgree, referenceSolveIndexed } from './reference2.js';
 
 export const EVALUATOR_VERSION = 'expunge.independent-grader.v1';
 export const EVALUATOR_HASH = contentHash(
@@ -448,6 +450,10 @@ function quarantineCodes(error: unknown): string[] {
 export interface AdmitOptions {
   /** TEST ONLY: admit a hand-written, guessable seed. Production seeds are minted by the trusted service. */
   allowLowEntropySeed?: boolean;
+  /** The campaign's keyed derivation (HMAC under the private key): required unless the test flag below is set. */
+  derivation?: Derivation;
+  /** TEST ONLY: admit a world whose IDs derive from the public, unkeyed hash. */
+  allowUnkeyedDerivation?: boolean;
 }
 export function admitWorld(
   spec: WorldSpec,
@@ -465,13 +471,20 @@ export function admitWorld(
   if (!options.allowLowEntropySeed && !isHighEntropySeed(seed)) {
     return quarantine(safeHash(spec, 'world-spec'), ['weak_seed']);
   }
+  if (!options.derivation && !options.allowUnkeyedDerivation) {
+    return quarantine(safeHash(spec, 'world-spec'), ['unkeyed_derivation']);
+  }
   try {
-    const fixture = generateSealedFixture(spec, seed, binding);
+    const fixture = generateSealedFixture(spec, seed, binding, undefined, { derivation: options.derivation });
     const specHash = fixture.world.specHash;
     const reference = runReference(fixture.world, spec.resourceBounds);
     const report = gradeWorld(fixture.manifest, reference.world, { terminalStatus: 'complete' });
     if (!report.usefulCompletion)
       return quarantine(specHash, ['reference_not_solvable', ...report.reasonCodes]);
+    // Two solvers built differently must select the same records; otherwise the world is ambiguous or a solver is wrong.
+    if (!plansAgree(reference.plan, referenceSolveIndexed(fixture.world, spec.resourceBounds))) {
+      return quarantine(specHash, ['solver_disagreement']);
+    }
     if (reference.plan.traversalDepth > spec.referenceTopology.maxHops) {
       return quarantine(specHash, ['reference_topology_bound']);
     }

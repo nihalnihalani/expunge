@@ -134,7 +134,15 @@ export function publicSplitCommitment(plan: readonly SealedSplitEntry[]): SplitC
     };
   });
   const splitBuilderHash = fixtureSourceCommitment(
-    ['splits.ts', 'recipes.ts', 'source.ts', 'types.ts', 'entropy.ts', '../../contracts/src/index.ts'],
+    [
+      'splits.ts',
+      'recipes.ts',
+      'source.ts',
+      'types.ts',
+      'entropy.ts',
+      'derivation.ts',
+      '../../contracts/src/index.ts',
+    ],
     'split-builder-source',
   );
   const payload = { contractVersion: 1 as const, counts, splitBuilderHash, entries };

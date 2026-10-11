@@ -8,6 +8,7 @@ import type {
 } from '@expunge/contracts';
 import { assignRecipePath } from './paths.js';
 import { effectFor, identityTokens, seededId, validateWorldSpec } from './recipes.js';
+import { UNKEYED_DERIVATION, type Derivation } from './derivation.js';
 import { resolveScopeKey, worldIdFor } from './scope.js';
 import {
   COLLECTION_IDS,
@@ -158,7 +159,13 @@ function chainNames(seed: string, count: number, namesakeCount: number): string[
   );
 }
 
-function createContext(spec: WorldSpec, seed: string, scope: ScopeKey, worldId: string): BuildContext {
+function createContext(
+  spec: WorldSpec,
+  seed: string,
+  scope: ScopeKey,
+  worldId: string,
+  derivation: Derivation,
+): BuildContext {
   const family = spec.family as FixtureFamily;
   const chainCount = spec.unrelatedRecipes.documentsPerCollection;
   const { subjectOrdinal, aliasCount } = spec.identityRecipe;
@@ -176,7 +183,7 @@ function createContext(spec: WorldSpec, seed: string, scope: ScopeKey, worldId: 
     tokens: (chain) => {
       if (!tokenCache.has(chain)) {
         const ordinal = chain === 0 ? subjectOrdinal : subjectOrdinal + 1_000_001 + chain;
-        tokenCache.set(chain, identityTokens(seed, ordinal, aliasCount, worldId));
+        tokenCache.set(chain, identityTokens(seed, ordinal, aliasCount, worldId, derivation));
       }
       return tokenCache.get(chain)!;
     },
@@ -186,15 +193,19 @@ function createContext(spec: WorldSpec, seed: string, scope: ScopeKey, worldId: 
         idCache.set(
           chain,
           Object.fromEntries(
-            COLLECTION_IDS.map((collection) => [collection, seededId(seed, collection, role, worldId)]),
+            COLLECTION_IDS.map((collection) => [
+              collection,
+              seededId(seed, collection, role, worldId, derivation),
+            ]),
           ) as Record<CollectionId, string>,
         );
       }
       return idCache.get(chain)!;
     },
     displayName: (chain) => names[chain]!,
-    bystanderToken: (chain) => identityTokens(seed, subjectOrdinal + 2_000_001 + chain, 1, worldId)[0]!,
-    bystanderRecord: (chain) => seededId(seed, 'accounts', `bystander-${chain}`, worldId),
+    bystanderToken: (chain) =>
+      identityTokens(seed, subjectOrdinal + 2_000_001 + chain, 1, worldId, derivation)[0]!,
+    bystanderRecord: (chain) => seededId(seed, 'accounts', `bystander-${chain}`, worldId, derivation),
     edges: (chain) => {
       if (!edgeCache.has(chain)) {
         edgeCache.set(chain, topology(family, context.ids(chain), spec.referenceTopology.includeCycles));
@@ -371,7 +382,17 @@ function orderByRole(
  * {tenantId, env, scopeId} is read from it; the same resolved scope key is hashed into the world ID and
  * emitted on the registry and every document, so an implicit default equals its explicit equivalent.
  */
-export function generateWorld(spec: WorldSpec, seed: string, binding?: ScopeKey): VisibleWorld {
+export interface GenerateOptions {
+  /** Keyed derivation for campaign worlds; absent means the public (unkeyed) derivation, for tests. */
+  derivation?: Derivation;
+}
+export function generateWorld(
+  spec: WorldSpec,
+  seed: string,
+  binding?: ScopeKey,
+  options: GenerateOptions = {},
+): VisibleWorld {
+  const derivation = options.derivation ?? UNKEYED_DERIVATION;
   const problems = validateWorldSpec(spec, seed);
   if (problems.length) throw new WorldSpecError(problems);
   const scope = resolveScopeKey(binding);
@@ -381,9 +402,9 @@ export function generateWorld(spec: WorldSpec, seed: string, binding?: ScopeKey)
   } catch {
     throw new WorldSpecError(['noncanonical_spec']);
   }
-  const worldId = worldIdFor(specHash, seed, scope);
+  const worldId = worldIdFor(specHash, seed, scope, derivation.keyId);
   const family = spec.family as FixtureFamily;
-  const context = createContext(spec, seed, scope, worldId);
+  const context = createContext(spec, seed, scope, worldId, derivation);
   const collections = Object.fromEntries(COLLECTION_IDS.map((id) => [id, []])) as unknown as WorldCollections;
   const fields: FieldDescriptor[] = [];
   const referenceEdges: ReferenceDeclaration[] = [];

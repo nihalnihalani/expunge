@@ -7,7 +7,7 @@ import {
   generateWorld,
   type VisibleWorld,
 } from '@expunge/fixtures';
-import { bindMintedSeed, buildSealedSplitPlan, mintSeed } from '@expunge/fixtures/sealed';
+import { bindMintedSeed, buildSealedSplitPlan, keyedDerivation, mintSeed } from '@expunge/fixtures/sealed';
 import { contentHash } from '@expunge/contracts';
 import { admitWorld, publicAdmissionVerdict, referenceSolve } from '../src/index.js';
 import { admit } from './helpers.js';
@@ -152,11 +152,19 @@ describe('fixture bounds at admission: six collections, 500 documents, five refe
     }
     // The explicit test-only flag still admits it, and the verdict never reveals the seed either way.
     expect(admit(spec, 'demo-3').admitted).toBe(true);
-    // A minted seed is admitted by default: the trusted service, not the caller or Hider, supplies the seed.
+    // A minted seed with the campaign's keyed derivation is admitted: the trusted service supplies seed and key.
     const minted = bindMintedSeed(createWorldSpec({ family: 'diamond_alias', seed: 'ignored-by-the-hider' }));
     expect(minted.seed).toMatch(/^[0-9a-f]{64}$/);
     expect(minted.spec.seedCommitment).not.toBe(spec.seedCommitment);
-    const admission = admitWorld(minted.spec, minted.seed);
+    const derivation = keyedDerivation(
+      new Uint8Array(Array.from({ length: 32 }, (_, i) => (i * 5 + 1) & 0xff)),
+      'key_test_campaign',
+    );
+    const admission = admitWorld(minted.spec, minted.seed, undefined, { derivation });
+    // Without the campaign key the public derivation would let a leaked seed reveal every target: refused.
+    expect(publicAdmissionVerdict(admitWorld(minted.spec, minted.seed)).reasonCodes).toEqual([
+      'unkeyed_derivation',
+    ]);
     expect(admission.admitted).toBe(true);
     expect(new Set([mintSeed(), mintSeed(), mintSeed()]).size).toBe(3);
     // A Hider-supplied commitment for a seed the trusted service does not hold cannot be admitted.

@@ -150,6 +150,7 @@ describe('synthetic fixture admission surface', () => {
   it('commits implementation source bytes rather than a version label alone', () => {
     const files = [
       'generator.ts',
+      'derivation.ts',
       'entropy.ts',
       'recipes.ts',
       'paths.ts',
@@ -193,6 +194,7 @@ describe('synthetic fixture admission surface', () => {
       'source.ts',
       'types.ts',
       'entropy.ts',
+      'derivation.ts',
       '../../contracts/src/index.ts',
     ].sort();
     const sources = files.map((moduleId) => ({

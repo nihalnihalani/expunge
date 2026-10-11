@@ -8,6 +8,13 @@ export {
 } from './reference.js';
 export type { ReferencePlan } from './reference.js';
 export {
+  INDEXED_SOLVER_HASH,
+  INDEXED_SOLVER_VERSION,
+  plansAgree,
+  referenceSolveIndexed,
+} from './reference2.js';
+export type { IndexedPlan } from './reference2.js';
+export {
   gradeWorld,
   admitWorld,
   publicAdmissionVerdict,

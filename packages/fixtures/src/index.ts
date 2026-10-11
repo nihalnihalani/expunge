@@ -23,6 +23,7 @@ export {
   ELIGIBILITY_POLICY_HASH,
 } from './recipes.js';
 export { generateWorld, WorldSpecError } from './generator.js';
+export type { GenerateOptions } from './generator.js';
 export { DEFAULT_SCOPE_KEY, resolveScopeKey, worldIdFor, deriveWorldScopeKey } from './scope.js';
 export { valuesAtPath, isRecipePath, RECIPE_PATH_MAX_SEGMENTS } from './paths.js';
 export { structuralSignature, publicSplitCommitment } from './splits.js';

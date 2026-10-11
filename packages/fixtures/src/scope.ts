@@ -35,8 +35,17 @@ export function resolveScopeKey(binding?: unknown): ScopeKey {
 }
 
 /** Domain-separated world identity over the spec commitment, private seed and the selected scope key only. */
-export function worldIdFor(specHash: string, seed: string, scope: ScopeKey): string {
-  const digest = contentHash({ specHash, seed, scope: scopeIdentity(scope) }, 'world');
+export function worldIdFor(
+  specHash: string,
+  seed: string,
+  scope: ScopeKey,
+  keyId: string | null = null,
+): string {
+  // A keyed world is a different world from the unkeyed one built from the same inputs: its IDs differ.
+  const digest = contentHash(
+    { specHash, seed, scope: scopeIdentity(scope), ...(keyId === null ? {} : { keyId }) },
+    'world',
+  );
   return `world_${digest.slice(0, 24)}`;
 }
 
