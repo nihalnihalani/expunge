@@ -148,6 +148,7 @@ describe('workbench frame', () => {
   it('registers only the tabs whose views exist', () => {
     expect(availableTabs()).toEqual([
       'workbench',
+      'evidence',
       'candidate',
       'evaluation',
       'receipt',

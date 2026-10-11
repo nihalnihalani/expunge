@@ -1,0 +1,20 @@
+# PKT-67 manifest (Evidence view), 2026-10-11T16:37:54Z; HEAD 97a214e stacked with the PKT-52, 53, 56, 66 manifests, then this packet; node 24.13.1; build id: c4069a66c3f79b8a26eea18318a3e39c78a768b7d4fe45430c33c98160c0f847 (results-s11.json records it). Full-stack proof: tsc exit 0, vitest 77 files 581 passed 5 skipped (root parity tests) 0 failed, browser s1-s11 exit 0 0 failures. A bundle that is evidence_ready but truncated shows an incomplete chip 'evidence ready, truncated' and the copy 'up to the cap; later components may be missing' (test; mutant killed). tests/expunge-workbench.test.tsx is a REAL entry here with the S10 change applied (tab list ['workbench','evidence','candidate','evaluation','receipt']): it must be committed with this packet and NOT earlier. DESIGN.md carries the known-issues entry for the intermittent upstream telemetry test.
+d4d108a2b067da6b78ac2efe096e51560887cd0d802f269226479ea7ff56c1e2  apps/operator/src/client/expunge/views/EvidenceView.tsx
+0c718d0b08c37d57b3fbde3c39dbc6dfa02578c85baf0f7be9e5a97d3becaaca  apps/operator/src/client/expunge/css/58-evidence.css
+236b305735368d1b6aad3d516a74b7b97268da9129eef0e99c5533229b0c222a  apps/operator/tests/expunge-evidence.test.tsx
+6c99b00cc11eec40688076249dd935c03cb51c25939736add0f577dcf65ee4d3  apps/operator/tests/fixtures/ext/70-evidence.ts
+ac8a6b1bd55965c743ded7359ba15851a22c183584745478bd347f6c694ef4dc  apps/operator/tests/browser/s11.mjs
+309b84972c705a54faa37078b54ab5b7c56285384ff02592fd3bc27cc3490692  apps/operator/tests/expunge-workbench.test.tsx
+61f19fe8faf0355f3535e2e33c79dd5a3e7cd0a56f423ebadfd72e44056f1714  docs/ui/S10-held-expunge-workbench.test.tsx.patch
+b1b2099ab961a319fa6bdf595b9b8e12e7f4a3f6949293c90f38e6c45846d63e  DESIGN.md
+9edc93bac9889ce4ce8f348a5716da76eeaabf093c76adb7d2f0365d853e7d23  docs/ui/screens/s11/results-s11.json
+d69164d2e81900b1a2b1452b627fcfc26e380f11307bfa340613f833b5b1d59b  docs/ui/screens/s11/s11-evidence-1024-dark.png
+6f62362a07d18849cd5ab91d4801a2e389d03c072544ffbfe77c6f9488e59afd  docs/ui/screens/s11/s11-evidence-1024-light.png
+887bc82a1a6d770aff2e05fd9a0f13cf4d554b534aa8dcc72d68e0b7056b36d4  docs/ui/screens/s11/s11-evidence-1440-dark.png
+e3afaeb3dac53b1144c9b67804bf9997d7c3782ca3e1ff89a48bba123e26c451  docs/ui/screens/s11/s11-evidence-1440-light.png
+abf889659d6059f8b168ed9338701d4bce8220229f8f937864ad8ec774868a0f  docs/ui/screens/s11/s11-evidence-390-dark.png
+69ea308ac6e58e30ae6449b881d77021ae7d791deed32e65cd6d884452f60855  docs/ui/screens/s11/s11-evidence-390-light.png
+229890287b2e2a29c685e7e0a96e1a1f19873afccb3edead776cea08924f8c55  docs/ui/screens/s11/s11-evidence-768-dark.png
+0bc3c76690740f3dbb7d0e29f8917d303246bdfb71a457c551256627478dd816  docs/ui/screens/s11/s11-evidence-768-light.png
+b9aa480da6e645fc3b2622cce5182aa02a706a8fff8ec5a81f73caaef729e589  docs/ui/screens/s11/s11-evidence-deadletter-1440-light.png
+81db8391a10c8e0b5fa7f6a2cea365f5686c3246146abedd370448c79807444c  docs/ui/screens/s11/s11-evidence-partial-1440-light.png

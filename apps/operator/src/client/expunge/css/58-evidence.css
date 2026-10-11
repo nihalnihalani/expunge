@@ -1,0 +1,19 @@
+.ex-root .ex-ladder {
+  display: grid;
+  gap: var(--ex-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ex-root .ex-ladder li {
+  padding: var(--ex-space-2) var(--ex-space-3);
+  border-inline-start: 4px solid var(--ex-rule-strong);
+  border-inline-start-style: dotted;
+}
+.ex-root .ex-ladder li[data-reached='yes'] {
+  border-inline-start-style: solid;
+}
+.ex-root .ex-ladder li[aria-current='step'] {
+  border-inline-start-color: var(--ex-ink);
+  font-weight: 600;
+}
