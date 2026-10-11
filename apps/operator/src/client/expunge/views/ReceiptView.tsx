@@ -17,6 +17,7 @@ import {
   UnavailableState,
 } from '../components/StateViews';
 import { StatusChip } from '../components/StatusChip';
+import { SourceScopeNotice } from '../components/SourceScopeNotice';
 import { TableWrap } from '../components/TableWrap';
 import { formatTime, plural } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -90,6 +91,7 @@ export function ReceiptDocument({
   );
   return (
     <>
+      <SourceScopeNotice binding={receipt.source} />
       <section className="ex-section" aria-labelledby="ex-rc-verdict-h">
         <h2 className="ex-h2" id="ex-rc-verdict-h">
           Verdict

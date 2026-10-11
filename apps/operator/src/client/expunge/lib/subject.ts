@@ -86,6 +86,16 @@ export function validateSubject(
   }
 }
 
+/**
+ * The value that is sent. The domain addresses an ObjectId only by its lowercase hexadecimal
+ * spelling (packages/mongo hashes.ts CANONICAL_OBJECT_ID) and hashes the raw string for the
+ * subject identity, so ABC... and abc... would be two identities for one record. An ObjectId is
+ * lowercased; every other type is sent exactly as typed (DA-7 X1).
+ */
+export function normalizeSubjectValue(idType: SubjectIdType, value: string) {
+  return idType === 'objectId' ? value.toLowerCase() : value;
+}
+
 /** A new random key for one submit; reused only for retries of that same submit. */
 export function newRequestKey() {
   const bytes = new Uint8Array(16);

@@ -1,11 +1,23 @@
-/** One valid payload per projection kind. FIXTURE data. */
+/** Historical fixture payloads, excluded from real-data/default acceptance. Never import into production. */
 import type { ProjectionPayloadByKind } from '../../src/shared/expunge.js';
 import { hex } from './expunge-data.js';
 
 const when = '2026-10-11T09:00:00.000Z';
-export const samplePayloads: {
-  [K in keyof ProjectionPayloadByKind]: ProjectionPayloadByKind[K];
-} = {
+/** Retired fields stay in this test-only alias; current worker-readable payload types remain minimized. */
+type HistoricalProjectionPayloadByKind = Omit<
+  ProjectionPayloadByKind,
+  'trial_completed' | 'campaign_row_committed'
+> & {
+  trial_completed: ProjectionPayloadByKind['trial_completed'] & {
+    split: 'train' | 'protected' | 'validation' | 'final';
+    parentUseful: boolean;
+    candidateUseful: boolean;
+  };
+  campaign_row_committed: ProjectionPayloadByKind['campaign_row_committed'] & {
+    admitted?: boolean;
+  };
+};
+export const samplePayloads: HistoricalProjectionPayloadByKind = {
   job_started: {
     jobKind: 'cleanup',
     harnessHash: hex('h'),

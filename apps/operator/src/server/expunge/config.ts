@@ -1,8 +1,9 @@
 import type { ReadinessCheck } from '../../shared/expunge.js';
+import { domainOrigin } from './domain-origin.js';
 
 /** Server-side Expunge configuration, described by names and presence only. */
 export interface ExpungeConfigView {
-  /** `pass` means the read projection principal is present and well formed. No network. */
+  /** `pass` means the domain origin, read projection principal and owner binding are well formed. No network. */
   configured: ReadinessCheck;
   /**
    * Which writes can work. All of them need the owner access token on the operator (an unauthenticated
@@ -48,26 +49,11 @@ export function applyTelemetryDefault(env: Record<string, string | undefined>) {
   if (env.EXPUNGE_ALLOW_TELEMETRY !== '1') env.DO_NOT_TRACK = '1';
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-
-function validOrigin(value: string) {
-  try {
-    const url = new URL(value);
-    // Tokens travel to this address, so cleartext http is only for the same machine.
-    const protocolOk =
-      url.protocol === 'https:' ||
-      (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname));
-    return (
-      protocolOk &&
-      !url.username &&
-      !url.password &&
-      url.pathname === '/' &&
-      !url.search &&
-      !url.hash
-    );
-  } catch {
-    return false;
-  }
+/** Owner identity is supplied by configuration; no default principal is invented. */
+export function validOperatorOwnerId(value: string): boolean {
+  // eslint-disable-next-line no-control-regex -- header/storage identity must not contain controls
+  const hasControls = /[\u0000-\u001f\u007f]/.test(value);
+  return value.trim().length > 0 && value.length <= 256 && !hasControls;
 }
 
 export function describeExpungeConfig(env: Env): ExpungeConfigView {
@@ -81,8 +67,10 @@ export function describeExpungeConfig(env: Env): ExpungeConfigView {
     }
     if (
       name === 'EXPUNGE_DOMAIN_URL'
-        ? !validOrigin(value)
-        : value.length < MIN_TOKEN_LENGTH
+        ? domainOrigin(value) === null
+        : name === 'OWNER_ID'
+          ? !validOperatorOwnerId(value)
+          : value.length < MIN_TOKEN_LENGTH
     ) {
       malformed.push(name);
       return false;
@@ -91,6 +79,7 @@ export function describeExpungeConfig(env: Env): ExpungeConfigView {
   };
   check('EXPUNGE_DOMAIN_URL', true);
   check(READ_TOKEN, true);
+  check('OWNER_ID', true);
   const owner = Boolean(env[OWNER_TOKEN]?.trim());
   const submitRole = check(JOB_WRITE_TOKEN, false);
   const approveRole = check(APPROVAL_TOKEN, false);
@@ -112,7 +101,7 @@ export function describeExpungeConfig(env: Env): ExpungeConfigView {
           reason: null,
           missing: [],
           detail:
-            'The domain service address and the read projection credential are present and well formed. This is not a connectivity check.',
+            'The domain service address, read projection credential and configured owner binding are present and well formed. This is not a connectivity or authentication check.',
           observedAt: new Date().toISOString(),
         }
       : {

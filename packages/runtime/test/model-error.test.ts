@@ -92,4 +92,53 @@ describe('classifyModelFailure: structured fields decide, text never does', () =
     for (let i = 0; i < 6; i++) deep = { cause: deep };
     expect(classifyModelFailure(deep)).toBe('ModelRunFailed'); // too deep to trust
   });
+
+  it('vetoes nested timeouts before considering any infrastructure wrapper', () => {
+    for (const error of [
+      {
+        name: 'APIConnectionError',
+        cause: { name: 'TypeError', cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } },
+      },
+      { status: 503, cause: { code: 'ETIMEDOUT' } },
+      { name: 'FetchError', cause: { status: 408 } },
+      { name: 'APIConnectionError', cause: { name: 'APIConnectionTimeoutError' } },
+      { statusCode: 429, cause: { cause: { cause: { name: 'TimeoutError' } } } },
+      { status: 503, statusCode: 408 },
+    ])
+      expect(classifyModelFailure(error)).toBe('ModelRunFailed');
+  });
+
+  it('vetoes explicit request construction failures and aborts across the bounded chain', () => {
+    for (const error of [
+      { name: 'FetchError', code: 'ERR_INVALID_URL' },
+      { name: 'FetchError', cause: { code: 'ERR_INVALID_URL' } },
+      { name: 'APIConnectionError', cause: { code: 'ERR_INVALID_ARG_TYPE' } },
+      { status: 503, cause: { code: 'UND_ERR_INVALID_ARG' } },
+      { status: 429, cause: { name: 'AbortError' } },
+      { name: 'APIConnectionError', cause: { name: 'APIUserAbortError' } },
+      { name: 'FetchError', cause: { code: 'ABORT_ERR' } },
+    ])
+      expect(classifyModelFailure(error)).toBe('ModelRunFailed');
+  });
+
+  it('keeps request status precedence even when a wrapper or code claims infrastructure', () => {
+    for (const error of [
+      { status: 400, name: 'APIConnectionError', code: 'ECONNRESET' },
+      { name: 'APIConnectionError', cause: { status: 400, code: 'ECONNRESET' } },
+      { status: 503, cause: { status: 422 } },
+    ])
+      expect(classifyModelFailure(error)).toBe('ModelRunFailed');
+  });
+
+  it('does not inspect message text or unbounded causes, and terminates on cycles', () => {
+    expect(classifyModelFailure({ status: 503, cause: { message: 'ETIMEDOUT ERR_INVALID_URL' } })).toBe(
+      'ModelUnavailable',
+    );
+    let deep: Record<string, unknown> = { code: 'ETIMEDOUT' };
+    for (let i = 0; i < 4; i++) deep = { cause: deep };
+    expect(classifyModelFailure({ status: 503, cause: deep })).toBe('ModelUnavailable');
+    const cycle: Record<string, unknown> = {};
+    cycle.cause = cycle;
+    expect(classifyModelFailure(cycle)).toBe('ModelRunFailed');
+  });
 });

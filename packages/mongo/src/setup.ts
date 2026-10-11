@@ -1,5 +1,11 @@
 import type { Document, IndexSpecification, CreateIndexesOptions } from 'mongodb';
-import type { DeploymentKey, Environment, ScopeKey, TargetKind } from '@expunge/contracts';
+import {
+  ENVIRONMENTS,
+  type DeploymentKey,
+  type Environment,
+  type ScopeKey,
+  type TargetKind,
+} from '@expunge/contracts';
 import { requirePrincipal, type MongoService } from './client.js';
 import { AuthorityRepository } from './authority.js';
 import { AuthorityPolicyRepository } from './policy.js';
@@ -13,6 +19,7 @@ import { CAMPAIGN_RESULT_COLLECTIONS, CAMPAIGN_RESULT_INDEXES } from './validato
 import { GATE_CONTROL_COLLECTIONS, GATE_CONTROL_INDEXES } from './validators-extra.js';
 import { ATTEST_COLLECTIONS, ATTEST_INDEXES } from './validators-attest.js';
 import { PRIVACY_COLLECTIONS, PRIVACY_INDEXES } from './validators-privacy.js';
+import { NATIVE_SOURCE_COLLECTIONS, NATIVE_SOURCE_INDEXES } from './native-source-metadata.js';
 
 export const WORLD_COLLECTIONS = [
   'customers',
@@ -219,7 +226,6 @@ export type SetupOptions = {
   authorities?: AuthoritySeed[];
 };
 const TARGETS: TargetKind[] = ['worker', 'improver', 'hider'];
-const ENVIRONMENTS: Environment[] = ['dev', 'evaluation', 'demo'];
 /**
  * Setup seeds from the environment, never from a request: the scope named by EXPUNGE_TENANT_ID, EXPUNGE_ENV and
  * EXPUNGE_SCOPE_ID gets an authority row with floor hash EXPUNGE_AUTHORITY_FLOOR_HASH and an approval policy for

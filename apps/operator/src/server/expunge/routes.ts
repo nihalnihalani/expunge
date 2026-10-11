@@ -4,6 +4,10 @@ import {
   JOB_KINDS,
   JOB_STATUSES,
   TARGET_KINDS,
+  cleanupReadinessPassed,
+  sourceBindingMatchesReadiness,
+  sourceBindingsEqual,
+  SOURCE_ENVIRONMENTS,
   type TargetKind,
 } from '../../shared/expunge.js';
 import { describeExpungeConfig, type ExpungeConfigView } from './config.js';
@@ -45,6 +49,24 @@ export function expungeRoutes(
 ) {
   const routes = new Hono();
   const readiness = new ReadinessCache(config, domain);
+  // Refusal-only transport gate. Final effect authorization remains inside the domain transaction.
+  const resolveCleanupSourceScope = async (
+    d: ExpungeDomainService,
+    worldId: string,
+    signal: AbortSignal,
+  ) => {
+    const state = await readiness.get(true, signal);
+    if (!cleanupReadinessPassed(state)) return null;
+    const world = (await d.listWorlds(signal)).find(
+      (item) => item.worldId === worldId,
+    );
+    return world &&
+      !world.maintenanceMode &&
+      (SOURCE_ENVIRONMENTS as readonly string[]).includes(world.env) &&
+      sourceBindingMatchesReadiness(world.source, state.source)
+      ? world
+      : null;
+  };
   const problem = (
     c: Context,
     status: 400 | 401 | 404 | 409 | 501 | 502 | 503,
@@ -147,7 +169,8 @@ export function expungeRoutes(
       paramName?: string,
     ) =>
     async (c: Context) => {
-      if (!domain) return unconfigured(c);
+      if (!domain || config.configured.status !== 'pass')
+        return unconfigured(c);
       try {
         return (await handler(c, domain)) as Response;
       } catch (error) {
@@ -216,7 +239,31 @@ export function expungeRoutes(
       const parsed = previewRequestSchema.safeParse(await body(c));
       if (!parsed.success)
         return problem(c, 400, 'invalid_request', 'Invalid preview request.');
-      return c.json(await d.previewCleanup(parsed.data, c.req.raw.signal));
+      const world = await resolveCleanupSourceScope(
+        d,
+        parsed.data.worldId,
+        c.req.raw.signal,
+      );
+      if (!world)
+        return problem(
+          c,
+          503,
+          'source_not_ready',
+          'Real-source registration and cleanup permission have not been established. See Setup and readiness.',
+        );
+      const preview = await d.previewCleanup(parsed.data, c.req.raw.signal);
+      if (
+        !sourceBindingsEqual(preview.source, world.source) ||
+        preview.worldRevision !== world.worldRevision ||
+        preview.scopeRevision !== world.scopeRevision
+      )
+        return problem(
+          c,
+          409,
+          'conflict',
+          'The preview source binding or scope changed. Re-check setup and preview again.',
+        );
+      return c.json(preview);
     }),
   );
   routes.get(
@@ -253,6 +300,19 @@ export function expungeRoutes(
       const parsed = submitRequestSchema.safeParse(await body(c));
       if (!parsed.success)
         return problem(c, 400, 'invalid_request', 'Invalid cleanup request.');
+      if (
+        !(await resolveCleanupSourceScope(
+          d,
+          parsed.data.worldId,
+          c.req.raw.signal,
+        ))
+      )
+        return problem(
+          c,
+          503,
+          'source_not_ready',
+          'Real-source registration and cleanup permission have not been established. See Setup and readiness.',
+        );
       return c.json(await d.submitCleanup(parsed.data, c.req.raw.signal), 202);
     }),
   );

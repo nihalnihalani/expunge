@@ -1,6 +1,7 @@
 import type { ClientSession, Document } from 'mongodb';
 import {
   contentHash,
+  scopeIdentity,
   type ArtifactEligibility,
   type ProvenanceEdge,
   type ScopeKey,
@@ -124,6 +125,38 @@ export class ProvenanceRepository {
     return this.service.control.collection<ProvenanceClosure>('provenance_closures');
   }
 
+  /** Common write fence for ancestry mutation and use, inside the caller's surrounding transaction. */
+  async touchScope(key: ScopeKey, session: ClientSession): Promise<void> {
+    requirePrincipal(this.service, [
+      'domain_executor',
+      'observer',
+      'proposer',
+      'promoter',
+      'privacy_controller',
+      'grader',
+      'fixture_builder',
+      'setup',
+    ]);
+    await this.service.control
+      .collection<Document & { _id: string }>('provenance_scope_barriers')
+      .updateOne(
+        { _id: scopeIdentity(key), ...scopeFilter(key) },
+        { $setOnInsert: scopeFilter(key), $inc: { touches: 1 }, $currentDate: { updatedAt: true } },
+        { session, upsert: true },
+      );
+  }
+
+  async fenceUse(key: ScopeKey, hashes: string[], session: ClientSession): Promise<void> {
+    const unique = [...new Set(hashes)];
+    if (unique.length > 4097 || unique.some((hash) => typeof hash !== 'string' || !hash || hash.length > 256))
+      fail('ProvenanceUseBounds');
+    await this.touchScope(key, session);
+    for (const part of chunks(unique, RETRIEVAL_MAX_HASHES)) {
+      const permitted = new Set(await this.permitted(key, part, session));
+      if (part.some((hash) => !permitted.has(hash))) fail('ContextOrHarnessNotPermitted');
+    }
+  }
+
   async append(
     key: ScopeKey,
     fromId: string,
@@ -141,6 +174,16 @@ export class ProvenanceRepository {
       'setup',
     ]);
     const edgeKey = contentHash({ ...scopeFilter(key), fromId, toId, kind }, 'provenance-edge');
+    if (!session)
+      return this.service.transaction((transactionSession) =>
+        this.append(key, fromId, toId, kind, transactionSession),
+      );
+    await this.touchScope(key, session);
+    const existing = await this.edges.findOne({ ...scopeFilter(key), edgeKey }, { session });
+    if (existing) {
+      if (existing.fromId !== fromId || existing.toId !== toId) fail('ProvenanceEdgeConflict');
+      return;
+    }
     try {
       await this.service.control
         .collection<Document & { _id: string }>('provenance_edges')
@@ -573,6 +616,7 @@ export class ProvenanceRepository {
     closure: Pick<ProvenanceClosure, 'sourceId' | 'policyHash' | 'reasonCode'>,
     session: ClientSession,
   ): Promise<void> {
+    await this.touchScope(key, session);
     for (const part of chunks(ids, WRITE_CHUNK)) {
       await this.eligibility.bulkWrite(
         part.map((artifactHash) => ({

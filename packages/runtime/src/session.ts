@@ -208,7 +208,19 @@ export class RunSession {
         maxSteps: this.maxSteps,
         tools,
         prompt: (this.deps.prompt ?? defaultWorkerPrompt)(job, bundle),
-        shouldContinue: () => !this.stopping,
+        shouldContinue: () => {
+          const next = meter.exhausted();
+          if (!next.ok)
+            this.fail(
+              next.code,
+              next.code === 'TokenBudgetExceeded'
+                ? 'token_budget'
+                : next.code === 'CostBudgetExceeded'
+                  ? 'cost_budget'
+                  : 'error',
+            );
+          return !this.stopping;
+        },
         stepLimitNote: STEP_LIMIT_NOTE,
         // Out of band: fires from the vendored helper only when the step limit ended the run. Model text can't forge it.
         onStepLimit: () => {
@@ -431,13 +443,13 @@ export class RunSession {
 
   /** Model phases: if nothing happens for one phase bound while no tool runs, the run is stopped. */
   private armWatchdog(): void {
-    this.attempts.clearWindow(); // a new watchdog window starts with no provider retry on record
+    this.attempts.clearWindow(); // a new window retains any provider retry still in flight
     clearTimeout(this.watchdog);
     if (this.finalized || this.innerFinished || this.stopping) return;
     this.watchdog = setTimeout(() => {
       if (this.activeTools !== 0) return;
-      // A provider retry/backoff was pending (the last attempt got a retriable status or a connection error and the SDK is
-      // sleeping before its next attempt): the delay is the provider's, so it ends as ModelUnavailable, not PhaseTimeout.
+      // Provider delay occurred in this window, or remains in flight after queued activity re-armed the watchdog.
+      // Keep that delay visible as ModelUnavailable instead of assigning it to the candidate's behaviour.
       if (this.attempts.retriedSinceArm) {
         this.attempts.markBackoffTimeout();
         this.fail('ModelUnavailable', 'phase_timeout');

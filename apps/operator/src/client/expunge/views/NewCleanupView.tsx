@@ -6,6 +6,12 @@ import type {
   SubjectIdType,
   WorldSummary,
 } from '../../../shared/expunge';
+import {
+  cleanupReadinessPassed,
+  sourceBindingMatchesReadiness,
+  sourceBindingsEqual,
+  SOURCE_ENVIRONMENTS,
+} from '../../../shared/expunge';
 import { ExpungeApiError, expungeFetch } from '../api';
 import { ConnectionBanner } from '../components/ConnectionBanner';
 import { HashChip } from '../components/HashChip';
@@ -19,6 +25,7 @@ import {
   UnavailableState,
 } from '../components/StateViews';
 import { StatusChip } from '../components/StatusChip';
+import { SourceScopeNotice } from '../components/SourceScopeNotice';
 import { TableWrap } from '../components/TableWrap';
 import { formatTime } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -27,7 +34,14 @@ import { useResource } from '../hooks/useResource';
 import { useReadiness } from '../readiness';
 import type { ViewMeta, ViewProps } from '../registry';
 import { formatRoute } from '../routes';
-import { ID_TYPES, newRequestKey, validateSubject } from '../lib/subject';
+import {
+  ID_TYPES,
+  newRequestKey,
+  normalizeSubjectValue,
+  validateSubject,
+} from '../lib/subject';
+import { previewStale } from '../lib/preview';
+export { previewStale } from '../lib/preview';
 
 export const meta: ViewMeta = {
   id: 'new',
@@ -57,10 +71,20 @@ export function problemFrom(
   if (error.kind === 'transport')
     return {
       kind: 'error',
-      message: 'Could not reach the operator, so nothing was sent. Try again.',
+      message:
+        action === 'submit'
+          ? 'The acknowledgment was lost. The job may have been submitted. Reconnect and retry with the same request key to avoid a second job.'
+          : 'The preview response was not received. Reconnect and request the preview again.',
       transport: true,
     };
   switch (error.code) {
+    case 'source_not_ready':
+      return {
+        kind: 'unavailable',
+        message:
+          'Real-source registration, source binding and cleanup permission must be confirmed by the backend. See Setup and readiness.',
+        missing: [],
+      };
     case 'owner_auth_required':
       return {
         kind: 'unavailable',
@@ -115,81 +139,73 @@ export function problemFrom(
     default:
       return {
         kind: 'error',
-        message: 'The domain service returned an error. Nothing was changed.',
+        message:
+          action === 'submit'
+            ? 'Submission could not be confirmed. Check the jobs list, then retry with the same request key; the backend resolves duplicate requests.'
+            : 'The domain service could not complete the preview.',
         transport: false,
       };
   }
 }
 
-/** A preview is stale when it expired, or the world's scope or revision moved under it. */
-export function previewStale(
-  preview: CleanupPreview,
-  world: WorldSummary | undefined,
-  now: number,
-) {
-  if (now > Date.parse(preview.expiresAt)) return 'This preview has expired.';
-  if (!world) return 'The world is no longer listed.';
-  if (world.maintenanceMode) return 'The world is in maintenance mode.';
-  if (
-    world.worldRevision !== preview.worldRevision ||
-    world.scopeRevision !== preview.scopeRevision
-  )
-    return 'The world changed since this preview.';
-  return null;
-}
-
 function WorldFacts({ world }: { world: WorldSummary }) {
   return (
-    <dl className="ex-dl ex-worldfacts">
-      <dt>Scope</dt>
-      <dd>
-        <span className="ex-data">{world.scopeId}</span>{' '}
-        <span className="ex-note">
-          scope revision {world.scopeRevision}, world revision{' '}
-          {world.worldRevision}, {world.env}
-        </span>
-      </dd>
-      <dt>Registry</dt>
-      <dd>
-        {world.collectionIds.length} collections, {world.fieldCount} fields,{' '}
-        {world.referenceEdgeCount} reference edges
-      </dd>
-      <dt>Allowed effects</dt>
-      <dd>{world.allowedEffectKinds.join(', ')}</dd>
-      <dt>Eligibility policy</dt>
-      <dd>
-        {world.eligibilityPolicyId}{' '}
-        <HashChip
-          value={world.eligibilityPolicyHash}
-          label="eligibility policy hash"
-        />
-      </dd>
-      <dt>Limits</dt>
-      <dd className="ex-num">
-        scan up to {world.documentLimits.maxScanned.toLocaleString()}, change up
-        to {world.documentLimits.maxChanged.toLocaleString()}
-      </dd>
-      <dt>Discovery</dt>
-      <dd>
-        <StatusChip
-          state={
-            world.discoveryCompleteness.kind === 'partial' ? 'incomplete' : 'ok'
-          }
-          label={`Registry discovery ${world.discoveryCompleteness.kind}`}
-        />
-        {world.discoveryCompleteness.limitations.map((text) => (
-          <div className="ex-note" key={text}>
-            {text}
-          </div>
-        ))}
-      </dd>
-    </dl>
+    <>
+      <SourceScopeNotice binding={world.source} />
+      <dl className="ex-dl ex-worldfacts">
+        <dt>Scope</dt>
+        <dd>
+          <span className="ex-data">{world.scopeId}</span>{' '}
+          <span className="ex-note">
+            scope revision {world.scopeRevision}, world revision{' '}
+            {world.worldRevision}, {world.env}
+          </span>
+        </dd>
+        <dt>Registry</dt>
+        <dd>
+          {world.collectionIds.length} collections, {world.fieldCount} fields,{' '}
+          {world.referenceEdgeCount} reference edges
+        </dd>
+        <dt>Allowed effects</dt>
+        <dd>{world.allowedEffectKinds.join(', ')}</dd>
+        <dt>Eligibility policy</dt>
+        <dd>
+          {world.eligibilityPolicyId}{' '}
+          <HashChip
+            value={world.eligibilityPolicyHash}
+            label="eligibility policy hash"
+          />
+        </dd>
+        <dt>Limits</dt>
+        <dd className="ex-num">
+          scan up to {world.documentLimits.maxScanned.toLocaleString()}, change
+          up to {world.documentLimits.maxChanged.toLocaleString()}
+        </dd>
+        <dt>Discovery</dt>
+        <dd>
+          <StatusChip
+            state={
+              world.discoveryCompleteness.kind === 'partial'
+                ? 'incomplete'
+                : 'ok'
+            }
+            label={`Registry discovery ${world.discoveryCompleteness.kind}`}
+          />
+          {world.discoveryCompleteness.limitations.map((text) => (
+            <div className="ex-note" key={text}>
+              {text}
+            </div>
+          ))}
+        </dd>
+      </dl>
+    </>
   );
 }
 
 export function PreviewResult({ preview }: { preview: CleanupPreview }) {
   return (
     <>
+      <SourceScopeNotice binding={preview.source} />
       <div className="ex-banner ex-banner--info" role="note">
         <strong>Operator preview, not the agent&apos;s plan.</strong>
         <span>
@@ -315,9 +331,26 @@ export default function NewCleanupView({ navigate }: ViewProps) {
     if (focusSummary > 0) summary.current?.focus();
   }, [focusSummary]);
   const validation = validateSubject(idType, value);
+  const sentValue = normalizeSubjectValue(idType, value);
+  const normalized = validation.ok && sentValue !== value;
   const showErrors = touched && !validation.ok;
   const stale = preview ? previewStale(preview, selected, now) : null;
   const writes = readiness.resource.data?.writes;
+  const readinessFresh =
+    readiness.resource.updatedAt !== null &&
+    now - readiness.resource.updatedAt <= 60_000;
+  const cleanupReady =
+    readiness.resource.status === 'ok' &&
+    readinessFresh &&
+    cleanupReadinessPassed(readiness.resource.data) &&
+    Boolean(
+      selected &&
+      (SOURCE_ENVIRONMENTS as readonly string[]).includes(selected.env) &&
+      sourceBindingMatchesReadiness(
+        selected.source,
+        readiness.resource.data?.source,
+      ),
+    );
   const edit =
     <T,>(setter: (next: T) => void) =>
     (next: T) => {
@@ -331,7 +364,7 @@ export default function NewCleanupView({ navigate }: ViewProps) {
     };
   const onPreview = async () => {
     setTouched(true);
-    if (!worldId || !validation.ok) {
+    if (!cleanupReady || !worldId || !validation.ok) {
       setFocusSummary((count) => count + 1);
       return;
     }
@@ -342,9 +375,23 @@ export default function NewCleanupView({ navigate }: ViewProps) {
     try {
       const result = await expungeFetch<CleanupPreview>('/previews', {
         method: 'POST',
-        body: { worldId, subject: { idType, value } },
+        body: { worldId, subject: { idType, value: sentValue } },
         signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
+      if (
+        !selected ||
+        result.worldId !== selected.worldId ||
+        !sourceBindingsEqual(result.source, selected.source)
+      ) {
+        setProblem({
+          kind: 'stale',
+          message:
+            'The preview does not match the selected source registration. Re-check setup and preview again.',
+        });
+        setPhase('editing');
+        return;
+      }
       setPreview(result);
       setPhase('previewed');
       requestKey.current = newRequestKey();
@@ -356,7 +403,8 @@ export default function NewCleanupView({ navigate }: ViewProps) {
     }
   };
   const onSubmit = async () => {
-    if (!preview || !worldId || stale || !requestKey.current) return;
+    if (!cleanupReady || !preview || !worldId || stale || !requestKey.current)
+      return;
     setPhase('submitting');
     setProblem(null);
     try {
@@ -366,7 +414,7 @@ export default function NewCleanupView({ navigate }: ViewProps) {
           requestKey: requestKey.current,
           worldId,
           previewId: preview.previewId,
-          subject: { idType, value },
+          subject: { idType, value: sentValue },
         },
       });
       setPhase('submitted');
@@ -390,10 +438,14 @@ export default function NewCleanupView({ navigate }: ViewProps) {
   return (
     <div className="ex-page">
       <PageHeading eyebrow="Expunge" title="New cleanup">
-        Choose an authorized world and the exact subject to remove. You will see
-        the scope, the eligibility policy and a model-free preview of effects
-        before anything is submitted.
+        Choose an authorized source scope and the exact subject to remove. You
+        will see the scope, the eligibility policy and a model-free preview of
+        effects before anything is submitted.
       </PageHeading>
+      <p className="ex-note">
+        An isolated snapshot or replay is a copy. Cleaning it verifies that
+        copy’s result; it does not erase records in the original source.
+      </p>
       {(worlds.status === 'retrying' || worlds.status === 'disconnected') && (
         <ConnectionBanner
           connection={worlds.status}
@@ -412,6 +464,19 @@ export default function NewCleanupView({ navigate }: ViewProps) {
           missing={readiness.resource.data?.configured.missing}
           onRecheck={readiness.recheck}
         />
+      )}
+      {!cleanupReady && !unavailableByReadiness && (
+        <div className="ex-banner ex-banner--warn" role="status">
+          <strong>Cleanup blocked.</strong>
+          <span>
+            The backend must report current source registration and cleanup
+            permission, and bind the selected scope to that source. See{' '}
+            <a className="ex-link" href={formatRoute({ name: 'setup' })}>
+              Setup and readiness
+            </a>
+            .
+          </span>
+        </div>
       )}
       {!unavailableByReadiness &&
         worlds.status === 'loading' &&
@@ -480,9 +545,10 @@ export default function NewCleanupView({ navigate }: ViewProps) {
             </div>
           )}
           <fieldset className="ex-fieldset">
-            <legend className="ex-legend">World</legend>
+            <legend className="ex-legend">Source scope</legend>
             <p className="ex-note">
-              Only worlds this owner is authorized for are listed.
+              Scopes come from the backend. An unreported source binding cannot
+              start cleanup.
             </p>
             {list.map((item) => (
               <label
@@ -551,13 +617,19 @@ export default function NewCleanupView({ navigate }: ViewProps) {
                 spellCheck={false}
                 value={value}
                 aria-invalid={showErrors}
-                aria-describedby={`ex-subject-hint${showErrors ? ' ex-subject-error' : ''}`}
+                aria-describedby={`ex-subject-hint${normalized ? ' ex-subject-normalized' : ''}${showErrors ? ' ex-subject-error' : ''}`}
                 onBlur={() => setTouched(true)}
                 onChange={(event) => edit(setValue)(event.target.value)}
               />
               <p className="ex-note" id="ex-subject-hint">
                 {ID_TYPES.find((item) => item.value === idType)?.hint}
               </p>
+              {normalized && (
+                <p className="ex-note" id="ex-subject-normalized">
+                  Sent in lowercase:{' '}
+                  <code className="ex-code">{sentValue}</code>
+                </p>
+              )}
               {showErrors && (
                 <p className="ex-fielderror" id="ex-subject-error">
                   {validation.message}
@@ -572,7 +644,8 @@ export default function NewCleanupView({ navigate }: ViewProps) {
               disabled={
                 phase === 'previewing' ||
                 phase === 'submitting' ||
-                needsSubmitCredential
+                needsSubmitCredential ||
+                !cleanupReady
               }
             >
               {phase === 'previewing'
@@ -686,6 +759,7 @@ export default function NewCleanupView({ navigate }: ViewProps) {
                   disabled={
                     phase === 'submitting' ||
                     needsSubmitCredential ||
+                    !cleanupReady ||
                     worlds.status === 'disconnected'
                   }
                   onClick={() => void onSubmit()}

@@ -44,7 +44,7 @@ export function describeEvent(event: ForwardedProjectionEvent): string {
     case 'candidate_proposed':
       return `Candidate ${event.payload.candidateId} for ${event.payload.target}; computed class ${words(event.payload.computedClass)}.`;
     case 'trial_completed':
-      return `Trial ${event.payload.pairId} (${event.payload.split}): parent ${event.payload.parentUseful ? 'useful' : 'not useful'}, candidate ${event.payload.candidateUseful ? 'useful' : 'not useful'}.`;
+      return `Trial ${event.payload.pairId} completed. Split and per-arm results are withheld from this event.${event.payload.reportId === null ? ' No report is linked yet.' : ' Open the linked report with authorized access for details.'}${event.payload.verdict === null ? '' : ` Gate verdict: ${event.payload.verdict}.`}`;
     case 'approval_required':
       return `Proposal ${event.payload.proposalId} needs a decision (${words(event.payload.computedClass)}).`;
     case 'harness_promoted':

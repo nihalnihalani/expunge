@@ -2,24 +2,26 @@ import type { ResourceLimits } from '@expunge/contracts';
 import type { ModelPricing, UsageSummary } from './ports.js';
 
 const count = (value: unknown): number | undefined =>
-  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 
-/** Reads a provider TokenUsage (promptTokens/completionTokens) or AG-UI spec usage (inputTokens/outputTokens). */
-export function readUsage(usage: unknown): { input: number; output: number } | undefined {
-  const record = Array.isArray(usage) ? usage[0] : usage;
+/** Each direction remains unknown unless a valid count is present; explicit zero is valid. */
+export function readUsage(usage: unknown): { input?: number; output?: number } | undefined {
+  const record = Array.isArray(usage) ? (usage.length === 1 ? usage[0] : undefined) : usage;
   if (!record || typeof record !== 'object') return undefined;
   const fields = record as Record<string, unknown>;
-  const input = count(fields.promptTokens) ?? count(fields.inputTokens);
-  const output = count(fields.completionTokens) ?? count(fields.outputTokens);
+  const direction = (primary: string, alias: string) =>
+    count(fields[primary] === undefined ? fields[alias] : fields[primary]);
+  const input = direction('promptTokens', 'inputTokens');
+  const output = direction('completionTokens', 'outputTokens');
   if (input === undefined && output === undefined) return undefined;
-  return { input: input ?? 0, output: output ?? 0 };
+  return { ...(input === undefined ? {} : { input }), ...(output === undefined ? {} : { output }) };
 }
 
-/**
- * The cumulative usage of a job across ALL its sessions, stored in the job's durable checkpoint (`checkpoint.meter`).
- * A session that takes over a lease seeds its meter from it, so budgets are per JOB, not per session. It is written
- * after every tool phase and once more when the session ends, so a crash loses at most the model call in flight.
- */
+export const hasCompletePricing = (pricing: ModelPricing | undefined): boolean =>
+  count(pricing?.inputMicrousdPerMillion) !== undefined &&
+  count(pricing?.outputMicrousdPerMillion) !== undefined;
+
+/** Numeric totals are known lower bounds. Coverage metadata carries unknown usage through takeover. */
 export type MeterCarry = {
   v: 1;
   modelCalls: number;
@@ -28,7 +30,10 @@ export type MeterCarry = {
   costMicrousd: number;
   unpricedCalls: number;
   wallTimeMs: number;
-  /** The provider SDK's HTTP attempts across all sessions (numbers only); absent when none were made. */
+  coverageVersion?: 2;
+  unknownUsageCalls?: number;
+  partialUsageCalls?: number;
+  partialCostCalls?: number;
   provider?: { attempts: number; retriedStatuses: number[]; backoffTimeout: boolean };
 };
 
@@ -41,7 +46,6 @@ export const EMPTY_CARRY: MeterCarry = {
   unpricedCalls: 0,
   wallTimeMs: 0,
 };
-
 const FIELDS = [
   'modelCalls',
   'inputTokens',
@@ -50,11 +54,9 @@ const FIELDS = [
   'unpricedCalls',
   'wallTimeMs',
 ] as const;
+const COVERAGE_FIELDS = ['unknownUsageCalls', 'partialUsageCalls', 'partialCostCalls'] as const;
 
-/**
- * Reads `checkpoint.meter`. No `meter` key means a job that has not been metered before (zero). A `meter` that is present
- * but malformed is an error, never zero: resetting budgets because a checkpoint is corrupt would fail open.
- */
+/** Present corrupt counters never become zero. Legacy carries remain readable but cannot certify complete usage. */
 export function readMeterCarry(checkpoint: unknown): { carry: MeterCarry } | { invalid: true } {
   if (!checkpoint || typeof checkpoint !== 'object' || !('meter' in checkpoint))
     return { carry: EMPTY_CARRY };
@@ -64,69 +66,121 @@ export function readMeterCarry(checkpoint: unknown): { carry: MeterCarry } | { i
   if (record.v !== 1) return { invalid: true };
   const carry: Record<string, number> = {};
   for (const field of FIELDS) {
-    const value = record[field];
-    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return { invalid: true };
+    const value = count(record[field]);
+    if (value === undefined) return { invalid: true };
     carry[field] = value;
+  }
+  if (
+    !Number.isSafeInteger(carry.inputTokens! + carry.outputTokens!) ||
+    carry.unpricedCalls! > carry.modelCalls!
+  )
+    return { invalid: true };
+  if (
+    carry.modelCalls === 0 &&
+    (carry.inputTokens! > 0 || carry.outputTokens! > 0 || carry.costMicrousd! > 0 || carry.unpricedCalls! > 0)
+  )
+    return { invalid: true };
+  const coverage: Record<string, number> = {};
+  if (record.coverageVersion !== undefined || COVERAGE_FIELDS.some((field) => record[field] !== undefined)) {
+    if (record.coverageVersion !== 2) return { invalid: true };
+    for (const field of COVERAGE_FIELDS) {
+      const value = count(record[field]);
+      if (value === undefined || value > carry.modelCalls!) return { invalid: true };
+      coverage[field] = value;
+    }
+    if (
+      coverage.partialUsageCalls! > coverage.unknownUsageCalls! ||
+      coverage.unknownUsageCalls! > carry.unpricedCalls! ||
+      coverage.partialCostCalls! > carry.unpricedCalls!
+    )
+      return { invalid: true };
   }
   const provider = readProviderCarry(record.provider);
   if (provider === 'invalid') return { invalid: true };
-  return { carry: { v: 1, ...carry, ...(provider ? { provider } : {}) } as MeterCarry };
+  // A request began without a completed model-call accounting row. Its spend cannot be reset to a fresh/free run.
+  if (carry.modelCalls === 0 && provider && provider.attempts > 0) return { invalid: true };
+  return {
+    carry: {
+      v: 1,
+      ...carry,
+      ...(record.coverageVersion === 2 ? { coverageVersion: 2, ...coverage } : {}),
+      ...(provider ? { provider } : {}),
+    } as MeterCarry,
+  };
 }
 
-/** Absent is fine; present but malformed is an error, never zero (counts are evidence and must not be reset by corruption). */
 function readProviderCarry(value: unknown): MeterCarry['provider'] | 'invalid' | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object') return 'invalid';
   const record = value as Record<string, unknown>;
   const { attempts, retriedStatuses, backoffTimeout } = record;
-  if (typeof attempts !== 'number' || !Number.isSafeInteger(attempts) || attempts < 0) return 'invalid';
+  if (count(attempts) === undefined) return 'invalid';
   if (!Array.isArray(retriedStatuses) || retriedStatuses.length > 50) return 'invalid';
   if (!retriedStatuses.every((n) => Number.isInteger(n) && n >= 100 && n <= 599)) return 'invalid';
   if (typeof backoffTimeout !== 'boolean') return 'invalid';
-  return { attempts, retriedStatuses: retriedStatuses as number[], backoffTimeout };
+  return { attempts: attempts as number, retriedStatuses: retriedStatuses as number[], backoffTimeout };
 }
 
 export type MeterVerdict =
   { ok: true } | { ok: false; code: 'TokenBudgetExceeded' | 'CostBudgetExceeded' | 'PricingUnavailable' };
 
-/**
- * Per-call token and cost meter against ResourceLimits and the frozen profile's prices. Unknown pricing is
- * unpriced, not free: a call without prices or without reported usage increments `unpricedCalls`, and cost
- * coverage is reported as partial or none. Cost is an integer ceiling in micro-US dollars.
- */
+/** Exact ceiling without unsafe floating-point multiplication; both arguments were validated safe integers. */
+const priceTokens = (tokens: number, price: number): bigint =>
+  (BigInt(tokens) * BigInt(price) + 999_999n) / 1_000_000n;
+const MAX = BigInt(Number.MAX_SAFE_INTEGER);
+
 export class UsageMeter {
-  private calls = 0;
-  private input = 0;
-  private output = 0;
-  private cost = 0;
-  private unpriced = 0;
+  private calls: number;
+  private input: number;
+  private output: number;
+  private cost: number;
+  private unpriced: number;
+  private unknownUsage: number;
+  private partialUsage: number;
+  private partialCost: number;
   constructor(
     private readonly limits: Pick<ResourceLimits, 'totalTokens' | 'maxCostMicrousd'>,
     private readonly pricing: ModelPricing | undefined,
     private readonly requirePricing: boolean,
     carried: MeterCarry = EMPTY_CARRY,
   ) {
+    if (count(limits.totalTokens) === undefined || count(limits.maxCostMicrousd) === undefined)
+      throw new Error('InvalidMeterLimits');
+    const validated = readMeterCarry({ meter: carried });
+    if ('invalid' in validated) throw new Error('InvalidMeterCarry');
     this.calls = carried.modelCalls;
     this.input = carried.inputTokens;
     this.output = carried.outputTokens;
     this.cost = carried.costMicrousd;
-    this.unpriced = carried.unpricedCalls;
+    const legacy = this.calls > 0 && carried.coverageVersion !== 2;
+    this.unpriced = legacy ? this.calls : carried.unpricedCalls;
+    this.unknownUsage = legacy ? this.calls : (carried.unknownUsageCalls ?? 0);
+    this.partialUsage =
+      legacy && this.input + this.output > 0 ? this.calls : (carried.partialUsageCalls ?? 0);
+    this.partialCost = legacy && this.cost > 0 ? this.calls : (carried.partialCostCalls ?? 0);
   }
 
-  /**
-   * Refuses to START another model call when the job's cumulative totals have already reached a limit. Nothing is
-   * refused for a job that has used nothing, so a fresh run behaves exactly as before.
-   */
+  /** Hold before another dispatch when unknown prior usage/spend prevents proof of the remaining budget. */
   exhausted(): MeterVerdict {
-    if (this.input + this.output > 0 && this.input + this.output >= this.limits.totalTokens)
+    // Every defined spend ceiling, including zero, needs a complete validated price profile before dispatch.
+    // The post-call requirePricing option cannot turn zero into an unlimited or unknown-price allowance.
+    if (!hasCompletePricing(this.pricing)) return { ok: false, code: 'PricingUnavailable' };
+    if (this.unknownUsage > 0 || this.unpriced > 0) return { ok: false, code: 'PricingUnavailable' };
+    if (this.input + this.output >= this.limits.totalTokens)
       return { ok: false, code: 'TokenBudgetExceeded' };
-    if (this.cost > 0 && this.cost >= this.limits.maxCostMicrousd)
+    if (
+      this.cost >= this.limits.maxCostMicrousd &&
+      (this.cost > 0 ||
+        (hasCompletePricing(this.pricing) &&
+          ((this.pricing?.inputMicrousdPerMillion ?? 0) > 0 ||
+            (this.pricing?.outputMicrousdPerMillion ?? 0) > 0)))
+    )
       return { ok: false, code: 'CostBudgetExceeded' };
     return { ok: true };
   }
 
-  /** The cumulative totals to persist; `wallTimeMs` is supplied by the session (it owns the clock). */
   carry(wallTimeMs: number): MeterCarry {
+    if (count(Math.round(wallTimeMs)) === undefined) throw new Error('InvalidMeterWallTime');
     return {
       v: 1,
       modelCalls: this.calls,
@@ -134,30 +188,60 @@ export class UsageMeter {
       outputTokens: this.output,
       costMicrousd: this.cost,
       unpricedCalls: this.unpriced,
-      wallTimeMs: Math.max(0, Math.round(wallTimeMs)),
+      wallTimeMs: Math.round(wallTimeMs),
+      coverageVersion: 2,
+      unknownUsageCalls: this.unknownUsage,
+      partialUsageCalls: this.partialUsage,
+      partialCostCalls: this.partialCost,
     };
   }
 
   record(usage: unknown): MeterVerdict {
+    if (!Number.isSafeInteger(this.calls + 1)) return { ok: false, code: 'TokenBudgetExceeded' };
     this.calls++;
     const read = readUsage(usage);
-    const priced =
-      read !== undefined &&
-      this.pricing?.inputMicrousdPerMillion !== undefined &&
-      this.pricing?.outputMicrousdPerMillion !== undefined;
-    if (read) {
-      this.input += read.input;
-      this.output += read.output;
+    const completeUsage = read?.input !== undefined && read.output !== undefined;
+    if (!completeUsage) {
+      this.unknownUsage++;
+      if (read) this.partialUsage++;
     }
-    if (priced && read) {
-      this.cost +=
-        Math.ceil((read.input * (this.pricing?.inputMicrousdPerMillion ?? 0)) / 1_000_000) +
-        Math.ceil((read.output * (this.pricing?.outputMicrousdPerMillion ?? 0)) / 1_000_000);
-    } else this.unpriced++;
+    const nextInput = this.input + (read?.input ?? 0);
+    const nextOutput = this.output + (read?.output ?? 0);
+    if (
+      !Number.isSafeInteger(nextInput) ||
+      !Number.isSafeInteger(nextOutput) ||
+      !Number.isSafeInteger(nextInput + nextOutput)
+    ) {
+      this.unpriced++;
+      if (completeUsage) this.unknownUsage++;
+      return { ok: false, code: 'TokenBudgetExceeded' };
+    }
+    this.input = nextInput;
+    this.output = nextOutput;
+    const inputPrice = count(this.pricing?.inputMicrousdPerMillion);
+    const outputPrice = count(this.pricing?.outputMicrousdPerMillion);
+    const knownInputCost = read?.input !== undefined && inputPrice !== undefined;
+    const knownOutputCost = read?.output !== undefined && outputPrice !== undefined;
+    const priced = completeUsage && hasCompletePricing(this.pricing);
+    if (!priced) {
+      this.unpriced++;
+      if (knownInputCost || knownOutputCost) this.partialCost++;
+    }
+    const increment =
+      (knownInputCost ? priceTokens(read!.input!, inputPrice!) : 0n) +
+      (knownOutputCost ? priceTokens(read!.output!, outputPrice!) : 0n);
+    const total = BigInt(this.cost) + increment;
+    if (total > MAX) {
+      if (priced) {
+        this.unpriced++;
+        this.partialCost++;
+      }
+      return { ok: false, code: 'CostBudgetExceeded' };
+    }
+    this.cost = Number(total);
     if (this.input + this.output > this.limits.totalTokens) return { ok: false, code: 'TokenBudgetExceeded' };
     if (this.cost > this.limits.maxCostMicrousd) return { ok: false, code: 'CostBudgetExceeded' };
-    if (!priced && this.requirePricing && this.limits.maxCostMicrousd > 0)
-      return { ok: false, code: 'PricingUnavailable' };
+    if (!priced && this.requirePricing) return { ok: false, code: 'PricingUnavailable' };
     return { ok: true };
   }
 
@@ -169,12 +253,23 @@ export class UsageMeter {
       totalTokens: this.input + this.output,
       costMicrousd: this.cost,
       unpricedCalls: this.unpriced,
-      costCoverage:
-        this.calls === 0 || this.unpriced === this.calls
+      unknownUsageCalls: this.unknownUsage,
+      usageCoverage:
+        this.calls === 0
           ? 'none'
-          : this.unpriced > 0
-            ? 'partial'
-            : 'complete',
+          : this.unknownUsage === 0
+            ? 'complete'
+            : this.unknownUsage < this.calls || this.partialUsage > 0
+              ? 'partial'
+              : 'none',
+      costCoverage:
+        this.calls === 0
+          ? 'none'
+          : this.unpriced === 0
+            ? 'complete'
+            : this.unpriced < this.calls || this.partialCost > 0
+              ? 'partial'
+              : 'none',
     };
   }
 }

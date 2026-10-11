@@ -1,88 +1,124 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderAttemptRecorder } from '../src/attempt-recorder.js';
+import { ProviderAttemptState } from '../src/attempt-recorder.js';
+import { MODEL_RETRY_POLICY } from '../src/model-retries.js';
 
-/** FAKE base fetch: answers with the next status (or throws for 'network'); nothing leaves the process. */
-const scripted = (steps: Array<number | 'network'>) => {
-  let index = 0;
-  return (async () => {
-    const step = steps[Math.min(index++, steps.length - 1)]!;
-    if (step === 'network') throw new TypeError('fetch failed');
-    return new Response('{}', { status: step });
-  }) as typeof fetch;
+/** Numeric retry state only: no provider, endpoint, model response or service double is created. */
+const response = (state: ProviderAttemptState, status: number) => {
+  state.beginAttempt();
+  state.observeResponse(status);
 };
 
-describe('ProviderAttemptRecorder (FAKE fetch)', () => {
-  it('counts attempts and records only retriable statuses, in order', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted([429, 503, 200]));
-    await recorder.fetch('http://x');
-    await recorder.fetch('http://x');
-    await recorder.fetch('http://x');
-    expect(recorder.snapshot()).toEqual({ attempts: 3, retriedStatuses: [429, 503], backoffTimeout: false });
-  });
-
-  it('the window flag is set ONLY by 429, 5xx or a connection error; 408, 409, a success and a 400 never set it', async () => {
-    for (const status of [429, 500, 502, 503, 504]) {
-      const recorder = new ProviderAttemptRecorder(scripted([status]));
-      await recorder.fetch('http://x');
-      expect(recorder.retriedSinceArm, String(status)).toBe(true);
+describe('provider attempt accounting: deterministic state transitions', () => {
+  it('records every 5xx retry the installed OpenAI and Anthropic SDKs admit', () => {
+    const state = new ProviderAttemptState();
+    for (let status = 500; status <= 599; status++) {
+      expect(MODEL_RETRY_POLICY.retriedStatuses).toContain(status);
+      const each = new ProviderAttemptState();
+      response(each, status);
+      expect(each.snapshot().retriedStatuses).toEqual([status]);
+      expect(each.retriedSinceArm).toBe(true);
+      response(state, status);
     }
-    for (const status of [408, 409, 200, 400, 401]) {
-      const recorder = new ProviderAttemptRecorder(scripted([status]));
-      await recorder.fetch('http://x');
-      expect(recorder.retriedSinceArm, String(status)).toBe(false);
+    expect(state.snapshot().attempts).toBe(100);
+    expect(state.snapshot().retriedStatuses).toHaveLength(50);
+  });
+
+  it('records SDK-retriable 408 and 409 without treating them as provider backoff', () => {
+    const state = new ProviderAttemptState();
+    for (const status of [408, 409, 200, 400, 401, 403, 404]) response(state, status);
+    expect(state.snapshot()).toEqual({ attempts: 7, retriedStatuses: [408, 409], backoffTimeout: false });
+    expect(state.retriedSinceArm).toBe(false);
+  });
+
+  it('keeps an in-flight retry when a queued activity event re-arms the watchdog', () => {
+    const state = new ProviderAttemptState();
+    response(state, 429);
+    state.clearWindow(); // activity emitted before the response but handled while the SDK backs off
+    expect(state.retriedSinceArm).toBe(true);
+    state.beginAttempt(); // the retry starts; its response has not arrived
+    state.clearWindow();
+    expect(state.retriedSinceArm).toBe(true);
+    state.markBackoffTimeout();
+    expect(state.snapshot()).toEqual({ attempts: 2, retriedStatuses: [429], backoffTimeout: true });
+  });
+
+  it('keeps a retried delay in its window until completed response activity re-arms it', () => {
+    const state = new ProviderAttemptState();
+    response(state, 505);
+    response(state, 200);
+    expect(state.retriedSinceArm).toBe(true);
+    state.clearWindow();
+    expect(state.retriedSinceArm).toBe(false);
+    state.beginAttempt(); // a slow first attempt in this window remains behaviour
+    expect(state.retriedSinceArm).toBe(false);
+  });
+
+  it('uses structured transport errors and their bounded causes, never message text', () => {
+    for (const error of [
+      { code: 'ECONNRESET' },
+      { name: 'TypeError', cause: { code: 'ENOTFOUND' } },
+      { cause: { cause: { code: 'UND_ERR_SOCKET' } } },
+      { name: 'APIConnectionError' },
+    ]) {
+      const state = new ProviderAttemptState();
+      state.beginAttempt();
+      state.observeFailure(error);
+      state.clearWindow();
+      expect(state.retriedSinceArm).toBe(true);
     }
-    const network = new ProviderAttemptRecorder(scripted(['network']));
-    await expect(network.fetch('http://x')).rejects.toThrow();
-    expect(network.retriedSinceArm).toBe(true);
+    const state = new ProviderAttemptState();
+    state.observeFailure({ message: 'ECONNRESET rate_limit_exceeded' });
+    expect(state.retriedSinceArm).toBe(false);
   });
 
-  it('408 and 409 are still recorded as retried statuses (what the SDK did), just not provider evidence', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted([408, 409, 200]));
-    for (let i = 0; i < 3; i++) await recorder.fetch('http://x');
-    expect(recorder.snapshot().retriedStatuses).toEqual([408, 409]);
-    expect(recorder.retriedSinceArm).toBe(false);
+  it('never promotes cancellation, construction failures or timeouts to connection evidence', () => {
+    for (const error of [
+      { name: 'AbortError' },
+      { name: 'AbortError', cause: { code: 'ECONNRESET' } },
+      { name: 'TypeError' },
+      { name: 'TypeError', cause: { code: 'ERR_INVALID_URL' } },
+      { code: 'ABORT_ERR' },
+      { code: 'ETIMEDOUT' },
+      { code: 'UND_ERR_CONNECT_TIMEOUT' },
+      { name: 'TimeoutError' },
+      { name: 'APIConnectionError', cause: { name: 'AbortError' } },
+      { name: 'APIConnectionError', cause: { code: 'ERR_INVALID_ARG_TYPE' } },
+      { name: 'APIConnectionError', cause: { code: 'ERR_INVALID_HTTP_TOKEN' } },
+      { name: 'APIConnectionError', cause: { name: 'APIUserAbortError' } },
+      { code: 'ECONNRESET', cause: { code: 'UND_ERR_INVALID_ARG' } },
+      { name: 'APIConnectionError', cause: { status: 400 } },
+      { name: 'APIConnectionError', cause: { status: 408 } },
+    ]) {
+      const state = new ProviderAttemptState();
+      state.beginAttempt();
+      state.observeFailure(error);
+      state.clearWindow();
+      expect(state.retriedSinceArm).toBe(false);
+    }
   });
 
-  it('the flag is per watchdog window: it survives until the next arm and then starts clean', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted([429, 200]));
-    await recorder.fetch('http://x');
-    expect(recorder.retriedSinceArm).toBe(true);
-    await recorder.fetch('http://x'); // a normal reply does not clear it by itself; the runtime's re-arm does
-    expect(recorder.retriedSinceArm).toBe(true);
-    recorder.clearWindow();
-    expect(recorder.retriedSinceArm).toBe(false);
+  it('a cancelled or invalid retry ends its in-flight marker without erasing prior window evidence', () => {
+    const state = new ProviderAttemptState();
+    response(state, 429);
+    state.beginAttempt();
+    state.observeFailure({ name: 'AbortError' });
+    expect(state.retriedSinceArm).toBe(true);
+    state.clearWindow();
+    expect(state.retriedSinceArm).toBe(false);
   });
 
-  it('seeds from earlier sessions, so the totals are per job', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted([503]));
-    recorder.seed({ attempts: 5, retriedStatuses: [429, 429], backoffTimeout: true });
-    await recorder.fetch('http://x');
-    expect(recorder.snapshot()).toEqual({
+  it('carries durable counts and backoff history across sessions, without carrying a dead request', () => {
+    const state = new ProviderAttemptState();
+    state.seed({ attempts: 5, retriedStatuses: [429, 503], backoffTimeout: true });
+    expect(state.retriedSinceArm).toBe(false);
+    response(state, 501);
+    expect(state.snapshot()).toEqual({
       attempts: 6,
-      retriedStatuses: [429, 429, 503],
+      retriedStatuses: [429, 503, 501],
       backoffTimeout: true,
     });
-    expect(recorder.retriedSinceArm).toBe(true);
-  });
-
-  it('records the backoff timeout only when the runtime marks it, and keeps the status list bounded', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted([503]));
-    for (let i = 0; i < 80; i++) await recorder.fetch('http://x');
-    expect(recorder.snapshot().retriedStatuses).toHaveLength(50);
-    expect(recorder.snapshot().backoffTimeout).toBe(false);
-    recorder.markBackoffTimeout();
-    expect(recorder.snapshot().backoffTimeout).toBe(true);
-  });
-
-  it('passes the request and response through untouched', async () => {
-    const seen: unknown[] = [];
-    const base = (async (input: unknown, init: unknown) => {
-      seen.push(input, init);
-      return new Response('payload', { status: 200 });
-    }) as typeof fetch;
-    const recorder = new ProviderAttemptRecorder(base);
-    const response = await recorder.fetch('http://x/path', { method: 'POST', body: 'b' });
-    expect(await response.text()).toBe('payload');
-    expect(seen).toEqual(['http://x/path', { method: 'POST', body: 'b' }]);
+    const snapshot = state.snapshot();
+    snapshot.retriedStatuses.push(599);
+    expect(state.snapshot().retriedStatuses).toEqual([429, 503, 501]);
   });
 });

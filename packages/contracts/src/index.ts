@@ -6,6 +6,7 @@ import type { EvidenceDelivery, ProjectionEventKind } from './projection.js';
 
 export * from './projection.js';
 export * from './source.js';
+export * from './native-run.js';
 
 export const CONTRACT_VERSION = 1 as const;
 export const GUARDRAIL_MAX_DEPTH = 8;
