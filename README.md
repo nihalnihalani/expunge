@@ -217,7 +217,7 @@ docs/                  contracts, demo, runbooks, reviews, UI audit
 
 Receipts with commands and checkpoints are in [`VERIFICATION.md`](VERIFICATION.md).
 
-## How the build is run
+## Repository layout
 
 A lead coordinates named role agents: Mongo authority, runtime and Raindrop, RSI evolution, UI/UX, independent verifiers, a devil's advocate, and a commit steward that is the only Git writer for team packets. An owner freezes each packet's paths; a verifier runs the checks on a hash-pinned checkpoint; the steward stages exactly those paths and records the commit in [`COMMIT-LEDGER.md`](COMMIT-LEDGER.md). See [`docs/continuity/OWNERSHIP.md`](docs/continuity/OWNERSHIP.md).
 

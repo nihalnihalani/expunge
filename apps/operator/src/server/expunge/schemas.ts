@@ -3,6 +3,7 @@ import {
   ARTIFACT_KINDS,
   CANDIDATE_STATES,
   EFFECT_KINDS,
+  ENVIRONMENTS,
   EXTERNAL_ERASURE_STATUSES,
   JOB_FAILURE_CODES,
   JOB_KINDS,
@@ -34,6 +35,8 @@ import {
   type PrivacyView,
   type ProjectionKind,
   type RecordDetail,
+  type SourceBindingView,
+  type SourceReadinessView,
   type WorldSummary,
 } from '../../shared/expunge.js';
 
@@ -60,8 +63,61 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const iso = z.iso.datetime();
 const int = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const bson = z.enum(['objectId', 'string', 'int', 'long']);
-const env = z.enum(['dev', 'evaluation', 'demo']);
+export const environmentSchema = z.enum(ENVIRONMENTS);
+const env = environmentSchema;
 const idList = (max: number) => z.array(id).max(max);
+const revision = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const sourceKind = z.enum(['original', 'isolated_replay']);
+const sourceId = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/);
+
+export const sourceBindingSchema: z.ZodType<SourceBindingView> = z.object({
+  sourceId,
+  sourceKind,
+  registrationHash: hash,
+  registrationRevision: revision,
+  policyRevision: revision,
+  authorizationRevision: revision,
+});
+
+export const sourceReadinessSchema: z.ZodType<SourceReadinessView> = z
+  .object({
+    registration: z.enum(['missing', 'active', 'revoked', 'unsupported']),
+    permission: z.enum(['not_checked', 'authorized', 'denied', 'revoked']),
+    sourceId: sourceId.nullable(),
+    sourceKind: sourceKind.nullable(),
+    sourceRegistrationHash: hash.nullable(),
+    registrationRevision: revision.nullable(),
+    policyRevision: revision.nullable(),
+    authorizationRevision: revision.nullable(),
+  })
+  .superRefine((source, context) => {
+    if (
+      source.registration === 'active' &&
+      [
+        source.sourceId,
+        source.sourceKind,
+        source.sourceRegistrationHash,
+        source.registrationRevision,
+        source.policyRevision,
+        source.authorizationRevision,
+      ].some((value) => value === null)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['registration'],
+        message: 'Active source requires a complete binding.',
+      });
+    if (source.permission === 'authorized' && source.registration !== 'active')
+      context.addIssue({
+        code: 'custom',
+        path: ['permission'],
+        message: 'Cleanup permission requires an active registration.',
+      });
+  });
 
 // ---- Readiness body from the domain ----
 export const domainReadinessSchema = z.object({
@@ -70,6 +126,7 @@ export const domainReadinessSchema = z.object({
     version: text(64).nullable(),
   }),
   scope: z.object({ bound: z.boolean() }),
+  source: sourceReadinessSchema.nullable().optional(),
   evidence: z.object({
     configured: z.boolean(),
     writeProvenAt: iso.nullable(),
@@ -84,6 +141,7 @@ export const worldSchema: z.ZodType<WorldSummary> = z.object({
   worldId: id,
   label: text(120),
   env,
+  source: sourceBindingSchema.optional(),
   scopeId: id,
   scopeRevision: int,
   worldRevision: int,
@@ -106,6 +164,7 @@ export const previewSchema: z.ZodType<CleanupPreview> = z.object({
   previewId: id,
   basis: z.literal('expert_static_discovery'),
   worldId: id,
+  source: sourceBindingSchema.optional(),
   worldRevision: int,
   scopeRevision: int,
   subject: z.object({
@@ -321,16 +380,15 @@ const payloadSchemas = {
     hypothesis: text(1000),
     state: z.enum(CANDIDATE_STATES),
   }),
-  trial_completed: z.object({
-    reportId: id.nullable(),
-    candidateId: id,
-    pairId: id,
-    family: id,
-    split: z.enum(['train', 'protected', 'validation', 'final']),
-    parentUseful: z.boolean(),
-    candidateUseful: z.boolean(),
-    verdict: z.enum(['admit', 'reject', 'hold']).nullable(),
-  }),
+  trial_completed: z
+    .object({
+      reportId: id.nullable(),
+      candidateId: id,
+      pairId: id,
+      family: id,
+      verdict: z.enum(['admit', 'reject', 'hold']).nullable(),
+    })
+    .strict(),
   approval_required: z.object({
     proposalId: id,
     candidateId: id,
@@ -401,16 +459,17 @@ const payloadSchemas = {
     runsCancelled: int,
     failClosed: z.boolean(),
   }),
-  campaign_row_committed: z.object({
-    campaignId: id,
-    manifestHash: hash,
-    kind: z.enum(['hider', 'meta']),
-    rowId: id,
-    admitted: z.boolean().optional(),
-    w0ResetProof: text(256).optional(),
-    budgetHash: hash.optional(),
-    result: z.enum(['measured', 'null', 'invalid']),
-  }),
+  campaign_row_committed: z
+    .object({
+      campaignId: id,
+      manifestHash: hash,
+      kind: z.enum(['hider', 'meta']),
+      rowId: id,
+      w0ResetProof: text(256).optional(),
+      budgetHash: hash.optional(),
+      result: z.enum(['measured', 'null', 'invalid']),
+    })
+    .strict(),
 } satisfies Record<ProjectionKind, z.ZodType>;
 
 export const MAX_EVENT_PAYLOAD_BYTES = 16_384;
@@ -535,6 +594,7 @@ const split = z.enum(['train', 'protected', 'validation', 'final']);
 const completionReceipt: z.ZodType<CompletionReceiptView> = z.object({
   receiptId: id,
   jobId: id,
+  source: sourceBindingSchema.optional(),
   runId: id,
   harnessHash: hash,
   scopeId: id,
@@ -735,8 +795,9 @@ const gateReport: z.ZodType<GateReportView> = z.object({
   unpricedCalls: int,
   verdict: z.enum(['admit', 'reject', 'hold']),
   reasonCodes: z.array(text(64)).max(20),
+  // Authority-bearing: an unknown key fails the whole artifact instead of being stripped.
   decisionSummary: z
-    .object({
+    .strictObject({
       triggerGain: z
         .number()
         .int()
@@ -745,7 +806,7 @@ const gateReport: z.ZodType<GateReportView> = z.object({
       triggerRequiredGain: int,
       splits: z.partialRecord(
         split,
-        z.object({
+        z.strictObject({
           trials: int,
           parentSuccesses: int,
           candidateSuccesses: int,
@@ -829,6 +890,10 @@ const deployment: z.ZodType<DeploymentView> = z.object({
     )
     .max(100),
 });
+// Only the authenticated artifact reader consumes this admission-bearing detail schema.
+const campaignDetailRow = payloadSchemas.campaign_row_committed.extend({
+  admitted: z.boolean().optional(),
+});
 const campaign: z.ZodType<CampaignView> = z.object({
   campaignId: id,
   kind: z.enum(['hider', 'meta']),
@@ -836,14 +901,15 @@ const campaign: z.ZodType<CampaignView> = z.object({
   plannedRows: int,
   w0ResetProof: text(128).nullable(),
   budgetHash: hash.nullable(),
-  rows: z.array(payloadSchemas.campaign_row_committed).max(500),
+  rows: z.array(campaignDetailRow).max(500),
   quarantined: z
     .array(z.object({ rowId: id, reasonCodes: z.array(text(64)).max(20) }))
     .max(100),
   noiseControl: z.object({ present: z.boolean(), rowId: id.nullable() }),
   noDataControl: z.object({ present: z.boolean(), rowId: id.nullable() }),
+  // Authority-bearing: an unknown key fails the whole artifact instead of being stripped.
   metaVerdict: z
-    .object({
+    .strictObject({
       verdict: z.enum(['gain', 'tie', 'loss']),
       incidents: int,
       wins: int,

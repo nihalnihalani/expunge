@@ -56,8 +56,8 @@ export class ArtifactRepository {
   }
   /**
    * The artifact, if it is currently permitted for this scope. With a `session` the eligibility row is read in that
-   * transaction's snapshot, so a revocation that lands before the transaction commits conflicts with it instead of
-   * slipping past a read made outside it.
+   * transaction's snapshot. A snapshot read alone does not conflict with concurrent revocation. Consequential uses
+   * must also call ProvenanceRepository.fenceUse in that transaction to check ancestry and write its common barrier.
    */
   async readPermitted(key: ScopeKey, hash: string, session?: ClientSession): Promise<ArtifactEnvelope> {
     const eligibility = this.service.control.collection('artifact_eligibility');

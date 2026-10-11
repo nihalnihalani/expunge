@@ -156,8 +156,9 @@ export type ExecutionDependencies = {
    */
   readonly acceptClientState?: boolean;
   /**
-   * Fail the run closed when a model call cannot be priced (no profile prices or no reported usage) and the
-   * bundle sets a cost ceiling. Default false: such calls are counted as unpriced and the run is flagged.
+   * Initial dispatch under a defined spend cap requires complete pricing regardless of this flag.
+   * Strict mode additionally refuses completed calls with unknown usage immediately. Unknown usage or
+   * unpriced spend always holds subsequent dispatch, including when the spend ceiling is zero.
    */
   readonly requirePricing?: boolean;
   /** Offer AGUISendStateSnapshot/Delta (protected paths are filtered). Default true. */
@@ -200,6 +201,9 @@ export type UsageSummary = {
   costMicrousd: number;
   unpricedCalls: number;
   costCoverage: 'complete' | 'partial' | 'none';
+  /** Numeric totals are known lower bounds whenever directional usage is missing. */
+  usageCoverage?: 'complete' | 'partial' | 'none';
+  unknownUsageCalls?: number;
 };
 
 /** Which provider, model and profile produced a run. `adapterInjected` is true when a caller supplied the adapter. */

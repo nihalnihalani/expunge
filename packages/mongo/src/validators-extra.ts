@@ -1,4 +1,5 @@
 import type { Document } from 'mongodb';
+import { ENVIRONMENTS } from '@expunge/contracts';
 
 /**
  * Strict validators, indexes and role grants for the control collections the gate, the adversary, the fault layer, the
@@ -24,14 +25,14 @@ const nullable = (schema: Schema): Schema => ({
   bsonType: [...(Array.isArray(schema.bsonType) ? schema.bsonType : [schema.bsonType]), 'null'],
 });
 const arr = (items: Schema, maxItems = 256): Schema => ({ bsonType: 'array', items, maxItems });
-const en = (values: string[]): Schema => ({ bsonType: 'string', enum: values });
+const en = (values: readonly string[]): Schema => ({ bsonType: 'string', enum: [...values] });
 const object = (properties: Record<string, Schema>, required = Object.keys(properties)): Schema => ({
   bsonType: 'object',
   required,
   additionalProperties: false,
   properties,
 });
-const scope = { tenantId: str, env: en(['dev', 'evaluation', 'demo']), scopeId: str };
+const scope = { tenantId: str, env: en(ENVIRONMENTS), scopeId: str };
 
 export const GATE_CONTROL_COLLECTIONS = [
   'campaign_freezes',
@@ -71,7 +72,7 @@ export const GATE_CONTROL_VALIDATORS: Record<string, Document> = {
         parentHash: hash,
         childProjectionHash: hash,
         campaignId: str,
-        state: en(['open', 'held', 'decided', 'failed']),
+        state: en(['open', 'held', 'decided', 'failed', 'invalid']),
         ordinal: integer,
       },
       ['_id', 'parentHash', 'childProjectionHash', 'campaignId', 'state'],

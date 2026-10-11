@@ -1,3 +1,5 @@
+import { boundedErrorRecords, hasRequestFailureVeto, structuredStatus } from '@expunge/vendor-openmuse';
+
 /**
  * Which side of the model boundary an inner run error is on, from STRUCTURED fields only (HTTP status, error code, error
  * name), never from message text: a message can echo the candidate's own prompt, so reading it could let a candidate steer
@@ -55,7 +57,7 @@ const statusOf = (value: unknown): number | undefined => {
   return undefined;
 };
 
-/** One structured record: a thrown error, or the `{ code }` of a RUN_ERROR event. */
+/** One record after the complete bounded chain has passed the behaviour veto. Explicit HTTP status precedes names/codes. */
 function classifyRecord(record: Record<string, unknown>): ModelFailureCode | null {
   const name = typeof record.name === 'string' ? record.name : '';
   const code = typeof record.code === 'string' ? record.code : '';
@@ -77,11 +79,11 @@ function classifyRecord(record: Record<string, unknown>): ModelFailureCode | nul
 
 /** Classifies a thrown value or a RUN_ERROR-shaped object, following `cause` a few levels. */
 export function classifyModelFailure(error: unknown): ModelFailureCode {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4 && typeof current === 'object' && current !== null; depth++) {
-    const verdict = classifyRecord(current as Record<string, unknown>);
+  const records = boundedErrorRecords(error);
+  if (records.some(hasRequestFailureVeto)) return 'ModelRunFailed';
+  for (const record of records) {
+    const verdict = classifyRecord(record);
     if (verdict) return verdict;
-    current = (current as { cause?: unknown }).cause;
   }
   return 'ModelRunFailed';
 }

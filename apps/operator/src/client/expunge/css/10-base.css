@@ -381,6 +381,14 @@
 .ex-root .ex-banner strong {
   font-weight: 600;
 }
+.ex-root .ex-source-scope {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ex-root .ex-source-scope .ex-dl {
+  min-width: 0;
+}
 .ex-root .ex-state {
   display: grid;
   justify-items: start;

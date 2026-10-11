@@ -24,6 +24,7 @@ import {
   DecisionRepository,
   ScopeRepository,
   WorldRepository,
+  atlasRoleManifests,
   createPrincipalService,
   deriveArgsDigest,
   deriveDecisionId,
@@ -116,6 +117,22 @@ export type LiveEnvironment = {
   dispose(): Promise<void>;
 };
 
+/**
+ * EXPUNGE_TEST_PER_PRINCIPAL=1 makes `env.as(principal)` a real, authenticated client: it creates the principal's role from
+ * `atlasRoleManifests` and a user on the test server, then connects as that user, so any repository suite runs under the
+ * privileges the manifest grants and nothing more. It needs an authenticated replica set (point MONGODB_TEST_URI at the
+ * auth set with the administrator, e.g. the 27019 lane); on an open set every principal can do everything. Local evidence
+ * only: this proves the manifest is enforceable by MongoDB, not that an Atlas custom role matches it.
+ */
+const PER_PRINCIPAL = process.env.EXPUNGE_TEST_PER_PRINCIPAL === '1';
+const ACTION_NAMES: Record<string, string> = {
+  FIND: 'find',
+  INSERT: 'insert',
+  UPDATE: 'update',
+  REMOVE: 'remove',
+  CHANGE_STREAM: 'changeStream',
+};
+
 /** Opens the setup principal against uniquely named databases so concurrent suites never collide. */
 export async function openEnvironment(label: string, options?: SetupOptions): Promise<LiveEnvironment> {
   const prefix = `expunge_${label}_${randomUUID().replaceAll('-', '')}`;
@@ -125,6 +142,34 @@ export async function openEnvironment(label: string, options?: SetupOptions): Pr
     privateDatabase: `${prefix}_private`,
   };
   const others: MongoService[] = [];
+  const provisioned = new Map<Principal, string>();
+  const provision = async (principal: Principal): Promise<string> => {
+    if (!PER_PRINCIPAL || principal === 'setup') return TEST_URI!;
+    const existing = provisioned.get(principal);
+    if (existing) return existing;
+    const manifest = atlasRoleManifests({
+      world: names.worldDatabase,
+      control: names.controlDatabase,
+      private: names.privateDatabase,
+    })[principal];
+    if (!manifest) throw new Error(`NoRoleManifest:${principal}`);
+    const name = `${prefix}_${principal}`;
+    const password = randomUUID();
+    const admin = service.client.db('admin');
+    await admin.command({
+      createRole: name,
+      privileges: manifest.actions.flatMap((action) =>
+        action.resources.map((resource) => ({ resource, actions: [ACTION_NAMES[action.action]!] })),
+      ),
+      roles: [],
+    });
+    await admin.command({ createUser: name, pwd: password, roles: [{ role: name, db: 'admin' }] });
+    const target = new URL(TEST_URI!);
+    target.username = name;
+    target.password = password;
+    provisioned.set(principal, target.toString());
+    return target.toString();
+  };
   const service = createPrincipalService({ uris: { setup: TEST_URI! }, ...names }, 'setup');
   await service.client.connect();
   const hello = await service.world.command({ hello: 1 });
@@ -134,7 +179,10 @@ export async function openEnvironment(label: string, options?: SetupOptions): Pr
   return {
     service,
     async as(principal) {
-      const other = createPrincipalService({ uris: { [principal]: TEST_URI! }, ...names }, principal);
+      const other = createPrincipalService(
+        { uris: { [principal]: await provision(principal) }, ...names },
+        principal,
+      );
       await other.client.connect();
       others.push(other);
       return other;
@@ -147,6 +195,11 @@ export async function openEnvironment(label: string, options?: SetupOptions): Pr
     },
     async dispose() {
       for (const other of others) await other.close();
+      for (const principal of provisioned.keys()) {
+        const admin = service.client.db('admin');
+        await admin.command({ dropUser: `${prefix}_${principal}` }).catch(() => undefined);
+        await admin.command({ dropRole: `${prefix}_${principal}` }).catch(() => undefined);
+      }
       await service.world.dropDatabase();
       await service.control.dropDatabase();
       await service.privateDb!.dropDatabase();
@@ -452,7 +505,7 @@ export function claimRow(claim: {
   campaignId: string;
   parentHash: string;
   childProjectionHash: string;
-  state?: 'open' | 'held' | 'decided' | 'failed';
+  state?: 'open' | 'held' | 'decided' | 'failed' | 'invalid';
 }) {
   return {
     _id: contentHash(

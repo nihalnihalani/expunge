@@ -5,9 +5,13 @@ export default defineConfig({
     // Historical generated-world, fake-provider and service-double suites remain in vitest.historical.config.ts.
     include: [
       'packages/contracts/test/source-metadata.test.ts',
+      'packages/mongo/test/projection-history-metadata.test.ts',
+      'packages/mongo/test/campaign-row-identity-metadata.test.ts',
+      'packages/contracts/test/native-run-metadata.test.ts',
       'packages/domain/test/service-config-pure.test.ts',
       'packages/runtime/test/model-error.test.ts',
       'packages/runtime/test/meter.test.ts',
+      'packages/vendor-openmuse/test/attempt-recorder.test.ts',
       'apps/worker/test/foreign-credentials.test.ts',
       'apps/worker/test/config.test.ts',
       'apps/worker/test/provider-retries.test.ts',

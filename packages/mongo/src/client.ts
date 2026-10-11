@@ -60,6 +60,22 @@ export function mongoConfigFromEnv(env: NodeJS.ProcessEnv = process.env): MongoC
     privateDatabase: env.EXPUNGE_PRIVATE_DB,
   };
 }
+/**
+ * The configuration for ONE principal: only its URI is read from the environment, so a process that runs as that
+ * principal never even parses another principal's credential (the worker must not hold the projection reader's, nor the
+ * setup administrator's, whatever its environment contains).
+ */
+export function mongoConfigForPrincipal(env: NodeJS.ProcessEnv, principal: Principal): MongoConfig {
+  const variable = PRINCIPAL_URI_VARIABLES[principal];
+  const uri = env[variable];
+  if (!uri) throw new Error(`MissingConfiguration:${variable}`);
+  return {
+    uris: { [principal]: uri },
+    worldDatabase: env.EXPUNGE_WORLD_DB,
+    controlDatabase: env.EXPUNGE_CONTROL_DB,
+    privateDatabase: env.EXPUNGE_PRIVATE_DB,
+  };
+}
 /** Each principal gets a distinct MongoClient. No fallback to setup credentials. */
 export function createPrincipalService(config: MongoConfig, principal: Principal): MongoService {
   const uri = config.uris[principal];
