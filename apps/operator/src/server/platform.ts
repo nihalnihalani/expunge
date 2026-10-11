@@ -91,7 +91,7 @@ export class Platform {
       telemetryProperties: this.setupTelemetry.metadata,
       identifyUser: async () => ({
         id: workspace.ownerId,
-        name: 'OpenDots owner',
+        name: 'Expunge owner',
       }),
       agents: async () =>
         Object.fromEntries(
