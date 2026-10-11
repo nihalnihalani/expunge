@@ -55,7 +55,7 @@ Expunge treats that failure as the training signal, under three rules:
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph OPERATOR["Operator · apps/operator · CopilotKit OpenDots fork"]
     UI["Expunge workbench<br/>Jobs · New cleanup · Workbench · Evidence<br/>Candidate · Evaluation · Receipt<br/>Lineage · Campaign · Privacy · Setup"]
     CHAT["CopilotKit chat<br/>HITL proposal-review card"]
