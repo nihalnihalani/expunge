@@ -30,12 +30,31 @@ Tools: `infra/services/backup/backup-mongo.mjs`, `restore-mongo.mjs`, `restore-d
   carries `expiresAt` (default 30 days; `--retention-days`). Restore refuses an expired set (`BackupExpired`). Keep backups no
   longer than the shortest erasure deadline you owe, and delete the sets and their off-host copies at expiry; a pruning job is
   not provided, delete expired sets by hand.
-- A restore can resurrect records erased after the backup. Restore therefore refuses to run unless you pass
-  `--reapply-erasures-after-restore`, and prints `MUST_DO_NEXT`: re-apply every erasure suppression and purge recorded after the
-  backup's `createdAt` (from the privacy controller's erasure records and the provider's own erasure jobs), reconcile effects and
-  receipts against the owner source, and reset projection streams. **The tool does not do these steps**; no runner exists that
-  replays them from a restored database, so this is a manual obligation until one is built. Do not return the restored system to
-  service before it is done.
+- A restore can resurrect records erased after the backup, and the facts of those erasures are not in the restored database.
+  They must come from a source that survives the restore, so the order matters:
+  1. **Before wiping the damaged database** (if it is still readable): `node --import tsx packages/privacy/src/reapply-cli.ts export --ledger <file>`
+     with `MONGODB_PRIVACY_CONTROLLER_URI` (never setup). The ledger holds every erasure job and source tombstone (opaque provider ids
+     and hashes, no subject text), mode 0600; keep it with the backup, not beside it in the open. If the database is unreadable and
+     no earlier ledger exists, **there is no independent erasure record in this repository**: reconstruct the list from the
+     provider's own erasure jobs and the privacy controller's request log, or keep the restored system out of service.
+  2. Restore (below), with `--reapply-erasures-after-restore`.
+  3. **Before any service starts:** `reapply-cli.ts apply --ledger <file> --cursor <file>`. It replays erasure jobs (inserted when
+     missing, advanced when behind, never moved back), re-derives the export suppressions, and purges tombstoned sources again. It
+     is idempotent and resumable (the cursor records progress and is bound to the ledger's hash). Exit 0 means DONE; **exit 5 means
+     something is pending and the system must stay out of service**.
+  4. DONE also needs two attestations this tool cannot perform itself, each with a ticket or run reference:
+     `reapply-cli.ts attest --cursor <file> world-effects-reconciled=<ref>` (world-record deletions reconciled against the owner
+     source) and `derived-artifacts-retracted=<ref>` (lessons and eligibility retracted by the retraction runner). Re-run `apply`
+     afterwards; it verifies the database state again.
+  **Out of service until verified.** If ANY cleanup or erasure completed after the backup, the restored system must stay out of
+  service until a verified re-application exists. The runner is a partial tool: exit 0 means only that the replayed jobs,
+  suppressions and tombstones are present. The two attestations are free text in an unauthenticated cursor file, **ATTESTED, NOT
+  VERIFIED** (no principal vouches for them and nothing checks them against the database), so exit 0 does not mean erasure is
+  complete. Not yet done: replaying committed effects and receipts with read-back, verifying derived artifacts, suppressing
+  every user of post-backup completed jobs, re-registering subjects added after the backup, per-collection counts in the ledger
+  header, and a keyed MAC and encrypted destination for the ledger.
+  Limits: the runner replays what the ledger holds; it cannot recover effects or receipts committed after the backup, which the
+  restore also lost, and it does not delete world records; those are the two attestations.
 - The backup and restore principals are dedicated; the tools refuse a URI equal to `MONGODB_SETUP_URI` (`SetupPrincipalRefused`).
   The Atlas setup user must not be used for either (BLOCKED: the two Atlas users and their read-only / restore roles are not
   created; names to create: `expunge_backup` read on the three databases, `expunge_restore` write on the target databases).

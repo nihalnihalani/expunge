@@ -78,7 +78,8 @@ export async function backup({
     sourceFingerprint: source,
     expiresAt: new Date(Date.now() + retentionDays * 86_400_000).toISOString(),
     postRestoreRequired: [
-      're-apply erasure suppressions and purges recorded after createdAt',
+      'BEFORE wiping: node --import tsx packages/privacy/src/reapply-cli.ts export --ledger FILE',
+      'AFTER restoring, before any service starts: reapply-cli.ts apply --ledger FILE --cursor FILE (exit 0 only when DONE)',
       'reconcile effects and receipts against the owner source',
       'rebuild or reset projection streams',
     ],

@@ -41,7 +41,7 @@ export async function restore({
   // re-applying erasures afterwards, and an archive past its retention is refused.
   if (!acknowledgeReapply)
     throw new Error(
-      'ReapplyNotAcknowledged: pass --reapply-erasures-after-restore, then do it (BACKUP-RESTORE.md)',
+      'ReapplyNotAcknowledged: pass --reapply-erasures-after-restore, then run packages/privacy/src/reapply-cli.ts (docs/runbooks/BACKUP-RESTORE.md)',
     );
   const manifestFile = resolve(manifestPath);
   const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
