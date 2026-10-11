@@ -4,7 +4,9 @@ import { contentHash } from '@expunge/contracts';
 import type { ScopeKey, WorldSpec } from '@expunge/contracts';
 import { generateWorld } from './generator.js';
 import { FIXTURE_GENERATOR_HASH, seedCommitment } from './recipes.js';
+import { UNKEYED_DERIVATION, type Derivation } from './derivation.js';
 import { resolveScopeKey, worldIdFor } from './scope.js';
+import type { GenerateOptions } from './generator.js';
 import {
   COLLECTION_IDS,
   addressKey,
@@ -20,7 +22,16 @@ import {
 } from './types.js';
 export type { FixtureManifest, PreservationHash, SealedFixture } from './types.js';
 export { buildSealedSplitPlan } from './splits.js';
+export type { SealedSplitEntry, SplitCommitment, SplitId } from './splits.js';
 export { isHighEntropySeed } from './entropy.js';
+export {
+  DerivationKeyError,
+  UNKEYED_DERIVATION,
+  assertDerivationKey,
+  keyedDerivation,
+  mintDerivationKey,
+  type Derivation,
+} from './derivation.js';
 export {
   SHAPE_DETECTORS,
   SHAPE_PRECISION_TOLERANCE,
@@ -83,20 +94,26 @@ function applyTrustedObservation(world: SealedFixture['world'], observation: Tru
  * Independent intent recipe: no discovery, relationship walk or reference solver participates. Record IDs are
  * namespaced by the world instance, so identical seeds in different scopes never share a collection-wide _id.
  */
-function oracleRecordId(seed: string, collectionId: CollectionId, instance: string): string {
-  const digest = contentHash({ seed, collection: collectionId, role: 'primary', instance }, 'fixture-record');
-  return `syn_${digest.substring(0, 24)}`;
+function oracleRecordId(
+  seed: string,
+  collectionId: CollectionId,
+  instance: string,
+  derivation: Derivation,
+): string {
+  return `syn_${derivation.recordDigest(seed, collectionId, 'primary', instance)}`;
 }
-function oracleBindings(seed: string, spec: WorldSpec, instance: string): Set<string> {
-  const suffix = contentHash(
-    { seed, subjectOrdinal: spec.identityRecipe.subjectOrdinal, instance },
-    'synthetic-identity',
-  ).substring(0, 20);
+function oracleBindings(
+  seed: string,
+  spec: WorldSpec,
+  instance: string,
+  derivation: Derivation,
+): Set<string> {
+  const suffix = derivation.tokenDigest(seed, spec.identityRecipe.subjectOrdinal, instance);
   return new Set([
     `syn_subject_${suffix}`,
     `synthetic-${suffix}@example.invalid`,
     ...Array.from({ length: spec.identityRecipe.aliasCount }, (_, n) => `syn_alias_${suffix}_${n}`),
-    ...COLLECTION_IDS.map((collection) => oracleRecordId(seed, collection, instance)),
+    ...COLLECTION_IDS.map((collection) => oracleRecordId(seed, collection, instance, derivation)),
   ]);
 }
 function oracleEffect(
@@ -213,11 +230,13 @@ export function generateSealedFixture(
   seed: string,
   binding?: ScopeKey,
   observation?: TrustedObservationRecipe,
+  options: GenerateOptions = {},
 ): SealedFixture {
+  const derivation = options.derivation ?? UNKEYED_DERIVATION;
   // The trusted scope key and instance are resolved here, independently of the generator, then cross-checked.
   const trustedScope = resolveScopeKey(binding);
-  const world = generateWorld(spec, seed, binding);
-  const instance = worldIdFor(contentHash(spec, 'world-spec'), seed, trustedScope);
+  const world = generateWorld(spec, seed, binding, options);
+  const instance = worldIdFor(contentHash(spec, 'world-spec'), seed, trustedScope, derivation.keyId);
   if (
     world.worldId !== instance ||
     world.scope.tenantId !== trustedScope.tenantId ||
@@ -228,12 +247,12 @@ export function generateSealedFixture(
   }
   if (observation) applyTrustedObservation(world, observation);
   const expectedState = structuredClone(world.collections);
-  const bindings = oracleBindings(seed, spec, instance);
+  const bindings = oracleBindings(seed, spec, instance, derivation);
   const effects: ExpectedEffect[] = [];
   const untouchedHashes: FixtureManifest['untouchedHashes'] = [];
   const preservationHashes: PreservationHash[] = [];
   for (const collectionId of COLLECTION_IDS) {
-    const recordId = oracleRecordId(seed, collectionId, instance);
+    const recordId = oracleRecordId(seed, collectionId, instance, derivation);
     const expectedEffect = oracleEffect(collectionId, spec.family);
     effects.push({
       address: { collectionId, recordId, recordIdBsonType: 'string' },

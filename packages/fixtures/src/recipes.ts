@@ -8,6 +8,7 @@ import {
   type FixtureOptions,
 } from './types.js';
 import { fixtureSourceCommitment } from './source.js';
+import { UNKEYED_DERIVATION, type Derivation } from './derivation.js';
 import { isRecipePath } from './paths.js';
 
 export const FIXTURE_GENERATOR_VERSION = 'expunge.synthetic.generator.v1';
@@ -15,6 +16,7 @@ export const FIXTURE_GENERATOR_VERSION = 'expunge.synthetic.generator.v1';
 export const FIXTURE_BOUNDS = { collections: 6, maxDocuments: 500, maxHops: 5 } as const;
 const GENERATOR_SOURCES = [
   'generator.ts',
+  'derivation.ts',
   'entropy.ts',
   'recipes.ts',
   'paths.ts',
@@ -55,9 +57,15 @@ export function seedCommitment(seed: string): string {
  * from the same seed in different scopes must not share an ID. `instance` is the world ID, which is itself a
  * deterministic hash of (spec, seed, selected ScopeKey): resetting the same world reproduces the same IDs.
  */
-export function seededId(seed: string, collection: CollectionId, role: string, instance: string): string {
+export function seededId(
+  seed: string,
+  collection: CollectionId,
+  role: string,
+  instance: string,
+  derivation: Derivation = UNKEYED_DERIVATION,
+): string {
   // Opaque on purpose: an ID must not name its collection or role, or a reference value would reveal its kind.
-  return `syn_${contentHash({ seed, collection, role, instance }, 'fixture-record').slice(0, 24)}`;
+  return `syn_${derivation.recordDigest(seed, collection, role, instance)}`;
 }
 /** Subject and alias bindings are translated through the same instance mapping as record IDs. */
 export function identityTokens(
@@ -65,8 +73,9 @@ export function identityTokens(
   subjectOrdinal: number,
   aliasCount: number,
   instance: string,
+  derivation: Derivation = UNKEYED_DERIVATION,
 ): string[] {
-  const token = contentHash({ seed, subjectOrdinal, instance }, 'synthetic-identity').slice(0, 20);
+  const token = derivation.tokenDigest(seed, subjectOrdinal, instance);
   return [
     `syn_subject_${token}`,
     `synthetic-${token}@example.invalid`,
