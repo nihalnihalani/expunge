@@ -188,7 +188,7 @@ describe('O4: delivery labels are computed from the receipts and travel into the
     fake.seedEvent({
       id: 'expunge:worker:job-1:run-1:1',
       assistant_output: '{"status":"failed"}',
-      tool_calls: [{ name: 'inspect_scope' }],
+      tool_calls: [{ tool_name: 'inspect_scope' }],
       properties: { run_id: 'run-1' },
     });
     const { dispatcher, enqueue, projected, outbox } = rig();
@@ -319,7 +319,7 @@ describe('O2: remote event content is never stored as received', () => {
     ['a base64 literal', { properties: { blob: Buffer.from(LITERAL).toString('base64') } }, 'SubjectLiteral'],
     ['a held-out key', { properties: { expected_poststate: 1 } }, 'HeldOutLeak'],
     ['a literal in a signal name', { signals: [{ id: 's1', name: LITERAL, score: null }] }, 'SubjectLiteral'],
-    ['a literal in a tool call name', { tool_calls: [{ name: LITERAL }] }, 'SubjectLiteral'],
+    ['a literal in a tool call name', { tool_calls: [{ tool_name: LITERAL }] }, 'SubjectLiteral'],
   ])('O2: %s quarantines the observation (structure only, never evidence)', (_label, over, code) => {
     const observation = observeEvent('proj-1', event(over), { guard: GUARD });
     expect(observation.quarantined).toBe(code);
@@ -359,7 +359,7 @@ describe('O2: a poisoned event cannot stall the cursor behind it', () => {
       properties: { role: 'worker', run_id: 'run-1', note: `about ${LITERAL}` },
       user_input: 'cleanup job',
       assistant_output: '{}',
-      tool_calls: [{ name: 'inspect_scope' }],
+      tool_calls: [{ tool_name: 'inspect_scope' }],
       signals: [{ id: 'sig-1', name: 'cleanup_not_verified', score: null }],
     });
     const { runner, evidence, cursors } = makeRig(fake);
