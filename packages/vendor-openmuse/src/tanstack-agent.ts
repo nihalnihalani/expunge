@@ -46,6 +46,14 @@ export type TanStackAgentOptions = {
    * cost per call instead of trusting a run-end aggregate.
    */
   onModelCall?: (call: ModelCallRecord) => void;
+  /**
+   * M15: called, out of band, with the adapter's OWN failure the moment it is seen at the adapter boundary: the `{ code }` of
+   * a RUN_ERROR chunk (which the converter later reduces to a message) or the error the adapter stream threw. Lets a host
+   * tell a provider-side failure from a request-side one by structured fields, never by message text.
+   */
+  onModelFailure?: (failure: unknown) => void;
+  /** M17: the `fetch` the provider SDK client uses (a counting wrapper), when the adapter is selected from `model`. */
+  providerFetch?: typeof fetch;
   /** M2: provider credentials come from this injected environment, never from ambient globals. */
   env?: ProviderEnv;
   /** M3: a ready text adapter replaces provider selection. Production code leaves this unset. */
@@ -82,11 +90,14 @@ export class TanStackAgent {
       type: 'tanstack',
       factory: ({ input, abortController }) => {
         const converted = convertInputToTanStackAI(scopeInput(input, allowedClientTools));
-        const base = options.textAdapter ?? selectAdapter(options.model, options.env);
+        const base = options.textAdapter ?? selectAdapter(options.model, options.env, options.providerFetch);
         // M14: record the identity of the adapter that really serves this run (adapter.name / adapter.model).
         this.resolvedIdentity = { provider: base.name, model: base.model };
         return chat({
-          adapter: options.onModelCall ? tapAdapter(base, options.onModelCall) : base,
+          adapter:
+            options.onModelCall || options.onModelFailure
+              ? tapAdapter(base, options.onModelCall, options.onModelFailure)
+              : base,
           messages: converted.messages,
           // M8: ONE composition path. Runtime 1.75.0's converter already appends the AG-UI
           // context entries and application state to `converted.systemPrompts`; upstream built
@@ -247,13 +258,17 @@ export function splitTextAtToolCalls(events: Observable<BaseEvent>) {
  * M13: observes every `chatStream` call of an adapter without changing it. The Proxy forwards everything else
  * (bound to the real adapter so private fields keep working).
  */
-function tapAdapter(adapter: AnyTextAdapter, onCall: (call: ModelCallRecord) => void): AnyTextAdapter {
+function tapAdapter(
+  adapter: AnyTextAdapter,
+  onCall: ((call: ModelCallRecord) => void) | undefined,
+  onFailure: ((failure: unknown) => void) | undefined,
+): AnyTextAdapter {
   return new Proxy(adapter, {
     get(target, property) {
       const value = Reflect.get(target, property, target);
       if (property === 'chatStream')
         return (options: Parameters<AnyTextAdapter['chatStream']>[0]) =>
-          tapStream(target.chatStream(options), onCall);
+          tapStream(target.chatStream(options), onCall, onFailure);
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
@@ -261,20 +276,25 @@ function tapAdapter(adapter: AnyTextAdapter, onCall: (call: ModelCallRecord) => 
 
 async function* tapStream<T>(
   stream: AsyncIterable<T>,
-  onCall: (call: ModelCallRecord) => void,
+  onCall: ((call: ModelCallRecord) => void) | undefined,
+  onFailure: ((failure: unknown) => void) | undefined,
 ): AsyncGenerator<T> {
   let usage: unknown;
   let completed = false;
   try {
     for await (const chunk of stream) {
-      const record = chunk as { type?: string; usage?: unknown };
+      const record = chunk as { type?: string; usage?: unknown; code?: unknown };
+      if (record.type === 'RUN_ERROR') onFailure?.({ code: record.code });
       if (record.type === 'RUN_FINISHED') {
         completed = true;
         if (record.usage !== undefined) usage = record.usage;
       }
       yield chunk;
     }
+  } catch (error) {
+    onFailure?.(error);
+    throw error;
   } finally {
-    onCall({ usage, completed });
+    onCall?.({ usage, completed });
   }
 }

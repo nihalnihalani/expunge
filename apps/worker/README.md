@@ -30,3 +30,28 @@ between phases and finalizes the job from committed state only.
   writes it as `checkpoint.attestedRuntimeHash` when it claims a run; every later snapshot keeps it, the terminal one included.
   A takeover by another build records its own. A campaign compares this committed value with its stored freeze; nothing a caller
   supplies stands in for it. Disclosed: it states what this process loaded, not what a compromised process would claim.
+
+## Session restarts and model failures
+
+- **Takeover and restart.** A session that ends `lost_lease` is the only thing that starts another one in the episode port
+  (`WorkerEpisodeRunner`): the domain gateway spends a stored fault plan's interruption by releasing the lease, and a real
+  takeover by another worker also surfaces as `lost_lease`. Either way the job is claimed again under a new fence, bounded by
+  `maxSessions`; exhausting it with the job still not terminal is a recorded `SessionsExhausted` failure, never a silent stop.
+  The worker injects no faults of its own.
+- **Model failures.** `ModelUnavailable` is provider-side or worker-side (5xx, 429 after retries, 401/403/404 for the worker's own
+  key or model configuration, connection-level errors, a missing credential). `ModelRunFailed` is everything else: other 4xx, any
+  timeout (HTTP 408, a timeout code or name), and any failure with no structured field. The verdict reads status, code and error
+  name only, never message text.
+- **Retry and timeout policy** (`MODEL_RETRY_POLICY`, `PROVIDER_CLIENT_TIMEOUT_MS` in `@expunge/vendor-openmuse`). Each provider call is
+  3 attempts: the SDK's own retries (`MODEL_MAX_RETRIES` = 2) are the whole budget, and the runtime adds none. Backoff is the SDK's:
+  0.5 s doubling per retry, capped at 8 s, up to 25% jitter off, with a `retry-after` header overriding it. A 429 that is retried and then
+  succeeds is not a failure; one that fails on the last attempt is `ModelUnavailable`. The SDK client timeout (600 s) is above every phase
+  timeout the runtime allows, so a slow call is ended by the phase watchdog as `PhaseTimeout` (behaviour); an SDK-side timeout that still
+  arrives is classified `ModelRunFailed`.
+- **Retries are recorded; a timeout during provider backoff is infrastructure.** A counting `fetch` on the provider client records,
+  per run, the HTTP attempts and the retriable statuses seen (numbers only), into the run stats, the terminal checkpoint
+  (`terminal.providerAttempts`) and the episode result (`providerRetries`). If the phase watchdog fires while the SDK is between
+  attempts (the last response was a retriable status or a connection error and attempts remain), the run ends as `ModelUnavailable`
+  with `failureDetail: 'phase_timeout_during_provider_backoff'`, not `PhaseTimeout`. A call the provider simply never answers within
+  the phase budget stays `PhaseTimeout`.
+

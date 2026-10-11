@@ -1,7 +1,14 @@
+import { classifyModelFailure } from './model-error.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { EventType, type BaseEvent, type RunAgentInput } from '@ag-ui/core';
 import type { HarnessBundle, Job, ScopeKey } from '@expunge/contracts';
-import { tanstackAgent, type TanStackAgent, type ToolDefinition } from '@expunge/vendor-openmuse';
+import {
+  PROVIDER_CLIENT_TIMEOUT_MS,
+  ProviderAttemptRecorder,
+  tanstackAgent,
+  type TanStackAgent,
+  type ToolDefinition,
+} from '@expunge/vendor-openmuse';
 import { guardMiddleware } from './middleware-guard.js';
 import type { Subscriber, Subscription } from 'rxjs';
 import { filterModelStateEvent, stripProtectedKeys } from './authority.js';
@@ -22,7 +29,7 @@ import type {
 
 export const STEP_LIMIT_NOTE =
   'The step limit for this run was reached before the job finished. The job has not been completed.';
-const DEFAULT_PHASE_TIMEOUT_MS = 120_000;
+export const DEFAULT_PHASE_TIMEOUT_MS = 120_000;
 const DEFAULT_TOOL_DRAIN_MS = 5_000;
 const PAUSED = (reason: string) => ({
   status: 'paused',
@@ -57,6 +64,10 @@ export class RunSession {
   private phases = 0;
   private readonly startedAt = Date.now();
   private stopRequested = false;
+  /** The adapter's own failure (structured fields only), kept for classification and never emitted. */
+  private providerFailure: unknown;
+  /** Counts the provider SDK's HTTP attempts for this run (numbers only) and knows when a retry/backoff is pending. */
+  private readonly attempts = new ProviderAttemptRecorder();
   private failure?: { code: string; end: RunEnd };
   private wait?: WaitStatus;
   private abortedByCaller = false;
@@ -105,7 +116,12 @@ export class RunSession {
       this.maxSteps = Math.max(1, modelCallsLeft);
       this.phaseTimeoutMs = Math.max(
         1,
-        Math.min(this.deps.phaseTimeoutMs ?? DEFAULT_PHASE_TIMEOUT_MS, Math.max(1, wallLeft)),
+        Math.min(
+          this.deps.phaseTimeoutMs ?? DEFAULT_PHASE_TIMEOUT_MS,
+          Math.max(1, wallLeft),
+          // The phase watchdog always fires before the provider SDK's own client timeout, so a slow call is PhaseTimeout.
+          PROVIDER_CLIENT_TIMEOUT_MS - 1,
+        ),
       );
       this.wallDeadline = this.startedAt + Math.max(0, wallLeft);
       this.wallTimer = setTimeout(() => this.fail('WallTimeExceeded', 'wall_time'), Math.max(1, wallLeft));
@@ -161,7 +177,12 @@ export class RunSession {
       this.inner = tanstackAgent({
         model: selection.spec,
         textAdapter: selection.textAdapter,
+        providerFetch: this.attempts.fetch,
         // Per-call metering: tokens and cost are checked as each model call ends, not only at run end.
+        // The adapter's own structured failure, seen before the converter reduces it to a message (classification only).
+        onModelFailure: (failure) => {
+          this.providerFailure ??= failure;
+        },
         onModelCall: (call) => {
           const verdict = meter.record(call.usage);
           if (!verdict.ok)
@@ -201,12 +222,7 @@ export class RunSession {
       this.innerSubscription = this.inner.run(this.scopedInput()).subscribe({
         next: (event) => this.enqueue(() => this.onInnerEvent(event)),
         error: (error) => {
-          this.fail(
-            error instanceof Error && error.name === 'MissingProviderCredentialError'
-              ? 'ModelUnavailable'
-              : 'ModelRunFailed',
-            'error',
-          );
+          this.fail(classifyModelFailure(this.providerFailure ?? error), 'error');
           this.enqueue(() => this.finish());
         },
         complete: () => this.enqueue(() => this.finish()),
@@ -409,7 +425,13 @@ export class RunSession {
     clearTimeout(this.watchdog);
     if (this.finalized || this.innerFinished || this.stopping) return;
     this.watchdog = setTimeout(() => {
-      if (this.activeTools === 0) this.fail('PhaseTimeout', 'phase_timeout');
+      if (this.activeTools !== 0) return;
+      // A provider retry/backoff was pending (the last attempt got a retriable status or a connection error and the SDK is
+      // sleeping before its next attempt): the delay is the provider's, so it ends as ModelUnavailable, not PhaseTimeout.
+      if (this.attempts.retryPending) {
+        this.attempts.markBackoffTimeout();
+        this.fail('ModelUnavailable', 'phase_timeout');
+      } else this.fail('PhaseTimeout', 'phase_timeout');
     }, this.phaseTimeoutMs);
   }
 
@@ -467,7 +489,10 @@ export class RunSession {
         return this.emit(event);
       case EventType.RUN_ERROR:
         // The inner message can carry provider or prompt fragments; the sanitized code is emitted at finish().
-        this.fail(this.failure?.code ?? 'ModelRunFailed', this.failure?.end ?? 'error');
+        this.fail(
+          this.failure?.code ?? classifyModelFailure(this.providerFailure ?? event),
+          this.failure?.end ?? 'error',
+        );
         return;
       case EventType.RUN_FINISHED: {
         this.innerFinished = true;
@@ -664,6 +689,7 @@ export class RunSession {
         ? { narrative: { sha256: this.narrative.digest('hex'), length: this.narrativeLength } }
         : {}),
       ...(abandonedTools > 0 ? { abandonedTools } : {}),
+      ...(this.attempts.snapshot().attempts > 0 ? { providerAttempts: this.attempts.snapshot() } : {}),
       ...(this.meter ? { metered: this.meter.summary(), meterCarry: this.currentCarry() } : {}),
       ...(this.provenance
         ? {

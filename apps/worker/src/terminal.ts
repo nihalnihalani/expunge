@@ -92,6 +92,7 @@ export function terminalCheckpoint(stats: RunStats, action: TerminalAction): Jso
         : {}),
       ...(stats.metered ? { usage: stats.metered } : {}),
       ...(stats.abandonedTools ? { abandonedTools: stats.abandonedTools } : {}),
+      ...(stats.providerAttempts ? { providerAttempts: stats.providerAttempts } : {}),
       ...(stats.narrative
         ? { untrustedModelNarrative: { sha256: stats.narrative.sha256, length: stats.narrative.length } }
         : {}),

@@ -159,6 +159,34 @@ describe('WorkerEpisodeRunner logic (FAKE host, evidence and worker)', () => {
     expect((await unreadable.port.run(request(), instance)).failureCode).toBe('CommittedStateUnreadable');
   });
 
+  it('a timeout during provider backoff is a ModelUnavailable failure with its detail and attempts; an ordinary failure carries neither', async () => {
+    const backedOff = makeJob(bundle, {
+      status: 'failed',
+      checkpoint: {
+        v: 1,
+        terminal: {
+          decision: { status: 'failed', reason: 'ModelUnavailable' },
+          providerAttempts: { attempts: 1, retriedStatuses: [429], backoffTimeout: true },
+        },
+      },
+    });
+    const a = await rig({ job: backedOff, receipt: null }).port.run(request(), instance);
+    expect(a).toMatchObject({
+      outcome: 'failed',
+      failureCode: 'ModelUnavailable',
+      failureDetail: 'phase_timeout_during_provider_backoff',
+      providerRetries: { attempts: 1, retriedStatuses: [429], backoffTimeout: true },
+    });
+    const plain = makeJob(bundle, {
+      status: 'failed',
+      checkpoint: { v: 1, terminal: { decision: { status: 'failed', reason: 'PhaseTimeout' } } },
+    });
+    const b = await rig({ job: plain, receipt: null }).port.run(request(), instance);
+    expect(b.failureCode).toBe('PhaseTimeout');
+    expect(b.failureDetail).toBeUndefined();
+    expect(b.providerRetries).toBeUndefined();
+  });
+
   it('retry failures are the planned batches that have no committed effect', async () => {
     const { port } = rig({ receipt: receipt(), plannedBatches: 5, committedBatches: 3 });
     expect((await port.run(request(), instance)).retryFailures).toBe(2);
