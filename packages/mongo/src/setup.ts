@@ -3,7 +3,12 @@ import type { DeploymentKey, Environment, ScopeKey, TargetKind } from '@expunge/
 import { requirePrincipal, type MongoService } from './client.js';
 import { AuthorityRepository } from './authority.js';
 import { AuthorityPolicyRepository } from './policy.js';
-import { CONTROL_VALIDATORS, WORLD_VALIDATORS, assertSupportedMongoSchema } from './validators.js';
+import {
+  CONTROL_VALIDATORS,
+  PRIVATE_VALIDATORS,
+  WORLD_VALIDATORS,
+  assertSupportedMongoSchema,
+} from './validators.js';
 
 export const WORLD_COLLECTIONS = [
   'customers',
@@ -68,6 +73,7 @@ export const PRIVATE_COLLECTIONS = [
   'preservation_hashes',
   'heldout_assignments',
   'grader_results',
+  'campaign_keys',
 ] as const;
 type IndexEntry = { collection: string; key: IndexSpecification; options?: CreateIndexesOptions };
 const identity = { tenantId: 1, env: 1, scopeId: 1 } as const;
@@ -224,7 +230,7 @@ export async function setupMongo(
   for (const [db, names, validators] of [
     [service.world, WORLD_COLLECTIONS, WORLD_VALIDATORS],
     [service.control, CONTROL_COLLECTIONS, CONTROL_VALIDATORS],
-    [service.privateDb!, PRIVATE_COLLECTIONS, {}],
+    [service.privateDb!, PRIVATE_COLLECTIONS, PRIVATE_VALIDATORS],
   ] as const) {
     for (const name of names) {
       const validator = (validators as Record<string, Document>)[name];

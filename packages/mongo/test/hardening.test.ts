@@ -260,6 +260,12 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
     // Subject literals live in job_subjects; the projection reader must never see them.
     expect(can('projection_reader', 'FIND', 'job_subjects')).toBe(false);
   });
+  it('keeps campaign keys insert-only and visible to the fixture builder and grader alone', () => {
+    expect(holders('INSERT', 'campaign_keys')).toEqual(['fixture_builder']);
+    expect(holders('UPDATE', 'campaign_keys')).toEqual([]);
+    expect(holders('REMOVE', 'campaign_keys')).toEqual([]);
+    expect(holders('FIND', 'campaign_keys').sort()).toEqual(['fixture_builder', 'grader']);
+  });
   it('never grants bypassDocumentValidation, collMod or role administration', () => {
     const forbidden = [
       'BYPASS_DOCUMENT_VALIDATION',

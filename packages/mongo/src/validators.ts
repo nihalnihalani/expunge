@@ -788,6 +788,19 @@ export const WORLD_VALIDATORS: Record<string, Document> = {
     }),
   },
 };
+export const PRIVATE_VALIDATORS: Record<string, Document> = {
+  // Per-campaign HMAC key for instance ids and tokens. Insert-only; readable by the fixture builder and grader.
+  campaign_keys: {
+    $jsonSchema: object({
+      _id: { bsonType: 'string', minLength: 1, maxLength: 128 },
+      keyId: { bsonType: 'string', minLength: 1, maxLength: 64 },
+      key: { bsonType: 'binData' },
+      createdAt: date,
+    }),
+    // JSON schema cannot bound binary length; the query-operator half pins the key to exactly 32 bytes.
+    $expr: { $eq: [{ $binarySize: '$key' }, 32] },
+  },
+};
 /** Fail setup if a future edit introduces unsupported JSON-schema keywords. */
 export function assertSupportedMongoSchema(schema: unknown): void {
   const forbidden = new Set(['$schema', '$ref', 'definitions', 'format', 'default', 'type']);
