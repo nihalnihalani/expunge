@@ -24,3 +24,12 @@ export { completeCleanup, completeCleanupInput } from './tools/complete-cleanup.
 export { inspectHarness, inspectHarnessInput } from './tools/inspect-harness.js';
 export { reportDiagnostic, reportDiagnosticInput } from './tools/report-diagnostic.js';
 export * from './service/index.js';
+export {
+  faultPlanHash,
+  storedFaultPlan,
+  InMemoryFaultSource,
+  MongoFaultSource,
+  type FaultPlan,
+  type FaultSource,
+  type StoredFaultPlan,
+} from './faults.js';

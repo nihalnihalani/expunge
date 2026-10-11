@@ -10,7 +10,7 @@ import {
   type WorkflowRecord,
 } from './budget.js';
 import type { ToolRuntime } from './runtime.js';
-import { ADVANCING_OUTCOMES, admitTransition, advance } from './workflow.js';
+import { ACKNOWLEDGED_OUTCOMES, ADVANCING_OUTCOMES, admitTransition, advance } from './workflow.js';
 
 /** How a call ended, in the vocabulary the bundle's workflow edges use (`when`). */
 export type CallOutcome =
@@ -133,12 +133,17 @@ export function createGatewayControls(): GatewayControls {
                     violations: [CALL_REPLAY_DIGEST_MISMATCH],
                   },
                 };
-              // The effect already happened: this call can only return the saved receipt, which costs nothing.
-              if (committed)
-                return {
-                  payload: null,
-                  result: { callNumber: prior.ordinal, callsToThisTool: spent, violations: [] },
-                };
+              // The effect already happened: this call can only return the saved receipt, which costs nothing. The
+              // exception is a receipt the caller never got: the earlier call ended in an error (a lost
+              // acknowledgement), so this call is the one that delivers it and takes the edge like any retry.
+              if (committed) {
+                const earlier = await state.settledRow(prior.ordinal);
+                if (!earlier || ACKNOWLEDGED_OUTCOMES.has(earlier.payload.callOutcome))
+                  return {
+                    payload: null,
+                    result: { callNumber: prior.ordinal, callsToThisTool: spent, violations: [] },
+                  };
+              }
               // A call that was admitted, began and never ended is carried on by the next holder under its number.
               // One the controls had refused is not resumed: it is judged again as a new attempt.
               const latest = await state.latestCall();

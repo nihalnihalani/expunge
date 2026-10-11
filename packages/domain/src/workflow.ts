@@ -22,6 +22,14 @@ export const ADVANCING_OUTCOMES: ReadonlySet<string> = new Set([
   'verification_failed',
 ]);
 
+/** Outcomes that reached the caller as an answer. An error outcome (a retryable error) may hide a committed effect. */
+export const ACKNOWLEDGED_OUTCOMES: ReadonlySet<string> = new Set([
+  'success',
+  'more_references',
+  'batches_remaining',
+  'verification_failed',
+]);
+
 /** Where a job stands in its graph: the node of the last call that moved it, how that call ended, and every node's visits. */
 export type WorkflowPosition = {
   nodeId: string | null;

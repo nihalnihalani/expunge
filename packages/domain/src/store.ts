@@ -12,6 +12,7 @@ import { identityHashOf } from './keys.js';
 import type {
   CallPayload,
   DiscoveryPayload,
+  FaultPayload,
   PlanTarget,
   Residual,
   ResolutionPayload,
@@ -22,13 +23,14 @@ import type {
   WorkflowPayload,
 } from './rows.js';
 
-export type StepKind = 'scope_selection' | 'subject_resolution' | 'discovery' | 'call' | 'workflow';
+export type StepKind = 'scope_selection' | 'subject_resolution' | 'discovery' | 'call' | 'workflow' | 'fault';
 type StepPayloads = {
   scope_selection: ScopeSelectionPayload;
   subject_resolution: ResolutionPayload;
   discovery: DiscoveryPayload;
   call: CallPayload;
   workflow: WorkflowPayload;
+  fault: FaultPayload;
 };
 export type StepRow<K extends StepKind = StepKind> = ScopeKey & {
   _id: string;
