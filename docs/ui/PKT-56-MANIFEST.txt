@@ -1,0 +1,9 @@
+# PKT-56 manifest (Entry links for Privacy and Campaign), 2026-10-11T16:03:46Z; HEAD 355cd31 (PKT-40 and PKT-45 landed) stacked with the PKT-46, 49, 52, 53, 56 manifests in that order, S5 held tab patch applied; node 24.13.1. Build id of the stack up to and including this packet: f7191af190b98436a8348cf006b99869c050cb2bec17efcec21801a34c1c0964. Evidence (screenshots, results-s*.json) comes from the full stack through PKT-56, build id f7191af190b98436a8348cf006b99869c050cb2bec17efcec21801a34c1c0964. Real edits to landed JobFrame.tsx and ReceiptView.tsx (PKT-40) plus new RelatedRecords. Depends on PKT-52 and PKT-53.
+da3d94f6b3437e6891cc3db6edffacacb68277c7855bceebc448b0028b6ed0e4  apps/operator/src/client/expunge/components/RelatedRecords.tsx
+68975b4580748ecfb34b787c4bd702dd4529782faf6df9435e201ea31fd4a3ce  apps/operator/src/client/expunge/css/57-related.css
+cd71aca167f878ffa8bbbf0554417b194d0048930e8cef2d9fa8dd5ff2979822  apps/operator/src/client/expunge/components/JobFrame.tsx
+dbb990a199a5ece503654367ec49fea742adaf3bfd098ada1ce156d82c5ce666  apps/operator/src/client/expunge/views/ReceiptView.tsx
+e2a7a9a5c65ad7c4f397f48cd6ff8c7a2cb73ccddb3710440df78dd7d35b07ba  apps/operator/tests/expunge-related.test.tsx
+ff2b4ad7e8e14b9236f28d2b203a1895c20b5d158c050cdf67cd1ba82025146c  apps/operator/tests/browser/s10.mjs
+d70cadc3c991d27b7b310edadcc74f3067f9fa2f3d1e4f1c46a761ba237e4e2b  docs/ui/screens/s10/results-s10.json
+5523ecaa9be232b803c4bb5faf03e42cd2c3ed8daaeb2d23e61a48dcc0c2feca  docs/ui/screens/s10/s10-related-1440-light.png

@@ -1,0 +1,9 @@
+.ex-root .ex-related {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ex-space-3);
+}
+.ex-root .ex-related ul {
+  margin: 0;
+}

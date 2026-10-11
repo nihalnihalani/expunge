@@ -1,0 +1,12 @@
+{
+ "slice": "s10",
+ "buildId": "f7191af190b98436a8348cf006b99869c050cb2bec17efcec21801a34c1c0964",
+ "node": "v24.13.1",
+ "generatedBy": "tests/expunge-browser.e2e.mjs",
+ "backend": "FIXTURE (test data, not a live job)",
+ "failures": [],
+ "okCount": 900,
+ "results": {
+  "scans": {}
+ }
+}
