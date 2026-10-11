@@ -17,6 +17,8 @@ export type RuntimeErrorCode =
   | 'PhaseTimeout'
   | 'PhaseHookFailed'
   | 'ModelUnavailable'
+  | 'ProviderServerError'
+  | 'ProviderRateLimited'
   | 'ToolsUnavailable'
   | 'ModelRunFailed'
   | 'CheckpointInvalid'
