@@ -22,6 +22,7 @@
     "checkpoint": "node scripts/continuity/checkpoint.mjs",
     "checkpoint:verify": "node scripts/continuity/verify-checkpoint.mjs",
     "checkpoint:restore": "node scripts/continuity/restore-checkpoint.mjs",
+    "drill:continuity": "node scripts/continuity/drill.mjs",
     "test:mongo": "vitest run packages/mongo/test",
     "setup:mongo": "node --import tsx --env-file-if-exists=.env scripts/setup-mongo.ts",
     "probe:mongo": "node --import tsx --env-file-if-exists=.env scripts/probe-mongo.ts"
