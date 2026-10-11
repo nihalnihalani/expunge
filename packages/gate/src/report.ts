@@ -54,8 +54,28 @@ export type AdmittedUnder = {
 export type GateControls = {
   schema: typeof GATE_CONTROLS_SCHEMA;
   decisionSummary: AdmissionSummary;
-  /** Which gated split each pair belongs to. Pair ids are opaque labels. */
+  /** Which split each STORED pair belongs to (training pairs only). Pair ids are opaque labels. */
   pairSplits: Record<string, GateSplit>;
+  /**
+   * What the protected and validation worlds showed, as totals only. Their per-pair rows are not stored (DA-11 F-10,
+   * DA-13 GB-2): the operator's projection reads this report, and a human relaying per-world held-out results into a
+   * proposal would be tuning on them.
+   */
+  withheld: Partial<
+    Record<
+      'protected' | 'validation',
+      {
+        pairs: number;
+        parentSuccesses: number;
+        candidateSuccesses: number;
+        excludedPairs: number;
+        outcomes: Record<string, number>;
+        cost: CostSummary;
+      }
+    >
+  >;
+  /** Hash over EVERY pair row, withheld ones included, as a commitment to what was measured but is not stored. */
+  allRowsDigest: string;
   plannedPairs: number;
   exclusions: Array<{ pairId: string; code: string }>;
   /** Failure rows that stay in the denominator, by outcome. */
@@ -146,14 +166,19 @@ export type ReportInput = {
  */
 export function buildGateReport(input: ReportInput): GateReport {
   const classification = classifyMutation(input.parent, input.child).mutationClass as MutationClass | null;
-  const pairs = pairedTrialsOf(input.rows, input.freeze);
+  // Only training pairs are stored one by one. The digest over the stored rows is verifiable from the report; the
+  // commitment over all rows is not, by design.
+  const trainRows = input.rows.filter((row) => row.split === 'train');
+  const pairs = pairedTrialsOf(trainRows, input.freeze);
   const attested = input.decision.attestedRuntimeHash;
   const controls: GateControls = {
     schema: GATE_CONTROLS_SCHEMA,
     decisionSummary: input.decision.summary,
-    pairSplits: Object.fromEntries(input.rows.map((row) => [row.pairId, row.split])),
+    pairSplits: Object.fromEntries(trainRows.map((row) => [row.pairId, row.split])),
+    withheld: withheldOf(input.rows),
+    allRowsDigest: contentHash(pairedTrialsOf(input.rows, input.freeze) as never, 'gate-all-trial-rows'),
     plannedPairs: input.planned,
-    exclusions: input.rows
+    exclusions: trainRows
       .filter((row) => row.parent.harnessDefect || row.candidate.harnessDefect)
       .map((row) => ({ pairId: row.pairId, code: row.parent.harnessDefect ?? row.candidate.harnessDefect! })),
     outcomes: tallyOutcomes(input.rows),
@@ -187,6 +212,23 @@ export function buildGateReport(input: ReportInput): GateReport {
     reasonCodes: [...input.decision.reasonCodes] as ReasonCode[],
     ...(classification ? { computedClass: classification } : {}),
   };
+}
+
+function withheldOf(rows: readonly TrialRow[]): GateControls['withheld'] {
+  const out: GateControls['withheld'] = {};
+  for (const split of ['protected', 'validation'] as const) {
+    const part = rows.filter((row) => row.split === split);
+    if (!part.length) continue;
+    out[split] = {
+      pairs: part.length,
+      parentSuccesses: part.filter((row) => row.parent.metrics.usefulCompletion).length,
+      candidateSuccesses: part.filter((row) => row.candidate.metrics.usefulCompletion).length,
+      excludedPairs: part.filter((row) => row.parent.harnessDefect || row.candidate.harnessDefect).length,
+      outcomes: tallyOutcomes(part),
+      cost: totalCost(part),
+    };
+  }
+  return out;
 }
 
 function tallyOutcomes(rows: readonly TrialRow[]): Record<string, number> {

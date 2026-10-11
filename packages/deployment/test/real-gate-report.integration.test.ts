@@ -39,6 +39,7 @@ describeLive('loadAdmittedReport on a report a real runGate wrote', () => {
     expect(loaded.digest).toBe(out.digest);
     expect(loaded.computedClass).toBe('behavioral');
     expect(loaded.admittedUnder.attempt).toEqual({ ordinal: 1, parentAttempts: 1 });
-    expect(loaded.report.pairedTrials).toHaveLength(38);
+    // Only training pairs are stored one by one (F-10); protected and validation are totals.
+    expect(loaded.report.pairedTrials).toHaveLength(6);
   }, 120_000);
 });
