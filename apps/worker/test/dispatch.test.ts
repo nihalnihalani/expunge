@@ -139,7 +139,7 @@ describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed 
     // Phase checkpoint after the tool, then a terminal checkpoint.
     const checkpoints = r.store.checkpoints.get('job-1') as Array<Record<string, unknown>>;
     // The first snapshot is the worker's model stamp (before any phase); the first phase checkpoint follows it.
-    expect(checkpoints[0]).toMatchObject({ v: 1, attestedModel: { source: 'fake' } });
+    expect(checkpoints[0]).toMatchObject({ v: 1, attestedModels: [{ source: 'fake' }] });
     expect(checkpoints.find((c) => c.phase === 1)).toMatchObject({
       v: 1,
       phase: 1,
@@ -944,29 +944,88 @@ describe('follow-up (FAKE store, FAKE model): the deployed-harness check and the
     ).toBe(HASH_B);
   });
 
+  type Stamp = { fence: number; source: string; provider: string; modelId: string; spec: string };
+  type Snap = { attestedModels?: Stamp[]; phase?: number };
+
   it('stamps the RESOLVED model into the claimed run checkpoint before any phase, keeps it in every snapshot, and a fake stays fake', async () => {
     const r = rig({
       script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('x')],
       runtimeHash: HASH_A,
     });
     await r.dispatcher.runJob('job-1');
-    type Snap = {
-      attestedModel?: { source: string; provider: string; modelId: string; spec: string };
-      phase?: number;
-    };
     const snapshots = r.store.checkpoints.get('job-1') as Snap[];
-    const stamped = snapshots.findIndex((snapshot) => snapshot.attestedModel);
+    const stamped = snapshots.findIndex((snapshot) => snapshot.attestedModels);
     expect(stamped).toBeGreaterThanOrEqual(0);
     expect(snapshots.slice(0, stamped).every((snapshot) => snapshot.phase === undefined)).toBe(true); // before any phase
     for (const snapshot of snapshots.slice(stamped))
-      expect(snapshot.attestedModel).toEqual({
-        source: 'fake',
-        provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
-        modelId: 'fake-deterministic-1',
-        spec: 'fake/fake',
-      });
+      expect(snapshot.attestedModels).toEqual([
+        {
+          fence: 1,
+          source: 'fake',
+          provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
+          modelId: 'fake-deterministic-1',
+          spec: 'fake/fake',
+        },
+      ]);
     expect(snapshots.at(-1)).toHaveProperty('terminal');
-    expect(snapshots.at(-1)).toHaveProperty('attestedModel');
+  });
+
+  it('FAIL CLOSED: a stamp write that fails ends the session before any model call and leaves no stamp', async () => {
+    const r = rig({
+      script: [fakeText('x')],
+      setup: (store) => {
+        store.failCheckpointWhen = (checkpoint) => JSON.stringify(checkpoint).includes('attestedModels');
+      },
+    });
+    await r.dispatcher.runJob('job-1');
+    expect(r.fake.calls).toHaveLength(0); // no model call was made
+    expect(JSON.stringify(r.store.checkpoints.get('job-1') ?? [])).not.toContain('attestedModels');
+    const failed = r.projected.find((p) => p.event.kind === 'job_failed');
+    expect(failed?.event.payload).toMatchObject({ retryable: true });
+    expect(r.store.jobs.get('job-1')!.status).not.toBe('succeeded');
+  });
+
+  it('a takeover by a session with a different model appends a second stamp bound to its own fence and keeps the first', async () => {
+    const r = rig({ script: [fakeText('y')] });
+    const stored = r.store.jobs.get('job-1')!;
+    stored.status = 'running';
+    stored.lease = { ownerId: 'dead', fence: 4, until: new Date(0), heartbeatAt: new Date(0) };
+    const first = {
+      fence: 4,
+      source: 'provider',
+      provider: 'openai',
+      modelId: 'gpt-5',
+      spec: 'openai/gpt-5',
+      endpoint: 'default',
+    };
+    stored.checkpoint = { v: 1, attestedModels: [first] };
+    await r.dispatcher.runJob('job-1');
+    const stamps = (r.store.jobs.get('job-1')!.checkpoint as Snap).attestedModels!;
+    expect(stamps).toHaveLength(2);
+    expect(stamps[0]).toEqual(first);
+    expect(stamps[1]).toMatchObject({ fence: 5, source: 'fake', modelId: 'fake-deterministic-1' });
+  });
+
+  it('a takeover whose own stamp write fails makes no model call and does not inherit the previous stamp as its own', async () => {
+    const r = rig({
+      script: [fakeText('y')],
+      setup: (store) => {
+        const stored = store.jobs.get('job-1')!;
+        stored.status = 'running';
+        stored.lease = { ownerId: 'dead', fence: 4, until: new Date(0), heartbeatAt: new Date(0) };
+        stored.checkpoint = {
+          v: 1,
+          attestedModels: [
+            { fence: 4, source: 'provider', provider: 'openai', modelId: 'gpt-5', spec: 'openai/gpt-5' },
+          ],
+        };
+        store.failCheckpointWhen = (checkpoint) => JSON.stringify(checkpoint).includes('"fence":5');
+      },
+    });
+    await r.dispatcher.runJob('job-1');
+    expect(r.fake.calls).toHaveLength(0);
+    const stamps = (r.store.jobs.get('job-1')!.checkpoint as Snap).attestedModels ?? [];
+    expect(stamps.map((s) => s.fence)).toEqual([4]); // no entry for fence 5: the gate sees a session without a stamp
   });
 
   it('without a runtime hash no attestation is written (never an invented value)', async () => {

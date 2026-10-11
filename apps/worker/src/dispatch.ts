@@ -183,7 +183,7 @@ const failedEvent = (jobId: string, runId: string, attempt: number, reason: stri
     kind: 'job_failed',
     payload: {
       code,
-      retryable: code === 'provider_error' || code === 'lease_lost',
+      retryable: code === 'provider_error' || code === 'lease_lost' || reason === 'ModelAttestationFailed',
       phase: null,
       message: reason.slice(0, 200),
     },
@@ -239,24 +239,37 @@ class CheckpointWriter {
     priorMeter?: JsonValue,
     /** This build's observed runtime hash: kept in every snapshot, terminal included. */
     attestedRuntimeHash?: string,
+    /** Model stamps earlier sessions committed (checkpoint.attestedModels): append-only, one per claiming fence. */
+    priorModels?: JsonValue[],
   ) {
     this.state = {
       v: 1,
       ...(priorMeter !== undefined ? { meter: priorMeter } : {}),
       ...(attestedRuntimeHash ? { attestedRuntimeHash } : {}),
+      ...(priorModels && priorModels.length > 0 ? { attestedModels: priorModels } : {}),
     };
   }
-  update(patch: Record<string, JsonValue>): Promise<void> {
+  /** The stamps this writer carries, for the append in onModelSelected. */
+  get models(): JsonValue[] {
+    return (this.state.attestedModels as JsonValue[] | undefined) ?? [];
+  }
+  update(patch: Record<string, JsonValue>, options: { revertOnFailure?: boolean } = {}): Promise<void> {
+    const previous = this.state;
     this.state = { ...this.state, ...patch };
     const snapshot = this.state;
     const write = this.chain.then(() => this.jobs.checkpoint(this.actor, this.lease, snapshot));
     this.chain = write.catch(() => undefined);
+    // A write that did not commit must not leave its content in later snapshots (a stamp that was never stored).
+    if (options.revertOnFailure)
+      write.catch(() => {
+        if (this.state === snapshot) this.state = previous;
+      });
     return write;
   }
   replace(value: JsonValue): Promise<void> {
     // A full replacement (the terminal checkpoint) must not drop the job's meter or the attested runtime hash.
     if (value && typeof value === 'object' && !Array.isArray(value))
-      for (const key of ['meter', 'attestedRuntimeHash', 'attestedModel'] as const)
+      for (const key of ['meter', 'attestedRuntimeHash', 'attestedModels'] as const)
         if (!(key in value) && key in this.state) value = { ...value, [key]: this.state[key] as JsonValue };
     const write = this.chain.then(() => this.jobs.checkpoint(this.actor, this.lease, value));
     this.chain = write.catch(() => undefined);
@@ -526,7 +539,9 @@ export class Dispatcher implements WakeTarget {
     // Defensive: onPhaseComplete already carries the meter, but a snapshot written before the first phase (or a
     // replace()) must never drop what an earlier session committed.
     const priorMeter = (claimed.checkpoint as { meter?: JsonValue } | null)?.meter;
-    const writer = new CheckpointWriter(jobs, actor, lease, priorMeter, this.deps.runtimeHash);
+    const priorModelsRaw = (claimed.checkpoint as { attestedModels?: unknown } | null)?.attestedModels;
+    const priorModels = Array.isArray(priorModelsRaw) ? (priorModelsRaw as JsonValue[]) : undefined;
+    const writer = new CheckpointWriter(jobs, actor, lease, priorMeter, this.deps.runtimeHash, priorModels);
     // Observed, not supplied by any caller: written at claim time so the run's committed checkpoint names the build.
     if (this.deps.runtimeHash) {
       try {
@@ -536,18 +551,27 @@ export class Dispatcher implements WakeTarget {
       }
     }
     const hooks: ExecutionHooks = {
-      // Written by the worker only, from what the runtime resolved (never from the profile or a caller): the gate derives
-      // "real evidence" from this stored fact. A takeover by another session records its own.
+      // Written by the worker only, from what the runtime resolved (never from the profile or a caller). APPEND-ONLY:
+      // one entry per claiming session, carrying its lease fence, so a takeover with another model leaves two stamps and
+      // never silently replaces the first. FAIL CLOSED: a write failure propagates and the runtime ends the session with
+      // ModelAttestationFailed before any model call (retryable); the earlier sessions' stamps stay as they were.
       onModelSelected: async (attestation) => {
+        const entry = { fence: lease.fence, ...attestation } as unknown as JsonValue;
+        const existing = writer.models;
+        const sameFence = existing.some((e) => (e as { fence?: unknown } | null)?.fence === lease.fence);
         try {
-          await writer.update({ attestedModel: { ...attestation } });
+          await writer.update(
+            { attestedModels: sameFence ? existing : [...existing, entry] },
+            { revertOnFailure: true },
+          );
         } catch (error) {
           this.log({
             level: 'warn',
-            message: 'model attestation checkpoint failed',
+            message: 'model attestation checkpoint failed; the session ends before any model call',
             jobId,
             code: errorCode(error),
           });
+          throw error;
         }
       },
       onContextInputs: async (hashes) => void (await jobs.recordContextInputs(actor, lease, hashes)),

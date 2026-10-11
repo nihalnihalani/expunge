@@ -169,10 +169,12 @@ export class RunSession {
       const refusal = meter.exhausted();
       if (!refusal.ok)
         this.fail(refusal.code, refusal.code === 'TokenBudgetExceeded' ? 'token_budget' : 'cost_budget');
+      // FAIL CLOSED (DA-12 M-1): the stamp is taken before any model call, so failing here costs nothing and a run can
+      // never proceed unstamped.
       try {
-        await this.deps.hooks?.onModelSelected?.(attestModel(selection));
+        await this.deps.hooks?.onModelSelected?.(attestModel(selection, this.deps.env ?? process.env));
       } catch (error) {
-        this.deps.hooks?.onHookError?.('onModelSelected', error);
+        throw new RuntimeError('ModelAttestationFailed', { cause: error });
       }
       this.provenance = {
         spec: selection.spec,

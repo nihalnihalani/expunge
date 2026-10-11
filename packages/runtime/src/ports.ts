@@ -124,7 +124,8 @@ export interface ExecutionHooks {
   onMeter?(carry: MeterCarry): Promise<void>;
   /**
    * Called once per session, right after the model is resolved and before any model call, with what was resolved. The worker
-   * persists it in the claimed run's checkpoint next to the runtime hash. Errors go to onHookError and do not abort the run.
+   * persists it in the claimed run's checkpoint. FAIL CLOSED: a rejection ends the session with ModelAttestationFailed before
+   * any model call, so a run can never proceed unstamped.
    */
   onModelSelected?(attestation: ModelAttestation): Promise<void>;
   onSecurityEvent?(event: SecurityEvent): void;
@@ -222,6 +223,14 @@ export type ModelAttestation = {
   provider: string;
   modelId: string;
   spec: string;
+  /**
+   * Provider selections only: `overridden` when OPENAI_BASE_URL / ANTHROPIC_BASE_URL points the adapter somewhere other than
+   * the provider's own endpoint (a gateway or a local OpenAI-compatible stand-in), with a sha256 of the lower-cased host
+   * (never the URL: gateway paths can carry tokens). The gate treats `overridden` as non-provider unless its freeze
+   * allowlists that host hash.
+   */
+  endpoint?: 'default' | 'overridden';
+  endpointHostHash?: string;
 };
 
 export type RunStats = {

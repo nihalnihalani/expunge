@@ -84,8 +84,11 @@ export class MultiJobStore implements DispatchJobs, JobResolver {
     job.lease.heartbeatAt = new Date();
     return structuredClone(job);
   }
+  /** Test hook: make a checkpoint write fail when it matches (a refused or lost write). */
+  failCheckpointWhen?: (checkpoint: JsonValue) => boolean;
   async checkpoint(_actor: ActorContext, lease: LeaseBinding, checkpoint: JsonValue): Promise<void> {
     this.rec('checkpoint', lease.jobId, checkpoint);
+    if (this.failCheckpointWhen?.(checkpoint)) throw new Error('CheckpointWriteFailed');
     this.live(lease);
     const list = this.checkpoints.get(lease.jobId) ?? [];
     list.push(checkpoint);
