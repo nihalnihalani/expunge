@@ -141,9 +141,11 @@ export interface TrialCompletedPayload {
   candidateId: string;
   pairId: string;
   family: string;
-  split: 'train' | 'protected' | 'validation' | 'final';
-  parentUseful: boolean;
-  candidateUseful: boolean;
+  /**
+   * Deliberately no split, no fixture and no per-arm outcome: projection events are readable by the worker's credential,
+   * and which world is held out and how each arm did on it is held-out structure. Per-pair detail lives in the campaign
+   * rows, which only the grader and the projection reader can read.
+   */
   verdict: 'admit' | 'reject' | 'hold' | null;
 }
 export interface ApprovalRequiredPayload {
@@ -222,7 +224,10 @@ export interface CampaignRowPayload {
   manifestHash: string;
   kind: 'hider' | 'meta';
   rowId: string;
-  admitted?: boolean;
+  /**
+   * No `admitted` and no per-row outcome here: the worker's credential can read projection events, and a row's admission
+   * and measures are held-out structure. They live in the committed row (reader-only).
+   */
   w0ResetProof?: string;
   budgetHash?: string;
   result: 'measured' | 'null' | 'invalid';
@@ -445,9 +450,6 @@ export const projectionPayloadSchemas: { [K in ProjectionEventKind]: z.ZodType<P
           candidateId: id,
           pairId: id,
           family: id,
-          split: z.enum(['train', 'protected', 'validation', 'final']),
-          parentUseful: z.boolean(),
-          candidateUseful: z.boolean(),
           verdict: z.enum(['admit', 'reject', 'hold']).nullable(),
         })
         .strict(),
@@ -556,7 +558,6 @@ export const projectionPayloadSchemas: { [K in ProjectionEventKind]: z.ZodType<P
           manifestHash: hash,
           kind: z.enum(['hider', 'meta']),
           rowId: id,
-          admitted: z.boolean().optional(),
           w0ResetProof: text(256).optional(),
           budgetHash: hash.optional(),
           result: z.enum(['measured', 'null', 'invalid']),

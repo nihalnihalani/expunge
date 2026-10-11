@@ -1,5 +1,6 @@
 import type {
   ArtifactEnvelope,
+  CampaignDetailRowView,
   CampaignRowPayload,
   CampaignView as CampaignData,
   ExpungeJobSnapshotV2,
@@ -31,7 +32,7 @@ export const meta: ViewMeta = {
 
 /** A row result as it may arrive. 'tie' is worded when a backend reports it; anything else is shown as unrecognized. */
 export type RowResult = CampaignRowPayload['result'] | 'tie';
-export type CampaignRow = Omit<CampaignRowPayload, 'result'> & {
+export type CampaignRow = Omit<CampaignDetailRowView, 'result'> & {
   result: string;
   /** The incident-level result of the row's two workers, when the backend reports it (a different field from the validity result). */
   incidentOutcome?: string;

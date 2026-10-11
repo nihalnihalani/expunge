@@ -8,6 +8,7 @@ import {
   ErasureSuppressionRepository,
   LessonRepository,
   RawArtifactRepository,
+  ProvenanceRepository,
   scopeFilter,
   type MongoService,
 } from '@expunge/mongo';
@@ -36,11 +37,16 @@ export class MongoEligibilityStore implements EligibilityStore {
   }
   /** Never resurrects: an existing row (revoked or deleted) is left exactly as it is. */
   async permit(scope: ScopeKey, artifactHash: string, policyHash: string, reasonCode: string): Promise<void> {
-    await this.rows.updateOne(
-      { ...scopeFilter(scope), artifactHash },
-      { $setOnInsert: { state: 'permitted', policyHash, reasonCode, sourceIds: [], updatedAt: new Date() } },
-      { upsert: true },
-    );
+    await this.service.transaction(async (session) => {
+      await new ProvenanceRepository(this.service).touchScope(scope, session);
+      await this.rows.updateOne(
+        { ...scopeFilter(scope), artifactHash },
+        {
+          $setOnInsert: { state: 'permitted', policyHash, reasonCode, sourceIds: [], updatedAt: new Date() },
+        },
+        { upsert: true, session },
+      );
+    });
   }
   async get(scope: ScopeKey, artifactHash: string): Promise<ArtifactEligibility | null> {
     const { _id: _id, ...row } = ((await this.rows.findOne({ ...scopeFilter(scope), artifactHash })) ??
@@ -70,10 +76,14 @@ export class MongoEligibilityStore implements EligibilityStore {
     policyHash: string,
     reasonCode: string,
   ): Promise<void> {
-    await this.rows.updateOne(
-      { ...scopeFilter(scope), artifactHash },
-      { $set: { state: 'source_deleted', policyHash, reasonCode, updatedAt: new Date() } },
-    );
+    await this.service.transaction(async (session) => {
+      await new ProvenanceRepository(this.service).touchScope(scope, session);
+      await this.rows.updateOne(
+        { ...scopeFilter(scope), artifactHash },
+        { $set: { state: 'source_deleted', policyHash, reasonCode, updatedAt: new Date() } },
+        { session },
+      );
+    });
   }
 }
 

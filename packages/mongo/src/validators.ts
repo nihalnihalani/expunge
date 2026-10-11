@@ -1,8 +1,9 @@
 import type { Document } from 'mongodb';
-import { GUARDRAIL_MAX_DEPTH, PROJECTION_EVENT_KINDS } from '@expunge/contracts';
+import { ENVIRONMENTS, GUARDRAIL_MAX_DEPTH, PROJECTION_EVENT_KINDS } from '@expunge/contracts';
 import { CAMPAIGN_RESULT_VALIDATORS } from './validators-campaign.js';
 import { GATE_CONTROL_VALIDATORS } from './validators-extra.js';
 import { PRIVACY_VALIDATORS } from './validators-privacy.js';
+import { NATIVE_SOURCE_VALIDATORS } from './native-source-metadata.js';
 
 type Schema = Document;
 const str: Schema = { bsonType: 'string', maxLength: 256 };
@@ -16,7 +17,7 @@ const integer: Schema = {
 const date: Schema = { bsonType: 'date' };
 const bool: Schema = { bsonType: 'bool' };
 const arr = (items: Schema, maxItems = 256): Schema => ({ bsonType: 'array', items, maxItems });
-const en = (values: string[]): Schema => ({ bsonType: 'string', enum: values });
+const en = (values: readonly string[]): Schema => ({ bsonType: 'string', enum: [...values] });
 const object = (properties: Record<string, Schema>, required = Object.keys(properties)): Schema => ({
   bsonType: 'object',
   required,
@@ -24,7 +25,7 @@ const object = (properties: Record<string, Schema>, required = Object.keys(prope
   properties,
 });
 const MUTATION_CLASSES = ['tightening', 'behavioral', 'authority_expansion'];
-const scope = { tenantId: str, env: en(['dev', 'evaluation', 'demo']), scopeId: str };
+const scope = { tenantId: str, env: en(ENVIRONMENTS), scopeId: str };
 const actor = object({ ...scope, actorId: str, authorizationRevision: integer });
 const binding = object({
   jobId: str,
@@ -753,10 +754,27 @@ export const CONTROL_VALIDATORS: Record<string, Document> = {
       payload: json,
       createdAt: date,
     }),
+    // This collection is worker-readable; held-out verdict payload keys must never cross this transport.
+    $or: [
+      { kind: { $nin: ['trial_completed', 'campaign_row_committed'] } },
+      {
+        $and: [
+          'split',
+          'fixtureId',
+          'parentUseful',
+          'candidateUseful',
+          'useful',
+          'outcome',
+          'outcomes',
+          'admitted',
+        ].map((key) => ({ [`payload.${key}`]: { $exists: false } })),
+      },
+    ],
   },
   ...GATE_CONTROL_VALIDATORS,
   ...CAMPAIGN_RESULT_VALIDATORS,
   ...PRIVACY_VALIDATORS,
+  ...NATIVE_SOURCE_VALIDATORS,
 };
 export const WORLD_VALIDATORS: Record<string, Document> = {
   // The revision counter only. The binding to a scope revision lives in world_scope_bindings.
@@ -781,6 +799,8 @@ export const WORLD_VALIDATORS: Record<string, Document> = {
       worldId: str,
       worldRevision: integer,
       scopeRevision: integer,
+      // contentHash(registry, 'edge-index-registry'): an index is valid only for the registry it was derived from.
+      registryHash: hash,
       edgeId: str,
       fieldId: str,
       fromNode: hash,
