@@ -310,6 +310,14 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
   });
   it('keeps authority rows with their owners', () => {
     expect(holders('INSERT', 'authority_revisions')).toEqual([]);
+    // The fixture builder's campaign authority is a separate collection the fence reads only for env 'evaluation'.
+    expect(holders('INSERT', 'campaign_authority')).toEqual(['fixture_builder']);
+    // The floor and revision are insert-only; the fence counter is a separate collection, as for the standing authority.
+    expect(holders('UPDATE', 'campaign_authority')).toEqual([]);
+    expect(holders('REMOVE', 'campaign_authority')).toEqual([]);
+    expect(holders('INSERT', 'campaign_authority_touches')).toEqual(['fixture_builder']);
+    expect(holders('UPDATE', 'campaign_authority_touches').sort()).toEqual(['domain_executor', 'promoter']);
+    expect(holders('REMOVE', 'campaign_authority_touches')).toEqual([]);
     expect(holders('UPDATE', 'authority_revisions')).toEqual(['approval_issuer']);
     expect(holders('UPDATE', 'authority_touches').sort()).toEqual([
       'approval_issuer',

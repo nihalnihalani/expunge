@@ -59,6 +59,10 @@ export function atlasRoleManifests(
         // Effects read the stored authority and decision ledger inside their transaction.
         'authority_revisions',
         'authority_touches',
+        // Evaluation scopes only: the campaign instance's authority row (read by the fence when the scope has no standing row)
+        // and its fence counter.
+        'campaign_authority',
+        'campaign_authority_touches',
         'decisions',
         'wake_commands',
         // The operator-facing service runs as this principal and serves committed projections: events, the per-job
@@ -94,7 +98,13 @@ export function atlasRoleManifests(
         ...DOMAIN_STEP_COLLECTIONS,
       ]),
       // authority_touches: the fence counter only. The authoritative authority_revisions row is not writable here.
-      control('UPDATE', ['jobs', 'runs', 'projection_sequences', 'authority_touches']),
+      control('UPDATE', [
+        'jobs',
+        'runs',
+        'projection_sequences',
+        'authority_touches',
+        'campaign_authority_touches',
+      ]),
     ]),
     observer: role('expunge_observer', [
       // JobRepository.create binds a job to a world through these two rows; no domain collection is readable.
@@ -225,11 +235,20 @@ export function atlasRoleManifests(
         'provenance_edges',
         'authority_revisions',
         'authority_touches',
+        'campaign_authority',
+        'campaign_authority_touches',
         'jobs',
       ]),
       // candidates: the promoted state transition. approvals: grant consumption.
       // No UPDATE on approvals: a grant is consumed by inserting a unique grant_consumptions row.
-      control('UPDATE', ['deployments', 'candidates', 'jobs', 'projection_sequences', 'authority_touches']),
+      control('UPDATE', [
+        'deployments',
+        'candidates',
+        'jobs',
+        'projection_sequences',
+        'authority_touches',
+        'campaign_authority_touches',
+      ]),
       control('INSERT', [
         'deployments',
         'promotions',
@@ -329,6 +348,9 @@ export function atlasRoleManifests(
         'artifact_eligibility',
         'campaign_freezes',
         'meta_draw_commitments',
+        // installForCampaign: refused in a scope with a worker deployment pointer; reads back its own campaign row.
+        'deployments',
+        'campaign_authority',
       ]),
       control('INSERT', [
         'jobs',
@@ -342,6 +364,11 @@ export function atlasRoleManifests(
         'projection_events',
         'projection_sequences',
         'provenance_edges',
+        // Insert-only authority row of an evaluation campaign instance. It lives apart from `authority_revisions`, which the
+        // fixture builder cannot write: the fence consults this collection only for env 'evaluation'. Insert-only, with its
+        // fence counter in a separate row.
+        'campaign_authority',
+        'campaign_authority_touches',
       ]),
       control('UPDATE', ['jobs', 'projection_sequences']),
     ]),

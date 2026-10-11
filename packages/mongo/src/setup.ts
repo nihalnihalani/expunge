@@ -61,6 +61,8 @@ export const CONTROL_COLLECTIONS = [
   'grant_consumptions',
   'authority_revisions',
   'authority_touches',
+  'campaign_authority',
+  'campaign_authority_touches',
   'decisions',
   'wake_commands',
   'job_subjects',
@@ -134,6 +136,8 @@ export const CONTROL_INDEXES: IndexEntry[] = [
   { collection: 'grant_consumptions', key: { ...identity, target: 1, candidateId: 1 } },
   { collection: 'authority_revisions', key: { ...identity }, options: { unique: true } },
   { collection: 'authority_touches', key: { ...identity }, options: { unique: true } },
+  { collection: 'campaign_authority', key: { ...identity }, options: { unique: true } },
+  { collection: 'campaign_authority_touches', key: { ...identity }, options: { unique: true } },
   { collection: 'decisions', key: { ...identity, jobId: 1, stepId: 1, batchOrdinal: 1 } },
   { collection: 'job_subjects', key: { ...identity, jobId: 1 }, options: { unique: true } },
   {
