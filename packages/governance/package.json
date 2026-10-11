@@ -1,0 +1,14 @@
+{
+  "name": "@expunge/governance",
+  "version": "0.1.0",
+  "description": "Authority floor, guardrail policy evaluation and the decision ledger the domain gateway decides with.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/baselines": "0.1.0",
+    "@expunge/contracts": "0.1.0",
+    "@expunge/harness-compiler": "0.1.0",
+    "@expunge/mongo": "0.1.0"
+  }
+}
