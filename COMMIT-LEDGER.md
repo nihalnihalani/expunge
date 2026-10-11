@@ -20,14 +20,8 @@ Maintained by commit-steward only. One row per commit: hash, task IDs, paths sum
 
 ## HEAD-proof history
 
-
-
 Each entry records a HEAD that was proven to install and typecheck on its own, from a clean export. Entries marked lead-relayed were produced by the verifier, not re-run by commit-steward.
 
-
-
 | HEAD | Proof reference | npm ci | typecheck | vitest (default lane) | Source |
-
 |---|---|---|---|---|---|
-
 | c45be9b31a30f49101e2ad8e28d8861f144a741d | checkpoint 20261011T113613Z-9b77b25b (verifier-2) | exit 0 | exit 0 | 537 passed / 0 failed / 254 skipped | lead-relayed verifier-2 proof, first entry |
