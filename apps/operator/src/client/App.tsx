@@ -3,6 +3,7 @@ import { SpaceNav } from './SpaceNav';
 import { SpaceWorkspace } from './SpaceWorkspace';
 import { ExpungeWorkbench } from './expunge';
 import { TelemetryNotice } from './expunge/TelemetryNotice';
+import { ExpungeReviewTool } from './expunge/review/ExpungeReviewTool';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
 import {
@@ -1047,6 +1048,7 @@ export function App() {
   );
   return configured ? (
     <CopilotKitProvider runtimeUrl="/api/copilotkit" headers={authHeaders()}>
+      <ExpungeReviewTool />
       {content}
     </CopilotKitProvider>
   ) : (
