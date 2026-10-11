@@ -1,3 +1,4 @@
+import './expunge/role-environment.js';
 import './expunge/telemetry-default.js';
 import { webSearchProvider } from './parallel.js';
 import { createShutdown } from './shutdown.js';
@@ -14,27 +15,21 @@ import { expungeDomainFromEnv } from './expunge/domain-service.js';
 import { describeExpungeConfig } from './expunge/config.js';
 import { readBuildId } from './expunge/build-id.js';
 import { ensureExpungeDot } from './expunge/expunge-dot.js';
+import { operatorStartupConfigFromEnv } from './expunge/startup-config.js';
 import {
   intelligenceApiKeyFromEnv,
   intelligenceWsUrlFromEnv,
   type PlatformConfig,
 } from './platform-config.js';
-const host = process.env.HOST ?? '127.0.0.1';
-const port = Number(process.env.PORT ?? 4310);
-const ownerToken = process.env.OWNER_TOKEN;
-if (
-  !['127.0.0.1', '::1', 'localhost'].includes(host) &&
-  (!ownerToken || ownerToken.length < 24)
-)
-  throw new Error(
-    'External binding requires an OWNER_TOKEN of at least 24 characters.',
+const startup = operatorStartupConfigFromEnv(process.env, process.cwd());
+const { host, port, databasePath: database, ownerId, ownerToken } = startup;
+const expungeDomain = expungeDomainFromEnv(process.env);
+if (startup.localDefaults.length)
+  console.info(
+    `Operator uses explicit local defaults: ${startup.localDefaults.join(', ')}.`,
   );
-const database = process.env.DATABASE_PATH ?? 'data/opendots.sqlite';
 const store = new Store(database);
-const workspace = new WorkspaceStore(
-  database,
-  process.env.OWNER_ID ?? 'opendots-owner',
-);
+const workspace = new WorkspaceStore(database, ownerId);
 const config: PlatformConfig = {
   intelligenceKey: intelligenceApiKeyFromEnv(process.env),
   intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,
@@ -63,7 +58,6 @@ const config: PlatformConfig = {
   runtimeUrl: `http://${host === '::1' ? '[::1]' : '127.0.0.1'}:${port}/api/copilotkit`,
   ownerToken,
 };
-const expungeDomain = expungeDomainFromEnv(process.env);
 if (expungeDomain) ensureExpungeDot(workspace);
 const platform = new Platform(store, workspace, config, expungeDomain);
 const researchConfig = {

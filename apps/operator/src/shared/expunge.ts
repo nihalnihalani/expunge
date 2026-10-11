@@ -9,6 +9,18 @@ import { z } from 'zod';
  */
 
 // ---- Mirrored vocabulary (runtime arrays; a parity test compares them with packages/contracts) ----
+export const ENVIRONMENTS = [
+  'dev',
+  'evaluation',
+  'demo',
+  'staging',
+  'production',
+] as const;
+export type Environment = (typeof ENVIRONMENTS)[number];
+/** Real source registrations require an explicit release environment. */
+export const SOURCE_ENVIRONMENTS = ['staging', 'production'] as const;
+export type SourceEnvironment = (typeof SOURCE_ENVIRONMENTS)[number];
+
 export const JOB_KINDS = [
   'cleanup',
   'observe',
@@ -158,6 +170,14 @@ export type ReadinessReason =
   | 'unauthorized'
   | 'forbidden'
   | 'scope_unbound' // authorized
+  | 'source_registration_unreported'
+  | 'source_missing'
+  | 'source_revoked'
+  | 'source_unsupported'
+  | 'legacy_backend'
+  | 'cleanup_permission_not_checked'
+  | 'cleanup_permission_denied'
+  | 'cleanup_permission_revoked'
   | 'evidence_unconfigured'
   | 'evidence_never_proven'
   | 'evidence_stale'
@@ -175,6 +195,28 @@ export interface ReadinessCheck {
   observedAt: string | null;
 }
 
+/** Sanitized source identity derived from the owner's stored registration, never browser authority. */
+export interface SourceBindingView {
+  sourceId: string;
+  sourceKind: 'original' | 'isolated_replay';
+  registrationHash: string;
+  registrationRevision: number;
+  policyRevision: number;
+  authorizationRevision: number;
+}
+
+/** Actual registry and permission state reported by the domain service. Null fields stay unbound. */
+export interface SourceReadinessView {
+  registration: 'missing' | 'active' | 'revoked' | 'unsupported';
+  permission: 'not_checked' | 'authorized' | 'denied' | 'revoked';
+  sourceId: string | null;
+  sourceKind: 'original' | 'isolated_replay' | null;
+  sourceRegistrationHash: string | null;
+  registrationRevision: number | null;
+  policyRevision: number | null;
+  authorizationRevision: number | null;
+}
+
 export interface ExpungeReadiness {
   checkedAt: string;
   /** 'fixture' = deterministic test backend; the UI shows a persistent banner. */
@@ -182,8 +224,13 @@ export interface ExpungeReadiness {
   configured: ReadinessCheck; // operator env present and well formed; no network
   reachable: ReadinessCheck; // backend answered the readiness route within the bound
   authorized: ReadinessCheck; // backend accepted the service principal and bound the owner to a scope
+  /** Optional only for historical projections; an absent check always blocks cleanup. */
+  sourceRegistered?: ReadinessCheck;
+  cleanupAuthorized?: ReadinessCheck;
+  /** Null/absent means no server-reported source binding. */
+  source?: SourceReadinessView | null;
   evidenceReady: ReadinessCheck; // observability write and read-back proven by the backend, not by the operator
-  /** true only when all four pass. Derived server-side; the client never computes it. */
+  /** true only when all six pass against the live backend. Derived server-side. */
   ready: boolean;
   /** Which write actions have a configured server-side principal. Names only, never values. */
   writes: {
@@ -196,11 +243,74 @@ export interface ExpungeReadiness {
   telemetry: 'disabled' | 'enabled';
 }
 
+/** Operational cleanup prerequisites. Remote evidence is a separate improvement/admission prerequisite. */
+export function cleanupReadinessPassed(
+  readiness:
+    | Pick<
+        ExpungeReadiness,
+        | 'backend'
+        | 'configured'
+        | 'reachable'
+        | 'authorized'
+        | 'sourceRegistered'
+        | 'cleanupAuthorized'
+      >
+    | undefined,
+): boolean {
+  return (
+    readiness?.backend.kind === 'live' &&
+    [
+      readiness.configured,
+      readiness.reachable,
+      readiness.authorized,
+      readiness.sourceRegistered,
+      readiness.cleanupAuthorized,
+    ].every((item) => item?.status === 'pass')
+  );
+}
+
+/** Exact immutable source binding comparison; missing bindings never match one another. */
+export function sourceBindingsEqual(
+  left: SourceBindingView | undefined,
+  right: SourceBindingView | undefined,
+): boolean {
+  return Boolean(
+    left &&
+    right &&
+    left.sourceId === right.sourceId &&
+    left.sourceKind === right.sourceKind &&
+    left.registrationHash === right.registrationHash &&
+    left.registrationRevision === right.registrationRevision &&
+    left.policyRevision === right.policyRevision &&
+    left.authorizationRevision === right.authorizationRevision,
+  );
+}
+
+/** A projected source must match every live registration binding reported by the backend. */
+export function sourceBindingMatchesReadiness(
+  binding: SourceBindingView | undefined,
+  source: SourceReadinessView | null | undefined,
+): boolean {
+  return Boolean(
+    binding &&
+    source &&
+    source.registration === 'active' &&
+    binding.sourceId === source.sourceId &&
+    binding.sourceKind === source.sourceKind &&
+    binding.registrationHash === source.sourceRegistrationHash &&
+    binding.registrationRevision === source.registrationRevision &&
+    binding.policyRevision === source.policyRevision &&
+    binding.authorizationRevision === source.authorizationRevision,
+  );
+}
+
 // ---- Worlds and previews: GET /api/expunge/worlds, POST /api/expunge/previews ----
 export interface WorldSummary {
   worldId: string;
   label: string;
-  env: 'dev' | 'evaluation' | 'demo';
+  env: Environment;
+  /** Absent historical worlds are displayed as unbound and cannot start native cleanup. */
+  source?: SourceBindingView;
   scopeId: string;
   scopeRevision: number;
   worldRevision: number;
@@ -229,6 +339,8 @@ export interface CleanupPreview {
   /** Executed model-free by the gateway under the expert-static discovery policy; never authorizes an effect. */
   basis: 'expert_static_discovery';
   worldId: string;
+  /** Exact source identity/policy/permission binding from the domain's persisted preview. */
+  source?: SourceBindingView;
   worldRevision: number;
   scopeRevision: number;
   /** Masked display and a hash. The literal subject is not echoed back. */
@@ -282,7 +394,7 @@ export interface ExpungeJobSnapshotV2 {
   scope: {
     scopeId: string;
     scopeRevision: number;
-    env: 'dev' | 'evaluation' | 'demo';
+    env: Environment;
   };
   world?: { worldId: string; revision: number; maintenanceMode: boolean };
   subject?: { display: string; identityHash: string; idType: SubjectIdType };
@@ -625,6 +737,8 @@ export interface ApprovalDecisionResult {
   /** committed state after the call, re-read from the domain, not echoed from the request */
   state: ApprovalDescriptorView['state'];
   committedEventSequence: number | null;
+  /** Minted by the database when an approval is committed; absent or null for a decline. */
+  grantId?: string | null;
 }
 
 export interface CancelJobRequest {
@@ -714,6 +828,8 @@ export interface RecordDetail {
 export interface CompletionReceiptView {
   receiptId: string;
   jobId: string;
+  /** Historical receipts without this binding cannot establish original-source erasure. */
+  source?: SourceBindingView;
   runId: string;
   harnessHash: string;
   scopeId: string;
@@ -899,6 +1015,16 @@ export interface DeploymentView {
     childHash: string;
     reasonCodes: string[];
   }>;
+  /**
+   * Rollbacks the deployment service refused (for example RollbackNeedsGrant), read from the
+   * insert-only refusal rows, bounded, newest first. Absent when the backend does not report them.
+   */
+  refusedRollbacks?: RefusedRollbackView[];
+}
+export interface RefusedRollbackView {
+  toHash: string;
+  code: string;
+  at: string;
 }
 /**
  * The preregistered meta verdict exactly as the backend stored it (summarizeMeta, PREREGISTRATION.md).

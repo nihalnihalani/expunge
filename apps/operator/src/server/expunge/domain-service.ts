@@ -16,7 +16,9 @@ import {
   JOB_WRITE_TOKEN,
   MIN_TOKEN_LENGTH,
   READ_TOKEN,
+  validOperatorOwnerId,
 } from './config.js';
+import { domainOrigin, DOMAIN_REDIRECT_POLICY } from './domain-origin.js';
 import {
   approvalDescriptorSchema,
   deploymentSchema,
@@ -203,23 +205,23 @@ function classifyStatus(status: number): DomainErrorCode {
 
 /** The backend must authenticate each principal and bind it to a fixed owner and scope. */
 export class HttpExpungeDomainService implements ExpungeDomainService {
+  private readonly origin: string;
   constructor(
-    private readonly origin: string,
+    origin: string,
     private readonly credentials: DomainCredentials,
     private readonly ownerId: string,
     private readonly transport: typeof fetch = fetch,
   ) {
-    const url = new URL(origin);
+    const normalized = domainOrigin(origin);
+    if (normalized === null)
+      throw new Error(
+        'EXPUNGE_DOMAIN_URL must be an HTTPS or explicit loopback HTTP origin.',
+      );
+    this.origin = normalized;
     if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.username ||
-      url.password ||
-      url.pathname !== '/' ||
-      url.search ||
-      url.hash
+      credentials.readToken.length < MIN_TOKEN_LENGTH ||
+      !validOperatorOwnerId(ownerId)
     )
-      throw new Error('EXPUNGE_DOMAIN_URL must be an HTTP(S) origin.');
-    if (credentials.readToken.length < MIN_TOKEN_LENGTH || !ownerId.trim())
       throw new Error(
         'Expunge domain transport requires a service token and owner binding.',
       );
@@ -256,7 +258,7 @@ export class HttpExpungeDomainService implements ExpungeDomainService {
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        redirect: 'error',
+        redirect: DOMAIN_REDIRECT_POLICY,
         signal: signal
           ? AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)])
           : AbortSignal.timeout(TIMEOUT_MS),
@@ -330,7 +332,10 @@ export class HttpExpungeDomainService implements ExpungeDomainService {
       input,
     );
     if (value === null) throw new ExpungeDomainError('not_found', 404);
-    return parseWith(previewSchema, value);
+    const preview = parseWith(previewSchema, value);
+    if (preview.worldId !== input.worldId || !preview.source)
+      throw new ExpungeDomainError('bad_response');
+    return preview;
   }
 
   async listJobs(query: JobListQuery, signal?: AbortSignal) {
@@ -507,6 +512,6 @@ export function expungeDomainFromEnv(env: Record<string, string | undefined>) {
       jobWriteToken: env[JOB_WRITE_TOKEN]?.trim() || undefined,
       approvalToken: env[APPROVAL_TOKEN]?.trim() || undefined,
     },
-    env.OWNER_ID?.trim() || 'opendots-owner',
+    env.OWNER_ID?.trim() ?? '',
   );
 }
