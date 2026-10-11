@@ -54,6 +54,11 @@ services:
       EGRESS_PROXY_DEFAULT: http://candidate-proxy:4314
       http_proxy: http://candidate-proxy:4314
       https_proxy: http://candidate-proxy:4314
+      # Loopback must never go through the proxy: the upstream image's own healthcheck (and its control server) call
+      # http://localhost:4100, and with a proxy configured that request was sent to the proxy and answered 403, which
+      # kept the container `unhealthy` while /health from the host answered 200.
+      no_proxy: localhost,127.0.0.1,::1
+      NO_PROXY: localhost,127.0.0.1,::1
     read_only: true
     # Source/results must be exported through the broker before replacement.
     # Unlike ordinary Dot workspaces these candidate filesystems are disposable
@@ -91,6 +96,39 @@ services:
       candidate-private:
         ipv4_address: ${EXPUNGE_PROXY_IPV4:-172.30.90.2}
       broker-internal: {}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ['/tmp:size=8m,mode=1777']
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 32
+    init: true
+  # The trusted broker behind the proxy. Enabled with `--profile broker`; the default stack keeps its empty allowlist.
+  candidate-broker:
+    profiles: [broker]
+    build:
+      context: .
+      dockerfile: broker.Dockerfile
+    environment:
+      PORT: '4320'
+      EXPUNGE_CANDIDATE_ID: ${EXPUNGE_CANDIDATE_ID:?Set a stored candidate ID}
+      # The inbound principal the proxy presents. The broker holds no database, model, grader, promoter, telemetry or
+      # operator credential and refuses to start with one.
+      EXPUNGE_CANDIDATE_BROKER_TOKEN: ${EXPUNGE_CANDIDATE_BROKER_TOKEN:?Set the proxy-to-broker service token}
+      EXPUNGE_BROKER_ARTIFACT_DIR: /artifacts
+      EXPUNGE_BROKER_SPOOL_DIR: /spool
+      EXPUNGE_BROKER_TICKET_DIR: /tickets
+    networks:
+      broker-internal:
+        aliases: [candidate-broker]
+    volumes:
+      # Admitted artifacts: files named by their own sha256, read-only to the broker.
+      - ${EXPUNGE_BROKER_ARTIFACTS_DIR:-./broker-artifacts}:/artifacts:ro
+      # Run tickets, minted by the trusted side (128-bit random ids bound to artifact, input, job, run and call), read-only.
+      - ${EXPUNGE_BROKER_TICKETS_DIR:-./broker-tickets}:/tickets:ro
+      # Typed results: an append-only spool the trusted side reads and re-validates.
+      - ${EXPUNGE_BROKER_SPOOL_DIR:-./broker-spool}:/spool
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     read_only: true

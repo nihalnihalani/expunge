@@ -63,6 +63,44 @@ One candidate runs per Compose project. Parallel projects need distinct loopback
 
 Bounds: 1 CPU, 2 GiB memory with no extra swap, 256 PIDs, read-only root, 64 MiB workspace, 256 MiB profiles, 512 MiB temporary directory, 32 MiB cache and 512 MiB shared memory. Candidate files are disposable tmpfs; export/hash artifacts before replacing the container. Ordinary Dot persistent volumes are untouched. The proxy has 0.25 CPU/128 MiB/32 PIDs. Docker shares the host kernel; this overlay does not install gVisor or establish a microVM boundary.
 
+## Trusted broker (`--profile broker`)
+
+`candidate-broker.mjs` is the only service behind the proxy and has exactly two typed routes, admitted by exact method/path in
+`EXPUNGE_CANDIDATE_ALLOWED_ROUTES='[{"method":"POST","path":"/artifact/fetch"},{"method":"POST","path":"/result/submit"}]'`:
+
+- `POST /artifact/fetch {artifactHash}` returns the bytes of an ADMITTED artifact (files named by their own sha256 in a read-only
+  directory, re-hashed on every serve, at most 256 KiB).
+- `POST /result/submit {ticketId, value}` takes a result for one RUN TICKET. The trusted side mints the ticket (a 128-bit random
+  id bound to candidate, slot, artifact hash, input hash, job, run and call number, with an expiry of at most 10 minutes; see
+  `mintRunTicket` in `@expunge/plugin-sandbox`) and writes it to the broker's read-only ticket directory; only that run is handed
+  the id. The candidate names a ticket and supplies the value; it cannot choose any bound field, so it cannot write another
+  run's result, and a guessed, unminted, expired or foreign-candidate ticket is refused. One value is accepted per ticket and per
+  call (same value again is idempotent, a different one is a 409, even from a second ticket for the same call). The record of what
+  was accepted is the append-only spool, which the broker re-reads at start, so a restart does not reopen a ticket. The trusted
+  reader (`selectSpooledResult`) independently refuses a call with more than one distinct result and re-validates the value with
+  the slot's strict schema.
+
+The broker holds no database, model, grader, promoter, telemetry or operator credential. It starts only if every environment
+name is in an ALLOWLIST (`ALLOWED_ENV` in the file: its own settings plus the node image defaults); anything else, whatever its
+name, refuses to start. Its only secret is the inbound proxy-to-broker token, which the proxy never returns (it also refuses a
+response that contains it). It enforces a per-candidate rate bound (default 120 requests per fixed one-minute window) and a cap
+on concurrent requests (default 4), both answered with 429. It sits on the internal `broker-internal` network only. Every other
+route is 403 at the proxy and 404 at the broker.
+
+Start it with `--profile broker`, `EXPUNGE_BROKER_ARTIFACTS_DIR` (read-only), `EXPUNGE_BROKER_TICKETS_DIR` (read-only to the
+broker, written by the trusted side) and `EXPUNGE_BROKER_SPOOL_DIR` (writable by the broker's `node` user). On macOS with colima
+the directories must be under your home (the VM does not share `/tmp`). Prove it live with `node infra/opendots/verify-broker.mjs
+<env-file> <artifact-sha256>`; unit/proxy chain: `node --test infra/opendots/candidate-broker.test.mjs`. What this does NOT do:
+authenticate which candidate process holds the proxy access token (every process in the candidate that has it can call the two
+routes, but only with a ticket it was handed), authorize by anything but the proxy's fixed candidate id, trust the ticket
+directory beyond its mount (its integrity is the trust root, as for the artifact directory), or protect against a Docker or
+kernel escape.
+
+**Healthcheck.** The candidate computer's environment sets `http_proxy`/`https_proxy` to the proxy, so the upstream healthcheck's
+request to `http://localhost:4100/health` went to the proxy and was answered 403: the container stayed `unhealthy` (over 1100
+failed checks) while `/health` from the host answered 200. `no_proxy`/`NO_PROXY=localhost,127.0.0.1,::1` is now set in the Compose
+file and the container reports `healthy`.
+
 ## Verification
 
 Run `node --test infra/opendots/candidate-proxy.test.mjs` for proxy authentication/origin/path/binding/disclosure checks. With a candidate stack running, `node infra/opendots/verify-candidate.mjs <env-file>` exercises the live guarded computer (file roundtrip, proxy 403 default-deny, Internet/metadata/host-gateway blocked, and the four DNS probes above). These use local fixture HTTP responses and are not live domain tests. Operator tests include inherited owner/origin/computer credential/action fixtures plus the new projection checks. Live Docker checks and service readiness are tracked in [BUILD-A1.md](BUILD-A1.md). A setup-only shell or configured endpoint is not a provider response, a working computer or a passed containment test.
