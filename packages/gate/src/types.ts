@@ -55,6 +55,12 @@ export type EpisodeRequest = {
   limits: ResourceLimits;
   /** The frozen owner ceiling both arms run under. */
   budget: ResourceLimits;
+  /**
+   * Whether the instance's world may stay in the world database after grading. Only training worlds are retained;
+   * a protected or validation instance is deleted once its read-back is taken, so held-out world contents do not
+   * outlive the run (DA-11 F-11).
+   */
+  retainWorld?: boolean;
   /** The visible world to seed. A copy: the port cannot change the gate's. Never carries the manifest. */
   world: VisibleWorld;
   /** The fault plan the trial declares (equal for both arms). The port may only seed it; the domain gateway injects. */

@@ -32,6 +32,8 @@ export type ArmTask = {
   profile: WorkerProfile;
   /** Extra seconds beyond the bundle's own wall-time limit before the gate cuts a run off as timed out. */
   graceMs: number;
+  /** Training worlds only. */
+  retainWorld: boolean;
 };
 export type ArmContext = {
   port: EpisodePort;
@@ -103,6 +105,7 @@ export async function runArm(context: ArmContext, task: ArmTask): Promise<ArmOut
     profile: structuredClone(task.profile),
     limits: structuredClone(task.bundle.limits),
     budget: structuredClone(task.budget),
+    retainWorld: task.retainWorld,
     world: structuredClone(fixture.world),
     faults,
     signal: context.signal,

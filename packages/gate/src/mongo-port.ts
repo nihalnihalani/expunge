@@ -188,6 +188,8 @@ export class MongoEpisodePort implements EpisodePort {
     } catch {
       readback = null;
     }
+    // Held-out instances do not outlive their grading: the read-back is in hand, the world's records go.
+    if (request.retainWorld === false) await discardWorld(builder, world).catch(() => undefined);
     if (!readback)
       return {
         outcome: 'failed',
@@ -267,4 +269,10 @@ export async function readFaults(
     attestedPlanHash: attest ? (attest.payload.planHash ?? null) : null,
     injected: { transient: count('transient'), lostAck: count('lost_ack'), interrupted: count('interrupt') },
   };
+}
+
+/** Removes the instance's records from the world database. The counter and binding rows stay as the audit of the instance. */
+export async function discardWorld(builder: MongoService, world: VisibleWorld): Promise<void> {
+  for (const id of COLLECTION_IDS)
+    await builder.world.collection(id).deleteMany({ worldId: world.worldId, tenantId: world.scope.tenantId });
 }

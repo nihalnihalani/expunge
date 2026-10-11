@@ -119,6 +119,7 @@ export async function runCampaign(args: CampaignArgs): Promise<CampaignRun> {
       budget: args.budget,
       profile: args.profile,
       graceMs: args.graceMs ?? DEFAULT_GRACE_MS,
+      retainWorld: pair.split === 'train',
     };
     const out = await runArm(
       {
