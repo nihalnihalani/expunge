@@ -29,8 +29,13 @@ function lastAssistantText(path) {
       const row = JSON.parse(lines[i]);
       const content = row?.message?.role === 'assistant' ? row.message.content : undefined;
       const text = Array.isArray(content)
-        ? content.filter((c) => c?.type === 'text').map((c) => c.text).join('\n')
-        : typeof content === 'string' ? content : '';
+        ? content
+            .filter((c) => c?.type === 'text')
+            .map((c) => c.text)
+            .join('\n')
+        : typeof content === 'string'
+          ? content
+          : '';
       if (text.trim() !== '') return text;
     }
   } catch {
