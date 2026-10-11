@@ -1,0 +1,11 @@
+--- a/apps/operator/src/shared/expunge.ts	2026-10-11 20:52:35
++++ b/apps/operator/src/shared/expunge.ts	2026-10-11 20:52:35
+@@ -75,6 +75,8 @@
+ export type ExternalErasureStatus = (typeof EXTERNAL_ERASURE_STATUSES)[number];
+ export const PROVIDER_ERASURE_STATUSES = [
+   'unsubmitted',
++  'submitting',
++  'submission_ambiguous',
+   'pending',
+   'in_progress',
+   'completed',
