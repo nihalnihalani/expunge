@@ -16,18 +16,19 @@ export type ModelStamp = {
   spec?: string;
   endpoint?: string;
   endpointHostHash?: string;
+  runtimeHash?: string;
 };
 export type ArmFacts = {
   /** Every check below held and the model is the frozen provider model. Anything less is not real evidence. */
   verified: boolean;
-  /** The runtime hash the worker attested in the committed checkpoint; null when absent. */
+  /** The runtime hash the lease holder attested in its insert-only attestation row for the final fence; null when absent. */
   runtimeHash: string | null;
   reasons: string[];
 };
 
 /**
- * What is stored about one arm: the job row, and the model stamps, whichever collection holds them. Today the stamps
- * are `checkpoint.attestedModels`; when they move to an insert-only attestation collection only the reader changes.
+ * What is stored about one arm: the job row, and the per-fence attestation rows (model and runtime). The stamps come
+ * from the insert-only attestation collection and nowhere else.
  */
 export type ArmRecord = {
   job: Job | null;
@@ -39,42 +40,38 @@ export interface JobEvidenceReader {
   read(scope: ScopeKey, jobId: string): Promise<ArmRecord>;
 }
 
-/** Majority reads of `jobs` as the grader. */
-export class MongoJobEvidence implements JobEvidenceReader {
-  constructor(private readonly service: MongoService) {}
-  async read(scope: ScopeKey, jobId: string): Promise<ArmRecord> {
-    const job = await this.service.control.collection<Job & { _id: string }>('jobs').findOne(
-      {
-        _id: jobId,
-        'actor.tenantId': scope.tenantId,
-        'actor.env': scope.env,
-        'actor.scopeId': scope.scopeId,
-      },
-      { readConcern: { level: 'majority' } },
-    );
-    return { job, stamps: (job?.checkpoint as { attestedModels?: unknown } | null)?.attestedModels };
-  }
+/** The job row, read at majority as the grader. Internal: the stamps are never taken from the row's checkpoint. */
+async function readJob(service: MongoService, scope: ScopeKey, jobId: string): Promise<Job | null> {
+  return service.control.collection<Job & { _id: string }>('jobs').findOne(
+    {
+      _id: jobId,
+      'actor.tenantId': scope.tenantId,
+      'actor.env': scope.env,
+      'actor.scopeId': scope.scopeId,
+    },
+    { readConcern: { level: 'majority' } },
+  );
 }
 
 /**
- * The preferred source: the job row from `jobs` and the stamps from the insert-only `run_attestations` collection (one
+ * The source: the job row from `jobs` and the stamps from the insert-only `run_attestations` collection (one
  * row per scope, job and fence), which principals with UPDATE on `jobs` cannot rewrite. Same interface as
- * `MongoJobEvidence`; switching is a one-line change where the gate builds its reader.
+ * the stamps come ONLY from `run_attestations`; the job's checkpoint copy is never read.
  */
 export class AttestedJobEvidence implements JobEvidenceReader {
-  private readonly jobs: MongoJobEvidence;
+  private readonly service: MongoService;
   private readonly listRows: (scope: ScopeKey, jobId: string) => Promise<StoredAttestation[]>;
   constructor(
     service: MongoService,
     /** Replaceable for tests; defaults to the repository's list. */
     list?: (scope: ScopeKey, jobId: string) => Promise<StoredAttestation[]>,
   ) {
-    this.jobs = new MongoJobEvidence(service);
+    this.service = service;
     const repository = new AttestationRepository(service);
     this.listRows = list ?? ((scope, jobId) => repository.list(scope, jobId));
   }
   async read(scope: ScopeKey, jobId: string): Promise<ArmRecord> {
-    const { job } = await this.jobs.read(scope, jobId);
+    const job = await readJob(this.service, scope, jobId);
     const rows = await this.listRows(scope, jobId);
     const defects: string[] = [];
     for (const row of rows) {
@@ -99,6 +96,7 @@ export class AttestedJobEvidence implements JobEvidenceReader {
         provider: row.provider,
         modelId: row.modelId,
         spec: row.spec,
+        runtimeHash: row.runtimeHash,
         ...(row.endpoint === undefined ? {} : { endpoint: row.endpoint }),
         ...(row.endpointHostHash === undefined ? {} : { endpointHostHash: row.endpointHostHash }),
       })),
@@ -122,8 +120,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * The worker's model stamps: `checkpoint.attestedModels`, an append-only array with one entry per claiming session, each
- * bound to the lease fence it was written under. An entry that is malformed, or has no numeric fence, is no stamp.
+ * The worker's model stamps, one per claiming session, each bound to the lease fence it was written under. An entry that is malformed, or has no numeric fence, is no stamp.
  */
 export function modelStampsOf(stamps: unknown): ModelStamp[] {
   if (!Array.isArray(stamps)) return [];
@@ -143,6 +140,7 @@ export function modelStampsOf(stamps: unknown): ModelStamp[] {
             ...(typeof item.spec === 'string' ? { spec: item.spec } : {}),
             ...(typeof item.endpoint === 'string' ? { endpoint: item.endpoint } : {}),
             ...(typeof item.endpointHostHash === 'string' ? { endpointHostHash: item.endpointHostHash } : {}),
+            ...(typeof item.runtimeHash === 'string' ? { runtimeHash: item.runtimeHash } : {}),
           },
         ]
       : [],
@@ -179,14 +177,21 @@ export function verifyArm(
     decision.status !== 'succeeded'
   )
     reasons.push('status_mismatch');
-  const checkpoint = job.checkpoint as { attestedRuntimeHash?: unknown } | null;
-  const runtimeHash =
-    typeof checkpoint?.attestedRuntimeHash === 'string' && HEX64.test(checkpoint.attestedRuntimeHash)
-      ? checkpoint.attestedRuntimeHash
-      : null;
-  if (!runtimeHash) reasons.push('runtime_unattested');
   const raw = record.stamps;
   const stamps = modelStampsOf(raw);
+  // The runtime the lease holder ran under is in the same insert-only row as its model: the final fence's row decides,
+  // and every row of the job must name a well-formed hash. Nothing is read from the job's rewritable checkpoint.
+  const finalStamp = stamps.find((stamp) => stamp.fence === job.lease.fence);
+  const runtimeHash =
+    finalStamp?.runtimeHash !== undefined && HEX64.test(finalStamp.runtimeHash)
+      ? finalStamp.runtimeHash
+      : null;
+  if (
+    !runtimeHash ||
+    stamps.some((stamp) => stamp.runtimeHash === undefined || !HEX64.test(stamp.runtimeHash))
+  )
+    reasons.push('runtime_unattested');
+  else if (stamps.some((stamp) => stamp.runtimeHash !== runtimeHash)) reasons.push('runtime_stamps_disagree');
   if (!stamps.length) reasons.push('model_unstamped');
   else {
     const first = stamps[0]!;

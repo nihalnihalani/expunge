@@ -53,7 +53,6 @@ export function jobRecorder(
       parentJobId: null,
       checkpoint: {
         v: 1,
-        ...(runtimeHash ? { attestedRuntimeHash: runtimeHash } : {}),
       } as never,
       status,
       cancellationRequested: false,
@@ -70,7 +69,8 @@ export function jobRecorder(
     await setup.control.collection('jobs').insertOne(job as never);
     // The authoritative stamps live in insert-only run_attestations rows, one per fence, as the worker writes them.
     const stamps = Array.isArray(model) ? model : [];
-    for (const stampRow of stamps as Array<Record<string, unknown>>) {
+    // A row cannot exist without a runtime hash: no hash means no attestation at all.
+    for (const stampRow of runtimeHash ? (stamps as Array<Record<string, unknown>>) : []) {
       const scope = request.instanceScope;
       await setup.control.collection('run_attestations').insertOne({
         _id: contentHash({ ...scope, jobId, fence: stampRow.fence }, 'run-attestation-row'),
@@ -79,6 +79,7 @@ export function jobRecorder(
         runId: request.runId,
         at: now,
         createdAt: now,
+        runtimeHash,
         ...stampRow,
       } as never);
     }

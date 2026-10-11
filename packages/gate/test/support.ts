@@ -23,7 +23,7 @@ import {
   type GateOutcome,
 } from '../src/index.js';
 import { jobRecorder } from './job-rows.js';
-import { ScriptedEpisodePort, type Behavior, type ScriptedOptions } from '../src/testing/index.js';
+import { ScriptedEpisodePort, type Behavior, type ScriptedOptions } from './scripted/index.js';
 
 export const RUNTIME_HASH = 'c'.repeat(64);
 export const FLOOR_HASH = 'd'.repeat(64);

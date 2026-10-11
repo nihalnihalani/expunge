@@ -13,7 +13,7 @@ import {
   GateStore,
   ZERO_COST,
 } from '../src/index.js';
-import { ScriptedEpisodePort } from '../src/testing/index.js';
+import { ScriptedEpisodePort } from './scripted/index.js';
 import { describeLive } from '../../mongo/test/support.js';
 import { PROVIDER_STAMP, jobRecorder } from './job-rows.js';
 import { RUNTIME_HASH, fullPlan, gateView, openGate, rulePort, uniqueChild, type Gate } from './support.js';

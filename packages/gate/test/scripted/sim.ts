@@ -17,7 +17,7 @@ import {
   type EpisodeRequest,
   type EpisodeResult,
   type WorkerProfile,
-} from '../types.js';
+} from '../../src/types.js';
 
 export const SCRIPTED_PORT_LABEL =
   'SCRIPTED/FAKE EPISODE PORT: deterministic stand-in for the worker; not a model';

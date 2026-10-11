@@ -85,7 +85,14 @@ export interface TerminalSweep {
   listRecentTerminal(key: ScopeKey, limit: number): Promise<Job[]>;
 }
 
-export type LogEntry = { level: 'info' | 'warn' | 'error'; message: string; jobId?: string; code?: string };
+export type LogEntry = {
+  level: 'info' | 'warn' | 'error';
+  message: string;
+  jobId?: string;
+  code?: string;
+  /** Usage totals that could not be committed (the job was already terminal). Numbers only. */
+  meter?: JsonValue;
+};
 
 export type JobOutcome =
   | 'unknown_job'
@@ -125,6 +132,8 @@ export interface AttestationPort {
       provider: string;
       modelId: string;
       spec: string;
+      /** Hash of the runtime this session loaded (`runtimeHash()`), part of the stamp: a differing value for the same fence conflicts. */
+      runtimeHash: string;
       endpoint?: string;
       endpointHostHash?: string;
       at: Date;
@@ -574,6 +583,10 @@ export class Dispatcher implements WakeTarget {
       }
     }
     const attestedAt = new Date(); // fixed per session so an identical repeat insert is idempotent
+    // Set when complete_cleanup's own transaction committed the terminal state (and released the lease): from then on nothing
+    // may renew or write under that lease, and the stale-lease errors that follow are expected, not faults.
+    let terminalReached = false;
+    let stopHeartbeat: () => void = () => undefined;
     const hooks: ExecutionHooks = {
       // Written by the worker only, from what the runtime resolved (never from the profile or a caller). APPEND-ONLY:
       // one entry per claiming session, carrying its lease fence, so a takeover with another model leaves two stamps and
@@ -585,11 +598,18 @@ export class Dispatcher implements WakeTarget {
         const sameFence = existing.some((e) => (e as { fence?: unknown } | null)?.fence === lease.fence);
         try {
           // Authoritative, insert-only row first (a fenced-out holder cannot write it), then the checkpoint copy.
-          await this.deps.attestations?.record(actor, lease, {
-            fence: lease.fence,
-            ...attestation,
-            at: attestedAt,
-          });
+          if (this.deps.attestations) {
+            // The runtime hash is part of the stamp and is written in the SAME insert as the model: without it there is no
+            // truthful stamp, so the session ends before any model call (fail closed).
+            const attested = this.deps.runtimeHash;
+            if (!attested || !/^[0-9a-f]{64}$/.test(attested)) throw new Error('RuntimeHashUnavailable');
+            await this.deps.attestations.record(actor, lease, {
+              fence: lease.fence,
+              ...attestation,
+              runtimeHash: attested,
+              at: attestedAt,
+            });
+          }
           await writer.update(
             { attestedModels: sameFence ? existing : [...existing, entry] },
             { revertOnFailure: true },
@@ -621,14 +641,37 @@ export class Dispatcher implements WakeTarget {
           // checkpoint after it legitimately finds no live lease. Re-read: a terminal job ends the run normally.
           if (errorCode(error) === 'LostLease') {
             const now = await jobs.readAuthorized(actor, jobId).catch(() => null);
-            if (now && ['succeeded', 'failed', 'cancelled'].includes(now.status)) return 'stop';
+            if (now && ['succeeded', 'failed', 'cancelled'].includes(now.status)) {
+              terminalReached = true;
+              stopHeartbeat(); // the lease is gone with the terminal transaction: stop renewing it
+              if (info.meter)
+                this.log({
+                  level: 'info',
+                  message: 'final meter not persisted: the terminal transaction already closed the lease',
+                  jobId,
+                  meter: info.meter as unknown as JsonValue,
+                });
+              return 'stop';
+            }
           }
           throw error;
         }
         return 'continue';
       },
       // Cumulative job usage, written while the lease is still held so a takeover starts from the committed totals.
-      onMeter: (carry) => writer.update({ meter: carry as unknown as JsonValue }),
+      onMeter: async (carry) => {
+        if (terminalReached) {
+          // Expected after complete_cleanup: a fenced write would fail LostLease. The totals are logged, not committed.
+          this.log({
+            level: 'info',
+            message: 'final meter not persisted: the job is already terminal',
+            jobId,
+            meter: carry as unknown as JsonValue,
+          });
+          return;
+        }
+        await writer.update({ meter: carry as unknown as JsonValue });
+      },
       onHookError: (hook, error) =>
         this.log({ level: 'warn', message: `hook ${hook} failed`, jobId, code: errorCode(error) }),
     };
@@ -670,7 +713,16 @@ export class Dispatcher implements WakeTarget {
       renewing = true;
       jobs
         .renew(actor, lease, config.leaseMs)
-        .catch((error) => {
+        .catch(async (error) => {
+          if (terminalReached) return; // our own terminal transaction released the lease: expected, not a failure
+          // The terminal transaction can land between two heartbeats and before the phase hook notices: a renewal refused on
+          // a job that is now terminal is the same expected case.
+          const now = await jobs.readAuthorized(actor, jobId).catch(() => null);
+          if (now && ['succeeded', 'failed', 'cancelled'].includes(now.status)) {
+            terminalReached = true;
+            stopHeartbeat();
+            return;
+          }
           // Lost fence, or cancellation requested (renew requires cancellationRequested=false). Stop the run;
           // the agent's teardown finishes a cancelled job while the lease is still live.
           renewalFailed = true;
@@ -687,6 +739,7 @@ export class Dispatcher implements WakeTarget {
         });
     }, config.renewEveryMs);
 
+    stopHeartbeat = () => clearInterval(heartbeat);
     let runErrorCode: string | undefined;
     const runModel = async () => {
       try {
@@ -850,10 +903,16 @@ export class Dispatcher implements WakeTarget {
       else await sink.append(key, event);
     } catch (error) {
       const code = errorCode(error);
+      // TerminalExists after our own terminal write (complete_cleanup's transaction already appended the terminal event) is the
+      // expected duplicate, not an error.
+      const expected = code === 'TerminalExists';
       this.log({
-        level: 'warn',
-        message:
-          code === 'StaleFence' ? 'projection refused: lease no longer held' : 'projection append failed',
+        level: expected ? 'info' : 'warn',
+        message: expected
+          ? 'terminal event already present (our own terminal write)'
+          : code === 'StaleFence'
+            ? 'projection refused: lease no longer held'
+            : 'projection append failed',
         jobId: event.jobId,
         code,
       });

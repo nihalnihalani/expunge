@@ -25,20 +25,15 @@ const stamp = (over: Record<string, unknown> = {}) => ({
   modelId: 'gpt-5',
   spec: 'openai/gpt-5',
   endpoint: 'default',
+  runtimeHash: RT,
   ...over,
 });
-const withStamps = (stamps: unknown, fence = 1, extra: Partial<Job> = {}) =>
-  job({
-    lease: { ownerId: 'w', fence, until: new Date(), heartbeatAt: new Date() },
-    checkpoint: { attestedRuntimeHash: RT, attestedModels: stamps } as never,
-    ...extra,
-  });
-const job = (over: Partial<Job> & { checkpoint?: unknown } = {}): Job =>
+const job = (over: Partial<Job> = {}, fence = 1): Job =>
   ({
     _id: 'j1',
     kind: 'cleanup',
     status: 'succeeded',
-    lease: { ownerId: 'w', fence: 1, until: new Date(), heartbeatAt: new Date() },
+    lease: { ownerId: 'w', fence, until: new Date(), heartbeatAt: new Date() },
     binding: {
       jobId: 'j1',
       runId: 'run-1',
@@ -47,66 +42,70 @@ const job = (over: Partial<Job> & { checkpoint?: unknown } = {}): Job =>
       scopeRevision: 1,
       workerProfileHash: 'a'.repeat(64),
     },
-    checkpoint: { attestedRuntimeHash: RT, attestedModels: [stamp()] },
+    checkpoint: { v: 1 },
     ...over,
   }) as unknown as Job;
-
-const rec = (row: Job | null) => ({
-  job: row,
-  stamps: (row?.checkpoint as { attestedModels?: unknown } | null)?.attestedModels,
+/** What the gate is handed for one arm: the job row and its attestation rows. */
+const rec = (stamps: unknown, jobOver: Partial<Job> = {}, fence = 1) => ({
+  job: job(jobOver, fence),
+  stamps,
 });
+const good = () => rec([stamp()]);
 
-describe('verifyArm reads the stored job and fails closed', () => {
+describe('verifyArm reads the stored job and the attestation rows and fails closed', () => {
   it('verifies a provider run pinned to the right harness, world and run', () => {
-    expect(verifyArm(rec(job()), expected, profile)).toEqual({
-      verified: true,
-      runtimeHash: RT,
-      reasons: [],
-    });
+    expect(verifyArm(good(), expected, profile)).toEqual({ verified: true, runtimeHash: RT, reasons: [] });
   });
-  const cases: Array<[string, Job | null, string, Partial<typeof expected>?, Partial<typeof profile>?]> = [
-    ['no job row', null, 'job_missing'],
-    ['wrong kind', job({ kind: 'observe' }), 'job_kind'],
-    ['another run', job({ binding: { ...job().binding, runId: 'x' } }), 'run_mismatch'],
-    ['another world', job({ binding: { ...job().binding, worldId: 'x' } }), 'world_mismatch'],
+  it('takes nothing from the job checkpoint: a checkpoint that claims everything adds nothing', () => {
+    const forged = rec(undefined, {
+      checkpoint: { attestedRuntimeHash: RT, attestedModels: [stamp()], attestedModel: stamp() } as never,
+    });
+    const facts = verifyArm(forged, expected, profile);
+    expect(facts.verified).toBe(false);
+    expect(facts.reasons).toEqual(expect.arrayContaining(['model_unstamped', 'runtime_unattested']));
+  });
+  const cases: Array<
+    [
+      string,
+      ReturnType<typeof rec> | { job: null; stamps: unknown },
+      string,
+      Partial<typeof expected>?,
+      Partial<typeof profile>?,
+    ]
+  > = [
+    ['no job row', { job: null, stamps: [stamp()] }, 'job_missing'],
+    ['wrong kind', rec([stamp()], { kind: 'observe' }), 'job_kind'],
+    ['another run', rec([stamp()], { binding: { ...job().binding, runId: 'x' } }), 'run_mismatch'],
+    ['another world', rec([stamp()], { binding: { ...job().binding, worldId: 'x' } }), 'world_mismatch'],
     [
       'another harness',
-      job({ binding: { ...job().binding, harnessHash: 'f'.repeat(64) } }),
+      rec([stamp()], { binding: { ...job().binding, harnessHash: 'f'.repeat(64) } }),
       'harness_mismatch',
     ],
-    ['completed but not succeeded', job({ status: 'failed' }), 'status_mismatch'],
-    ['cancelled but not cancelled', job(), 'status_mismatch', { outcome: 'cancelled' }],
-    ['the port says failed for a succeeded job', job(), 'status_mismatch', { outcome: 'failed' }],
-    ['the port says incomplete for a succeeded job', job(), 'status_mismatch', { outcome: 'incomplete' }],
-    ['the port says refused for a succeeded job', job(), 'status_mismatch', { outcome: 'refused' }],
-    ['the port says completed for a failed job', job({ status: 'failed' }), 'status_mismatch'],
+    ['completed but not succeeded', rec([stamp()], { status: 'failed' }), 'status_mismatch'],
+    ['cancelled but not cancelled', good(), 'status_mismatch', { outcome: 'cancelled' }],
+    ['the port says failed for a succeeded job', good(), 'status_mismatch', { outcome: 'failed' }],
+    ['the port says incomplete for a succeeded job', good(), 'status_mismatch', { outcome: 'incomplete' }],
+    ['the port says refused for a succeeded job', good(), 'status_mismatch', { outcome: 'refused' }],
+    ['the port says completed for a failed job', rec([stamp()], { status: 'failed' }), 'status_mismatch'],
     [
       'a succeeded job whose own terminal decision is a failure',
-      job({
-        checkpoint: {
-          attestedRuntimeHash: RT,
-          attestedModels: [stamp()],
-          terminal: { decision: { status: 'failed' } },
-        } as never,
-      }),
+      rec([stamp()], { checkpoint: { terminal: { decision: { status: 'failed' } } } as never }),
       'status_mismatch',
     ],
-    ['no runtime attestation', job({ checkpoint: { attestedModels: [stamp()] } }), 'runtime_unattested'],
-    ['no model stamp', job({ checkpoint: { attestedRuntimeHash: RT } }), 'model_unstamped'],
-    [
-      'the superseded singular stamp',
-      job({ checkpoint: { attestedRuntimeHash: RT, attestedModel: stamp() } }),
-      'model_unstamped',
-    ],
-    ['an empty stamp list', withStamps([]), 'model_unstamped'],
+    ['a stamp with no runtime hash', rec([stamp({ runtimeHash: undefined })]), 'runtime_unattested'],
+    ['a stamp with a malformed runtime hash', rec([stamp({ runtimeHash: 'zz' })]), 'runtime_unattested'],
+    ['no model stamp', rec(undefined), 'model_unstamped'],
+    ['the superseded singular stamp', rec(stamp()), 'model_unstamped'],
+    ['an empty stamp list', rec([]), 'model_unstamped'],
     [
       'a stamp without a fence',
-      withStamps([{ source: 'provider', provider: 'openai', modelId: 'gpt-5' }]),
+      rec([{ source: 'provider', provider: 'openai', modelId: 'gpt-5' }]),
       'model_unstamped',
     ],
     [
       'fake source',
-      withStamps([
+      rec([
         stamp({
           source: 'fake',
           provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
@@ -115,39 +114,44 @@ describe('verifyArm reads the stored job and fails closed', () => {
       ]),
       'model_not_provider',
     ],
-    ['unknown source', withStamps([stamp({ source: 'maybe' })]), 'model_not_provider'],
+    ['unknown source', rec([stamp({ source: 'maybe' })]), 'model_not_provider'],
     [
       'an overridden endpoint',
-      withStamps([stamp({ endpoint: 'overridden', endpointHostHash: 'a'.repeat(64) })]),
+      rec([stamp({ endpoint: 'overridden', endpointHostHash: 'a'.repeat(64) })]),
       'endpoint_not_default',
     ],
-    ['an unlabeled endpoint', withStamps([stamp({ endpoint: undefined })]), 'endpoint_not_default'],
-    ['another model', withStamps([stamp({ modelId: 'gpt-4' })]), 'model_not_frozen_profile'],
-    ['another provider', withStamps([stamp({ provider: 'other' })]), 'model_not_frozen_profile'],
-    ['a fake profile', job(), 'profile_not_provider', {}, { modelKind: 'fake' }],
-    ['a profile with no provider', job(), 'model_not_frozen_profile', {}, { provider: '' }],
+    ['an unlabeled endpoint', rec([stamp({ endpoint: undefined })]), 'endpoint_not_default'],
+    ['another model', rec([stamp({ modelId: 'gpt-4' })]), 'model_not_frozen_profile'],
+    ['another provider', rec([stamp({ provider: 'other' })]), 'model_not_frozen_profile'],
+    ['a fake profile', good(), 'profile_not_provider', {}, { modelKind: 'fake' }],
+    ['a profile with no provider', good(), 'model_not_frozen_profile', {}, { provider: '' }],
     [
       'stamps that disagree across sessions',
-      withStamps([stamp(), stamp({ fence: 2, modelId: 'gpt-4' })], 2),
+      rec([stamp(), stamp({ fence: 2, modelId: 'gpt-4' })], {}, 2),
       'model_stamps_disagree',
     ],
-    ['two stamps for one fence', withStamps([stamp(), stamp()]), 'model_stamp_duplicate_fence'],
+    [
+      'runtime hashes that disagree across sessions',
+      rec([stamp(), stamp({ fence: 2, runtimeHash: 'd'.repeat(64) })], {}, 2),
+      'runtime_stamps_disagree',
+    ],
+    ['two stamps for one fence', rec([stamp(), stamp()]), 'model_stamp_duplicate_fence'],
     [
       'a takeover with no stamp for the final fence',
-      withStamps([stamp()], 2),
+      rec([stamp()], {}, 2),
       'model_stamp_missing_final_fence',
     ],
-    ['a malformed entry beside a good one', withStamps([stamp(), { fence: 2 }], 1), 'model_stamp_malformed'],
+    ['a malformed entry beside a good one', rec([stamp(), { fence: 2 }]), 'model_stamp_malformed'],
   ];
-  for (const [label, row, reason, exp, prof] of cases)
+  for (const [label, record, reason, exp, prof] of cases)
     it(`${label} is not real evidence (${reason})`, () => {
-      const facts = verifyArm(rec(row), { ...expected, ...exp }, { ...profile, ...prof });
+      const facts = verifyArm(record, { ...expected, ...exp }, { ...profile, ...prof });
       expect(facts.verified).toBe(false);
       expect(facts.reasons).toContain(reason);
     });
   it('one stamp per claiming session, the last for the final fence, verifies', () => {
     const facts = verifyArm(
-      rec(withStamps([stamp(), stamp({ fence: 2 }), stamp({ fence: 3 })], 3)),
+      rec([stamp(), stamp({ fence: 2 }), stamp({ fence: 3 })], {}, 3),
       expected,
       profile,
     );

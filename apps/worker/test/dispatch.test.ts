@@ -224,6 +224,48 @@ describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed 
     expect(r.store.named('finish')).toHaveLength(0);
   });
 
+  it('after complete_cleanup commits the terminal state: no renewal, no onMeter/LostLease fault, no TerminalExists error, the final meter is logged', async () => {
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'complete_cleanup', args: {} }]), fakeText('ok')],
+      bundle: makeBundle({ toolPolicy: { grants: ['complete_cleanup'], prerequisites: [] } }),
+      tools: ({ store, receipts }) => [
+        defineTool({
+          name: 'complete_cleanup',
+          description: 'receipt and terminal state commit together',
+          parameters: z.object({}),
+          execute: async () => {
+            const job = store.jobs.get('job-1')!;
+            receipts.byJob.set('job-1', receiptFor(job));
+            job.status = 'succeeded';
+            job.outputRefs = ['rcpt-job-1'];
+            job.lease.until = new Date(0);
+            // Longer than several heartbeats (lease 150 ms, renewal every 50 ms): the old code renewed a released lease.
+            await new Promise((resolve) => setTimeout(resolve, 260));
+            return { receiptId: 'rcpt-job-1' };
+          },
+        }),
+      ],
+      projection: () =>
+        ({
+          append: async () => {
+            throw Object.assign(new Error('TerminalExists'), { code: 'TerminalExists' });
+          },
+        }) as unknown as ProjectionSink,
+    });
+    const result = await r.dispatcher.runJob('job-1');
+    expect(result.outcome).toBe('succeeded');
+    const messages = r.logs.map((l) => l.message);
+    expect(messages).not.toContain('lease renewal failed; stopping run');
+    expect(messages).not.toContain('hook onMeter failed');
+    expect(r.logs.filter((l) => l.level === 'warn' && l.code === 'LostLease')).toEqual([]);
+    expect(r.logs.filter((l) => l.code === 'TerminalExists').every((l) => l.level === 'info')).toBe(true);
+    expect(r.logs.find((l) => l.message.startsWith('final meter not persisted'))?.meter).toBeDefined();
+    // No renewal after the terminal state was read: the renew calls all happened while the lease was live or before the stop.
+    const renews = r.store.named('renew').length;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(r.store.named('renew')).toHaveLength(renews);
+  });
+
   it('fails a job whose committed receipt is incomplete, naming the receipt', async () => {
     const r = rig({
       script: [fakeToolCalls([{ name: 'complete_cleanup', args: {} }]), fakeText('ok')],
@@ -989,19 +1031,34 @@ describe('follow-up (FAKE store, FAKE model): the deployed-harness check and the
   });
 
   it('records the attestation through the insert-only port with the session fence BEFORE the checkpoint copy, and a port failure fails closed', async () => {
-    const calls: Array<{ fence: number; source: string; modelId: string; at: Date }> = [];
+    const calls: Array<{ fence: number; source: string; modelId: string; runtimeHash: string; at: Date }> =
+      [];
     const r = rig({
       script: [fakeText('x')],
+      runtimeHash: HASH_A,
       attestations: { record: async (_a, lease, att) => void calls.push({ ...att, fence: lease.fence }) },
     });
     await r.dispatcher.runJob('job-1');
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ fence: 1, source: 'fake', modelId: 'fake-deterministic-1' });
+    // The runtime hash goes in the SAME insert as the model stamp.
+    expect(calls[0]).toMatchObject({
+      fence: 1,
+      source: 'fake',
+      modelId: 'fake-deterministic-1',
+      runtimeHash: HASH_A,
+    });
     const snap = (r.store.checkpoints.get('job-1') as Snap[]).find((c) => c.attestedModels)!;
     expect(snap.attestedModels![0]).toMatchObject({ fence: 1 }); // convenience copy still written
 
+    // No runtime hash => no truthful stamp => the session ends before any model call.
+    const noHash = rig({ script: [fakeText('x')], attestations: { record: async () => undefined } });
+    await noHash.dispatcher.runJob('job-1');
+    expect(noHash.fake.calls).toHaveLength(0);
+    expect(JSON.stringify(noHash.store.checkpoints.get('job-1') ?? [])).not.toContain('attestedModels');
+
     const failing = rig({
       script: [fakeText('x')],
+      runtimeHash: HASH_A,
       attestations: {
         record: async () => {
           throw new Error('AttestationConflict');
