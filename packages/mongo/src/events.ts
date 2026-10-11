@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ChangeStream, ChangeStreamDocument, ClientSession, Document, ResumeToken } from 'mongodb';
 import {
   contentHash,
@@ -70,7 +71,8 @@ export class ProjectionRepository {
         .collection<{ _id: string; sequence: number }>('projection_sequences')
         .findOneAndUpdate(
           { _id: projectionStreamId(key, event.jobId) },
-          { $inc: { sequence: 1 } },
+          // The epoch is born with the stream and never changes on an append (only `resetStream` replaces it).
+          { $inc: { sequence: 1 }, $setOnInsert: { epoch: randomUUID() } },
           { session: active, upsert: true, returnDocument: 'after', includeResultMetadata: false },
         );
       if (!counter) fail('SequenceAllocationFailed');
@@ -88,6 +90,98 @@ export class ProjectionRepository {
     };
     return session ? execute(session) : this.service.transaction(execute);
   }
+  /**
+   * The stream's epoch: an opaque value, constant for one committed history of the job's events, that CHANGES ONLY when
+   * the per-job sequence is rebuilt or reset (`resetStream`: a restore, a re-sequencing, a rebuild). An append never changes
+   * it. `null` while the stream has no events yet, so the field is optional on the wire.
+   */
+  async epochOf(key: ScopeKey, jobId: string, session?: ClientSession): Promise<string | null> {
+    const row = await this.service.control
+      .collection<{ _id: string; epoch?: string }>('projection_sequences')
+      .findOne(
+        { _id: projectionStreamId(key, jobId) },
+        { ...(session ? { session } : {}), projection: { epoch: 1 } },
+      );
+    return typeof row?.epoch === 'string' ? row.epoch : null;
+  }
+
+  /**
+   * One page of a job's events together with the epoch they belong to. The page always comes from ONE epoch: the epoch
+   * is read before and after the events, and a reset in between makes the read start over, so a client never receives
+   * rows of two histories under one epoch.
+   */
+  async readPage(
+    key: ScopeKey,
+    afterSequence: number,
+    jobId: string,
+    limit = 500,
+  ): Promise<{ events: ProjectionEvent[]; streamEpoch: string | null }> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = await this.epochOf(key, jobId);
+      const events = await this.read(key, afterSequence, jobId, limit);
+      if ((await this.epochOf(key, jobId)) === before) return { events, streamEpoch: before };
+    }
+    fail('StreamEpochUnstable');
+  }
+
+  /**
+   * Replaces a job's event history. In ONE transaction: the job's events are removed, the sequence counter restarts at 0 under
+   * a NEW epoch (recording why, as a hash, never the text), and `rebuild` may append the events again from committed state
+   * with the same session. Clients that hold an older epoch see it change and re-page from 0. Restricted to `setup`: the
+   * projection roles grant no delete on `projection_events`, and a reset is an administrator's act.
+   */
+  async resetStream(
+    key: ScopeKey,
+    jobId: string,
+    reason: 'restore' | 'resequence' | 'backfill_rebuild',
+    rebuild?: (session: ClientSession) => Promise<void>,
+  ): Promise<{ streamEpoch: string; removed: number }> {
+    requirePrincipal(this.service, ['setup']);
+    if (!['restore', 'resequence', 'backfill_rebuild'].includes(reason)) fail('InvalidReset');
+    return this.service.transaction(async (session) => {
+      const removed = await this.service.control
+        .collection('projection_events')
+        .deleteMany({ ...scopeFilter(key), jobId }, { session });
+      const streamEpoch = randomUUID();
+      await this.service.control
+        .collection<import('mongodb').Document & { _id: string }>('projection_sequences')
+        .updateOne(
+          { _id: projectionStreamId(key, jobId) },
+          {
+            $set: {
+              sequence: 0,
+              epoch: streamEpoch,
+              resetAt: new Date(),
+              resetReasonHash: contentHash({ reason }, 'stream-reset'),
+            },
+          },
+          { session, upsert: true },
+        );
+      if (rebuild) await rebuild(session);
+      return { streamEpoch, removed: removed.deletedCount };
+    });
+  }
+
+  /**
+   * The committed completion receipt of a job as the list needs it, from the job's own `receipt_committed` event (so it is
+   * a committed fact with its projection sequence), or `null` when no receipt has been committed. Never inferred.
+   */
+  async receiptReference(
+    key: ScopeKey,
+    jobId: string,
+  ): Promise<{ receiptId: string; receiptSequence: number; verifiedWorldRevision: number } | null> {
+    const row = await this.service.control
+      .collection<ProjectionEvent & { _id: string }>('projection_events')
+      .findOne({ ...scopeFilter(key), jobId, kind: 'receipt_committed' }, { sort: { sequence: -1 } });
+    if (!row) return null;
+    const payload = row.payload as unknown as ProjectionPayloadByKind['receipt_committed'];
+    return {
+      receiptId: payload.receiptId,
+      receiptSequence: row.sequence,
+      verifiedWorldRevision: payload.verifiedWorldRevision,
+    };
+  }
+
   /** One job's events after `afterSequence`, in order. Sequences are per job, so the job is required. */
   async read(key: ScopeKey, afterSequence: number, jobId: string, limit = 500): Promise<ProjectionEvent[]> {
     if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || limit < 1 || limit > 1000 || !jobId)
