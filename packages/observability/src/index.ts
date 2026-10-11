@@ -3,6 +3,7 @@ export * from './config.js';
 export * from './diagnostics.js';
 export * from './episode.js';
 export * from './ingest.js';
+export * from './leak.js';
 export * from './outbox.js';
 export * from './sanitize.js';
 export * from './tools.js';

@@ -69,6 +69,8 @@ if (missing.length > 0 && !requireLive) {
       const query = raindropQueryConfigFromEnv(process.env);
       if (!write.ok || !query.ok) throw new Error('configuration unexpectedly incomplete');
 
+      // The smoke run has no data subject; the guard still needs a literal, so it carries a placeholder that never occurs.
+      const guard = { forbiddenLiterals: ['smoke-test-forbidden-literal-never-present'] };
       const runId = `smoke-${randomUUID()}`;
       const jobId = `job-${runId}`;
       const harnessHash = createHash('sha256').update(runId).digest('hex');
@@ -82,8 +84,8 @@ if (missing.length > 0 && !requireLive) {
         workerProfileHash: createHash('sha256').update('profile').digest('hex'),
         worldId: 'world-smoke',
         completionPolicy: 'verified_receipt',
-        telemetryUserId: `smoke_${runId.slice(6, 14)}`,
-        input: 'live smoke: inspect one collection',
+        telemetryUserId: `smk_${createHash('sha256').update(runId).digest('hex').slice(0, 32)}`,
+        input: 'smoke test',
       });
       const tool = defineTool({
         name: 'inspect_scope',
@@ -155,6 +157,7 @@ if (missing.length > 0 && !requireLive) {
           transaction: (work) => work(undefined as never),
           scope: SCOPE,
           projectId: query.config.projectId,
+          guard,
         },
         { ownerId: 'live-smoke', now: clock.now, holdTimeoutMs: 20 * 60_000, leaseMs: 30_000 },
       );
@@ -181,7 +184,10 @@ if (missing.length > 0 && !requireLive) {
 
       // 4. A bundle that cites the real IDs.
       const finalEvent = (await client.getEvent(episode.eventId))!;
-      const observation: EvidenceObservation = observeEvent(query.config.projectId, finalEvent, traces);
+      const observation: EvidenceObservation = observeEvent(query.config.projectId, finalEvent, {
+        guard,
+        traces,
+      });
       const signal = finalEvent.signals?.find((s) => s.name === 'cleanup_not_verified');
       expect(signal, 'the signal we sent is visible on the event').toBeDefined();
       const bundle = assembleEvidenceBundle({
@@ -211,6 +217,7 @@ if (missing.length > 0 && !requireLive) {
           wallTimeMs: 5,
         },
         confidence: 0.5,
+        guard,
         sources: [
           {
             provider: 'raindrop',

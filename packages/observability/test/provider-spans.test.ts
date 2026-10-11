@@ -129,7 +129,7 @@ describe('model spans from the real OpenAI adapter', () => {
       runId: 'run-p',
       attempt: 1,
       harnessHash: 'c'.repeat(64),
-      telemetryUserId: 'tok_p',
+      telemetryUserId: 'tok_00000000000000b1',
       input: 'adapter span check',
     });
     const adapter = createOpenaiChat('gpt-5', 'test-key-not-real', {

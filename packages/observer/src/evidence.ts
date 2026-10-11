@@ -1,5 +1,17 @@
 import { createHash } from 'node:crypto';
 import { contentHash, type ScopeKey } from '@expunge/contracts';
+import {
+  DEFAULT_ALLOWED_STRING_KEYS,
+  DEFAULT_SANITIZATION,
+  detectLeak,
+  isTelemetryUserId,
+  requireGuard,
+  sanitizeProperty,
+  sanitizeValue,
+  type LeakCode,
+  type LeakGuard,
+  type SanitizationPolicy,
+} from '@expunge/observability';
 import type { ClientSession, Document } from 'mongodb';
 import type { MongoService } from '@expunge/mongo';
 import type { RaindropEvent, RaindropSpan } from './query-client.js';
@@ -44,6 +56,11 @@ export type EvidenceObservation = {
   contentHash: string;
   presentFields: EvidenceField[];
   potentiallyTruncated: boolean;
+  /**
+   * Set when the remote event tripped the leak guard (a held-out key, a subject literal or a private id anywhere in
+   * it). A quarantined observation is structure only, has no present fields and can never become evidence.
+   */
+  quarantined?: LeakCode;
   event: {
     eventName: string;
     timestamp: string;
@@ -77,47 +94,147 @@ export function missingFields(required: readonly string[], present: readonly str
   return required.filter((field) => !present.includes(field));
 }
 
+/** Event property keys this system writes itself; their identifier-shaped values may be stored as they are. */
+export const OBSERVED_STRING_KEYS: readonly string[] = [
+  ...DEFAULT_ALLOWED_STRING_KEYS,
+  'run_id',
+  'job_id',
+  'harness_hash',
+  'worker_profile_hash',
+  'world_id',
+  'role',
+  'attempt',
+  'outcome',
+  'ended_by',
+  'error_code',
+  'completion_policy',
+  'evidence_arm',
+  'origin',
+  'evaluation_id',
+  'proposal_id',
+  'gate_report_id',
+  'dedupe_key',
+  'severity',
+  'tool_call_id',
+  'detail_sha256',
+];
+
+export function observationPolicy(guard: LeakGuard): SanitizationPolicy {
+  return {
+    ...DEFAULT_SANITIZATION,
+    allowStringKeys: OBSERVED_STRING_KEYS,
+    forbiddenLiterals: guard.forbiddenLiterals,
+  };
+}
+
+/**
+ * Reduces one remote event (and optionally its trace) to what the observer may remember: hashes and structure.
+ * Remote properties are written by anyone holding the write key (or added by the vendor), so NOTHING is kept as
+ * received: strings pass only as identifiers under keys this system writes, everything else becomes a hash; the user
+ * id must be an opaque telemetry id. If the raw event trips the leak guard the result is a QUARANTINED, structure-only
+ * observation instead of an error, so one poisoned event cannot stall the page transaction and the cursor behind it.
+ */
 export function observeEvent(
   projectId: string,
   event: RaindropEvent,
-  traces?: { spans: RaindropSpan[]; potentiallyTruncated: boolean },
-  now: Date = new Date(),
+  options: {
+    guard: LeakGuard;
+    traces?: { spans: RaindropSpan[]; potentiallyTruncated: boolean };
+    now?: Date;
+  },
 ): EvidenceObservation {
-  const { $context: _context, ...properties } = event.properties as Record<string, unknown>;
+  requireGuard(options.guard);
+  const { guard, traces } = options;
+  const now = options.now ?? new Date();
+  const policy = observationPolicy(guard);
+  const { $context: _context, ...rawProperties } = event.properties as Record<string, unknown>;
+  const potentiallyTruncated = traces?.potentiallyTruncated ?? false;
+  const finding = detectLeak(
+    {
+      eventName: event.event_name,
+      userId: event.user_id,
+      convoId: event.convo_id,
+      properties: rawProperties,
+      featureFlags: event.feature_flags,
+      signals: (event.signals ?? []).map((s) => [s.id, s.name]),
+      toolCalls: (event.tool_calls ?? []).map((t) => t.name),
+      spans: (traces?.spans ?? []).map((span) => [span.span_name, span.span_type, span.model, span.provider]),
+    },
+    guard,
+  );
+  if (finding) {
+    const structure = {
+      eventName: 'quarantined',
+      timestamp: event.timestamp,
+      userId: null,
+      convoId: null,
+      properties: {},
+      featureFlags: {},
+      userInputSha: null,
+      assistantOutputSha: null,
+      signals: [] as Array<{ id: string; name: string; score: number | null }>,
+      toolCallNames: [] as string[],
+      errorSpanCount: event.error_spans?.length ?? 0,
+      topicCount: event.topics?.length ?? 0,
+    };
+    return {
+      provider: 'raindrop',
+      projectId,
+      externalEventId: sanitizeProperty(event.id, policy),
+      observedAt: now,
+      // The hash of the raw payload lets a later remote edit show up as a new quarantined revision, and nothing more.
+      contentHash: contentHash(
+        { reason: finding.code, structure, raw: sha(JSON.stringify([event.properties, event.event_name])) },
+        'raindrop-observation-quarantined',
+      ),
+      presentFields: [],
+      potentiallyTruncated,
+      quarantined: finding.code,
+      event: structure,
+      spans: [],
+    };
+  }
   const spans: SpanSummary[] = (traces?.spans ?? [])
     .map((span) => ({
-      spanId: span.span_id,
-      parentSpanId: span.parent_span_id ?? null,
-      name: span.span_name,
-      type: span.span_type,
-      status: span.status ?? null,
-      model: span.model ?? null,
-      provider: span.provider ?? null,
+      spanId: sanitizeProperty(span.span_id, policy),
+      parentSpanId: span.parent_span_id ? sanitizeProperty(span.parent_span_id, policy) : null,
+      name: sanitizeProperty(span.span_name, policy),
+      type: sanitizeProperty(span.span_type, policy),
+      status: span.status ? sanitizeProperty(span.status, policy) : null,
+      model: span.model ? sanitizeProperty(span.model, policy) : null,
+      provider: span.provider ? sanitizeProperty(span.provider, policy) : null,
       inputTokens: span.input_tokens ?? null,
       outputTokens: span.output_tokens ?? null,
     }))
     .sort((a, b) => a.spanId.localeCompare(b.spanId));
   const summary: EvidenceObservation['event'] = {
-    eventName: event.event_name,
+    eventName: sanitizeProperty(event.event_name, policy),
     timestamp: event.timestamp,
-    userId: event.user_id ?? null,
-    convoId: event.convo_id ?? null,
-    properties,
-    featureFlags: event.feature_flags,
+    userId: event.user_id
+      ? isTelemetryUserId(event.user_id)
+        ? event.user_id
+        : sanitizeProperty(`~${event.user_id}`, policy)
+      : null,
+    convoId: event.convo_id ? sanitizeProperty(event.convo_id, policy) : null,
+    properties: sanitizeValue(rawProperties, policy) as Record<string, unknown>,
+    featureFlags: sanitizeValue(event.feature_flags, policy) as Record<string, unknown>,
     userInputSha: sha(event.user_input),
     assistantOutputSha: sha(event.assistant_output),
     signals: (event.signals ?? [])
-      .map((s) => ({ id: s.id, name: s.name, score: s.score ?? null }))
+      .map((s) => ({
+        id: sanitizeProperty(s.id, policy),
+        name: sanitizeProperty(s.name, policy),
+        score: s.score ?? null,
+      }))
       .sort((a, b) => a.name.localeCompare(b.name)),
-    toolCallNames: (event.tool_calls ?? []).map((t) => t.name),
+    toolCallNames: (event.tool_calls ?? []).map((t) => sanitizeProperty(t.name, policy)),
     errorSpanCount: event.error_spans?.length ?? 0,
     topicCount: event.topics?.length ?? 0,
   };
-  const potentiallyTruncated = traces?.potentiallyTruncated ?? false;
   return {
     provider: 'raindrop',
     projectId,
-    externalEventId: event.id,
+    externalEventId: sanitizeProperty(event.id, policy),
     observedAt: now,
     // Enrichment that arrives later changes this hash, which is what makes a new evidence revision.
     contentHash: contentHash({ event: summary, spans, potentiallyTruncated }, 'raindrop-observation'),
@@ -214,7 +331,7 @@ export class MongoEvidenceStore implements EvidenceStore {
     const revision = (last?.revision ?? 0) + 1;
     await this.rows.insertOne(
       {
-        _id: `raindrop:${observation.projectId}:${observation.externalEventId}:${revision}` as never,
+        _id: `raindrop:${scope.tenantId}:${scope.env}:${scope.scopeId}:${observation.projectId}:${observation.externalEventId}:${revision}` as never,
         tenantId: scope.tenantId,
         env: scope.env,
         scopeId: scope.scopeId,

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { compact, decodedVariants, isHeldOutKey } from './leak.js';
 
 /**
  * Sanitization for everything that leaves the process as telemetry: tool arguments and results, errors,
@@ -66,11 +67,14 @@ export function redact(value: string): Redacted {
   };
 }
 
+/** Folded, punctuation-free and decoded matching, the same comparison the leak guard uses. */
 function containsForbidden(value: string, policy: SanitizationPolicy): boolean {
-  const lower = value.toLowerCase();
-  return policy.forbiddenLiterals.some(
-    (literal) => literal.length > 0 && lower.includes(literal.toLowerCase()),
-  );
+  const literals = policy.forbiddenLiterals.map(compact).filter(Boolean);
+  if (!literals.length) return false;
+  return decodedVariants(value).some((variant) => {
+    const flat = compact(variant);
+    return literals.some((literal) => flat.includes(literal));
+  });
 }
 
 export function sanitizeValue(
@@ -105,8 +109,14 @@ export function sanitizeValue(
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>);
     const out: Record<string, unknown> = {};
-    for (const [entryKey, child] of entries.slice(0, policy.maxKeys))
+    for (const [entryKey, child] of entries.slice(0, policy.maxKeys)) {
+      // A key that names held-out truth is renamed and its whole value reduced to a hash: nothing under it is readable.
+      if (isHeldOutKey(entryKey)) {
+        out[`key_${redact(entryKey).sha256}`] = redact(JSON.stringify(child) ?? '');
+        continue;
+      }
       out[sanitizeKey(entryKey, policy)] = sanitizeValue(child, policy, entryKey, depth + 1);
+    }
     if (entries.length > policy.maxKeys) out['_truncated'] = entries.length - policy.maxKeys;
     return out;
   }
@@ -139,12 +149,15 @@ export function sanitizeError(error: unknown, policy: SanitizationPolicy = DEFAU
 }
 
 /**
- * Free text from a model (a diagnostic's `detail`). It cannot be proven free of personal data, so the control is the
- * caller-supplied forbidden-literal list (subject handles from the trusted job); text that contains one is replaced by
- * a hash, and everything else is length-capped.
+ * Free text from a model (a diagnostic's `detail`). It cannot be proven free of personal data, so it FAILS CLOSED:
+ *  - with no forbidden literals in the policy nothing can be checked, so all of it is replaced by a hash;
+ *  - with literals, text that contains one (in any folded, split or encoded form) is replaced by a hash;
+ *  - anything else is length-capped.
+ * A caller that wants readable text must therefore supply the literal list of the trusted job.
  */
 export function sanitizeFreeText(value: string, policy: SanitizationPolicy = DEFAULT_SANITIZATION): string {
-  if (containsForbidden(value, policy)) return `[redacted:${redact(value).sha256}]`;
+  if (policy.forbiddenLiterals.length === 0 || containsForbidden(value, policy))
+    return `[redacted:${redact(value).sha256}]`;
   return value.length > 200 ? `${value.slice(0, 200)}...[truncated]` : value;
 }
 
