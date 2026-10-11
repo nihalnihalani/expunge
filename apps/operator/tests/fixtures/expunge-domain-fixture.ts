@@ -270,6 +270,13 @@ export async function route(
       subjectDisplay: snapshot.subject?.display,
       worldId: snapshot.world?.worldId,
       harnessHash: snapshot.harness?.hash,
+      receiptDomainStatus:
+        (snapshot as { receiptVerdict?: string }).receiptVerdict === 'complete'
+          ? 'complete_in_registered_scope'
+          : (snapshot as { receiptVerdict?: string }).receiptVerdict ===
+              'incomplete'
+            ? 'incomplete'
+            : undefined,
       updatedAt: snapshot.updatedAt,
     }));
     return json(200, { items, nextCursor: null });
