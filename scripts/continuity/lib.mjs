@@ -524,6 +524,41 @@ const SECRET_RULES = [
  * Parse local .env style files into a redaction set. Only value bytes and key NAMES are kept in
  * memory; values equal to the committed .env.example default for the same key are public and skipped.
  */
+const SECRET_NAME_RE = /(^|_)(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?|SHA256|SIGNATURE|URI|URL|DSN)$/i;
+const URL_RE = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i;
+
+/** Shannon entropy in bits per character. */
+function entropy(s) {
+  const counts = new Map();
+  for (const ch of s) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  let h = 0;
+  for (const n of counts.values()) h -= (n / s.length) * Math.log2(n / s.length);
+  return h;
+}
+
+/**
+ * Whether an env value is a secret worth withholding. Plain URLs without embedded credentials (loopback worker URLs,
+ * public origins), ports, booleans, numbers, names, model ids and prices are configuration, not secrets. Values under
+ * a secret-bearing name (*_KEY, *_SECRET, *_TOKEN, *_PASSWORD, *_SHA256, *_URI/_URL) are secrets unless they are one
+ * of those plain shapes; a URL with userinfo (scheme://user:pass@host) is always a secret. Any other name is a secret
+ * only when the value is long and random-looking.
+ */
+export function isSecretEnvValue(key, value) {
+  if (value.length < 8) return false;
+  const url = URL_RE.exec(value);
+  if (url) return url[1].includes('@');
+  if (/^(true|false|yes|no|on|off|null|none)$/i.test(value) || /^[0-9.,:$_-]+$/.test(value)) return false;
+  if (SECRET_NAME_RE.test(key)) return !/\s/.test(value) || value.length >= 24;
+  // Lowercase delimiter-separated words (model ids, scope and database names) are names, not random strings.
+  if (/^[a-z0-9]+([-_./:][a-z0-9]+)+$/.test(value)) return false;
+  return (
+    /^[A-Za-z0-9+/=_-]{24,}$/.test(value) &&
+    /[A-Za-z]/.test(value) &&
+    /\d/.test(value) &&
+    entropy(value) >= 3.5
+  );
+}
+
 export function buildRedactionSet(repo) {
   const sources = [];
   const candidates = ['.env', '.env.local', 'apps/operator/.env', 'infra/opendots/.env.candidates.local'];
@@ -545,7 +580,7 @@ export function buildRedactionSet(repo) {
     }
     sources.push(rel);
     for (const { key, value } of parseEnv(text)) {
-      if (value.length < 8 || exampleValues.get(key) === value || seen.has(value)) continue;
+      if (exampleValues.get(key) === value || seen.has(value) || !isSecretEnvValue(key, value)) continue;
       seen.add(value);
       entries.push({ key, buf: Buffer.from(value, 'utf8') });
     }
