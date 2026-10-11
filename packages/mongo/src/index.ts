@@ -19,4 +19,3 @@ export * from './authority.js';
 export * from './decisions.js';
 export * from './wake.js';
 export * from './grants.js';
-export * from './edges.js';
