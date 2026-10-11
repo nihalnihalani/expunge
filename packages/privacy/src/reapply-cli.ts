@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createPrincipalService, mongoConfigFromEnv } from '@expunge/mongo';
+import { ENC_KEY_VARIABLE, MAC_KEY_VARIABLE, openLedger, sealLedger } from './ledger-security.js';
 import {
   REQUIRED_ATTESTATIONS,
   ledgerSha256,
   newCursor,
-  parseLedger,
   reapplyErasures,
   type ReapplyCursor,
 } from './reapply.js';
@@ -15,8 +15,11 @@ import { exportErasureLedger, mongoReapplyPorts, writePrivateFile } from './reap
  * Post-restore erasure re-application. All commands use the privacy_controller principal (MONGODB_PRIVACY_CONTROLLER_URI),
  * never setup.
  *
- *   export --ledger FILE                 (BEFORE wiping the damaged database) write the erasure ledger, mode 0600
- *   apply  --ledger FILE --cursor FILE   (after the restore, BEFORE any service starts) replay; resumable; exit 0 only when DONE
+ *   export --ledger FILE [--retention-days N]   (BEFORE wiping the damaged database) write the erasure ledger: mode 0600,
+ *                                        signed with HMAC (env EXPUNGE_LEDGER_MAC_KEY, required), AES-256-GCM encrypted when
+ *                                        EXPUNGE_LEDGER_ENC_KEY (64 hex) is set; the header carries counts, latest times, retention
+ *   apply  --ledger FILE --cursor FILE [--allow-expired]   (after the restore, BEFORE any service starts) verify MAC, header and
+ *                                        retention, then replay; resumable; exit 0 only when DONE
  *   attest --cursor FILE NAME=REFERENCE  record that a step this tool cannot do was done (names: world-effects-reconciled,
  *                                        derived-artifacts-retracted); needs a non-empty reference such as a ticket or run id
  *
@@ -55,7 +58,15 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       await service.client.connect();
       if (command === 'export') {
         const ledger = await exportErasureLedger(service);
-        writePrivateFile(ledgerPath, JSON.stringify(ledger));
+        const days = Number(flag('--retention-days') ?? 30);
+        writePrivateFile(
+          ledgerPath,
+          sealLedger(ledger, {
+            macKey: env[MAC_KEY_VARIABLE],
+            encKey: env[ENC_KEY_VARIABLE],
+            retentionDays: days,
+          }),
+        );
         console.log(
           JSON.stringify({ exported: { jobs: ledger.jobs.length, tombstones: ledger.tombstones.length } }),
         );
@@ -65,7 +76,12 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       const text = readFileSync(ledgerPath, 'utf8');
       const hash = ledgerSha256(text);
       const cursor = loadCursor(hash);
-      const report = await reapplyErasures(parseLedger(text), hash, mongoReapplyPorts(service), cursor, (c) =>
+      const parsed = openLedger(text, {
+        macKey: env[MAC_KEY_VARIABLE],
+        encKey: env[ENC_KEY_VARIABLE],
+        allowExpired: rest.includes('--allow-expired'),
+      });
+      const report = await reapplyErasures(parsed, hash, mongoReapplyPorts(service), cursor, (c) =>
         writePrivateFile(cursorPath, JSON.stringify(c)),
       );
       writePrivateFile(cursorPath, JSON.stringify(cursor));
