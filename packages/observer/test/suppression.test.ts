@@ -106,12 +106,13 @@ describe('local export suppression gate in the outbox dispatcher (FAKE Raindrop,
     expect(() => new OutboxDispatcher(deps, { ownerId: 'x' })).toThrow('SuppressionRequired');
   });
 
-  it('fails closed when the suppression list cannot be read: the event is not sent', async () => {
+  it('fails closed when the suppression list cannot be read: the event is HELD, not sent, not dead-lettered', async () => {
     const { dispatcher, add } = rig(async () => {
       throw new Error('store down');
     });
     add(USER, 'evt-4');
-    await expect(dispatcher.runOnce()).rejects.toThrow('store down');
-    expect(fake.ingestEvents).toHaveLength(0);
+    const outcome = await dispatcher.runOnce();
+    expect(outcome).toMatchObject({ result: 'blocked', detail: 'SuppressionUnavailable', attained: [] });
+    expect(fake.ingestEvents).toHaveLength(0); // held, not sent and not dead-lettered
   });
 });
