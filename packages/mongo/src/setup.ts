@@ -65,6 +65,8 @@ export const CONTROL_COLLECTIONS = [
   'preview_plans',
   'verification_sweeps',
   'diagnostics',
+  'campaign_freezes',
+  'gate_claims',
 ] as const;
 export const PRIVATE_COLLECTIONS = [
   'fixture_specs',

@@ -235,6 +235,14 @@ describe('derived effect identity', () => {
 });
 
 describe('role manifests: structural negatives (offline mirror of rbac.integration.test.ts)', () => {
+  it('gives the campaign gate collections a fixed reader and no writer yet (PKT-44)', () => {
+    // Not only manifest equality: the exact holders, so a widened grant fails here by name.
+    for (const collection of ['campaign_freezes', 'gate_claims']) {
+      expect(holders('FIND', collection), collection).toEqual(['grader']);
+      for (const verb of ['INSERT', 'UPDATE', 'REMOVE'])
+        expect(holders(verb, collection), `${verb} ${collection}`).toEqual([]);
+    }
+  });
   it('keeps authority rows with their owners', () => {
     expect(holders('INSERT', 'authority_revisions')).toEqual([]);
     expect(holders('UPDATE', 'authority_revisions')).toEqual(['approval_issuer']);

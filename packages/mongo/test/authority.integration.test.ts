@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Document } from 'mongodb';
-import { scopeIdentity } from '@expunge/contracts';
+import { scopeIdentity, type JobKind } from '@expunge/contracts';
 import {
   AuthorityRepository,
   DecisionRepository,
@@ -17,6 +17,7 @@ import {
   actor,
   completionReceipt,
   createJob,
+  deployWorker,
   describeLive,
   insertRegistry,
   intent,
@@ -445,15 +446,29 @@ describeLive('D8 live authorization, D13 world split, K6 world binding (real rep
 
     it('lets the principals that create jobs read the binding rows they need', async () => {
       await worlds.create(scope, 'shared', 1);
-      for (const principal of [
-        'domain_executor',
-        'observer',
-        'promoter',
-        'privacy_controller',
-        'grader',
-        'fixture_builder',
-      ] as const)
-        expect((await create('shared', 1, await env.as(principal)))._id, principal).toBeTruthy();
+      // Each principal creates the kind it owns; a cleanup also needs a deployed harness to be pinned to (D8-3).
+      const deployed = await deployWorker(env.service);
+      const owned = {
+        domain_executor: 'cleanup',
+        promoter: 'cleanup',
+        observer: 'observe',
+        privacy_controller: 'redact',
+        grader: 'evaluate',
+        fixture_builder: 'adversarial_generate',
+      } as const;
+      for (const [principal, kind] of Object.entries(owned) as Array<[keyof typeof owned, JobKind]>) {
+        const job = await new JobRepository(await env.as(principal)).create(actor, {
+          kind,
+          binding: {
+            runId: 'r',
+            worldId: 'shared',
+            harnessHash: kind === 'cleanup' ? deployed : HASH,
+            scopeRevision: 1,
+            workerProfileHash: HASH,
+          },
+        });
+        expect(job._id, principal).toBeTruthy();
+      }
     });
   });
   describe('setup seeding', () => {

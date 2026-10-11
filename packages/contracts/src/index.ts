@@ -77,6 +77,8 @@ export type WorldScopeBinding = ScopeKey & {
   worldId: string;
   scopeRevision: number;
   maintenanceMode: boolean;
+  /** Set only on an evaluation world built for one gate campaign; written by the fixture builder, never by a run. */
+  campaignId?: string;
   updatedAt: Date;
 };
 export type WorldSpec = {
@@ -686,6 +688,21 @@ export function canonicalJson(value: unknown): string {
   const result = canonicalize(value);
   if (typeof result !== 'string') throw new Error('CanonicalizationFailed');
   return result;
+}
+/**
+ * The executable projection of a bundle: everything a run reads, none of what only documents it. `evidence` and the
+ * `sourceEvidenceIds` of guardrail rules are provenance, not behaviour. This is the same function the gate uses to
+ * name a candidate (`packages/gate/src/freeze.ts`); a parity test pins the two together.
+ */
+export function executableProjection(bundle: HarnessBundle): JsonValue {
+  const { evidence: _evidence, guardrails, ...rest } = bundle;
+  return {
+    ...(rest as unknown as Record<string, JsonValue>),
+    guardrails: guardrails.map(({ sourceEvidenceIds: _ids, ...rule }) => rule) as unknown as JsonValue,
+  };
+}
+export function projectionHash(bundle: HarnessBundle): string {
+  return contentHash(executableProjection(bundle), 'executable-projection');
 }
 export function contentHash(value: unknown, domain = 'artifact'): string {
   if (!/^[a-z0-9_-]+$/.test(domain)) throw new Error('InvalidHashDomain');

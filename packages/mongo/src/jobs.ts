@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { ClientSession, Collection, Document, Filter } from 'mongodb';
 import {
   assertJobAccess,
+  deploymentIdentity,
+  projectionHash,
   type ActorContext,
+  type Deployment,
   type Job,
   type JobKind,
   type JobStatus,
@@ -10,7 +13,8 @@ import {
   type RunBinding,
   type ScopeKey,
 } from '@expunge/contracts';
-import { fail, requirePrincipal, type MongoService, type Principal } from './client.js';
+import { fail, requirePrincipal, scopeFilter, type MongoService, type Principal } from './client.js';
+import { ArtifactRepository } from './artifacts.js';
 import { ProvenanceRepository } from './provenance.js';
 import { WorldRepository } from './worlds.js';
 import { worldKeyOf, type WorldKey } from './worldkey.js';
@@ -36,6 +40,24 @@ function contextHashes(values: readonly string[], limit: number): string[] {
  */
 export const JOB_KIND_PRINCIPALS: Record<JobKind, readonly Principal[]> = {
   cleanup: ['domain_executor'],
+  observe: ['observer'],
+  propose: ['observer'],
+  evaluate: ['grader'],
+  meta_evaluate: ['grader'],
+  adversarial_generate: ['fixture_builder'],
+  promote: ['promoter'],
+  rollback: ['promoter'],
+  redact: ['privacy_controller'],
+  external_delete: ['privacy_controller'],
+};
+/**
+ * Which principal may CREATE each job kind (DA-8 D8-3). Creating is not claiming: a principal that cannot drive a kind
+ * may still not queue one, so an observer cannot queue a cleanup that the worker would then run. `setup`, the local
+ * administrator that never runs in a sandbox, may create any kind. A cleanup is created by the domain service
+ * (`domain_executor`) or by the deployment's pinned-job path (`promoter`).
+ */
+export const JOB_CREATOR_PRINCIPALS: Record<JobKind, readonly Principal[]> = {
+  cleanup: ['domain_executor', 'promoter'],
   observe: ['observer'],
   propose: ['observer'],
   evaluate: ['grader'],
@@ -89,6 +111,55 @@ export class JobRepository {
       'fixture_builder',
       'setup',
     ]);
+    if (
+      this.service.principal !== 'setup' &&
+      !JOB_CREATOR_PRINCIPALS[input.kind].includes(this.service.principal)
+    )
+      fail('PrincipalBoundary');
+    // A cleanup runs the pinned harness against the owner's real data, so it may only run a harness the scope has
+    // deployed: the caller's hash is checked against the stored deployment pointer and never trusted (fail closed).
+    // `setup` is exempt because it is the administrator that seeds evaluation worlds and tests; it is never configured
+    // in a worker or a sandbox.
+    if (input.kind === 'cleanup' && this.service.principal !== 'setup') {
+      const pointer = await this.deploymentPointer(actor);
+      if (!pointer || pointer.activeHash !== input.binding.harnessHash) fail('HarnessNotDeployed');
+    }
+    return this.insertJob(actor, input);
+  }
+  /**
+   * Creates a cleanup job for a gate campaign's evaluation episode. Only the grader may, and only when all of this holds
+   * in stored rows: the world was built for this campaign (its binding names it), the campaign has a freeze row written
+   * by the fixture builder, the campaign's claim is open, and the pinned harness is the claim's parent or the exact child
+   * the claim names (same executable projection, derived from the stored artifact). Anything else is refused, so an
+   * evaluation can never act on a production scope or run a harness the campaign does not own.
+   */
+  async createCampaignJob(
+    actor: ActorContext,
+    input: Parameters<JobRepository['create']>[1] & { kind: 'cleanup'; campaignId: string },
+  ): Promise<Job> {
+    requirePrincipal(this.service, ['grader']);
+    const { campaignId, ...rest } = input;
+    const control = this.service.control;
+    const worlds = new WorldRepository(this.service);
+    if ((await worlds.campaignOf(actor, rest.binding.worldId)) !== campaignId) fail('NotCampaignWorld');
+    if (!(await control.collection('campaign_freezes').findOne({ _id: campaignId as never })))
+      fail('NotCampaignWorld');
+    const claim = await control
+      .collection<{ parentHash: string; childProjectionHash: string }>('gate_claims')
+      .findOne({ campaignId, state: 'open' });
+    if (!claim) fail('HarnessNotInCampaign');
+    const hash = rest.binding.harnessHash;
+    if (hash !== claim.parentHash) {
+      const artifact = await new ArtifactRepository(this.service).read(hash).catch(() => null);
+      const isChild =
+        artifact !== null &&
+        artifact.payload.parentHash === claim.parentHash &&
+        projectionHash(artifact.payload) === claim.childProjectionHash;
+      if (!isChild) fail('HarnessNotInCampaign');
+    }
+    return this.insertJob(actor, rest);
+  }
+  private async insertJob(actor: ActorContext, input: Parameters<JobRepository['create']>[1]): Promise<Job> {
     // A run is bound to a world that exists under this scope, at this scope revision, outside maintenance.
     await new WorldRepository(this.service).assertRunnable(
       actor,
@@ -119,6 +190,27 @@ export class JobRepository {
     };
     await this.collection.insertOne(job);
     return job;
+  }
+  /** The scope's active worker deployment pointer, read from the stored row. */
+  private async deploymentPointer(key: ScopeKey, session?: ClientSession): Promise<Deployment | null> {
+    const deploymentKey = { ...scopeFilter(key), target: 'worker' as const };
+    return this.service.control
+      .collection<Deployment>('deployments')
+      .findOne({ _id: deploymentIdentity(deploymentKey), ...deploymentKey }, { session });
+  }
+  /**
+   * For the worker to call before it runs a cleanup: the job's pinned harness must be the one the scope has deployed
+   * now. Throws `HarnessNotDeployed` when the scope has no pointer or the pointer names another harness (a rollback or
+   * a newer promotion), so a queued job never starts on a harness the owner no longer runs.
+   */
+  async assertHarnessDeployed(actor: ActorContext, jobId: string): Promise<void> {
+    const job = await this.readAuthorized(actor, jobId);
+    if (job.kind !== 'cleanup') return;
+    // An evaluation job on a campaign world was admitted by `createCampaignJob` against the campaign's own claim; the
+    // scope's production pointer is not what it runs. The binding that says so is written by the fixture builder.
+    if ((await new WorldRepository(this.service).campaignOf(actor, job.binding.worldId)) !== null) return;
+    const pointer = await this.deploymentPointer(actor);
+    if (!pointer || pointer.activeHash !== job.binding.harnessHash) fail('HarnessNotDeployed');
   }
   /**
    * The world capability for one job. It is minted from the job row as stored (its run binding), after the actor's

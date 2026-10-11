@@ -38,7 +38,7 @@ export class WorldRepository {
     key: ScopeKey,
     worldId: string,
     scopeRevision: number,
-    options: { maintenanceMode?: boolean } = {},
+    options: { maintenanceMode?: boolean; campaignId?: string } = {},
   ): Promise<void> {
     requirePrincipal(this.service, ['fixture_builder', 'setup']);
     if (!worldId || !Number.isSafeInteger(scopeRevision) || scopeRevision < 1) fail('InvalidWorld');
@@ -55,6 +55,7 @@ export class WorldRepository {
           worldId,
           scopeRevision,
           maintenanceMode: options.maintenanceMode ?? false,
+          ...(options.campaignId === undefined ? {} : { campaignId: options.campaignId }),
           updatedAt: now,
         },
         { session },
@@ -92,6 +93,13 @@ export class WorldRepository {
       if (advanced.matchedCount !== 1) fail('UnknownWorld');
     });
     return this.read(key, worldId);
+  }
+
+  /** The gate campaign this world was built for, from its stored binding; null for any other world. */
+  async campaignOf(key: ScopeKey, worldId: string, session?: ClientSession): Promise<string | null> {
+    const binding = await this.bindings.findOne({ _id: worldId, ...scopeFilter(key) }, { session });
+    if (!binding) fail('UnknownWorld');
+    return binding.campaignId ?? null;
   }
 
   /** The logical world revision: the counter joined with its trusted binding. */
