@@ -1,3 +1,4 @@
+import { contentHash } from '@expunge/contracts';
 import { describe, expect, it } from 'vitest';
 import { buildSealedSplitPlan, sealPlanForGate, verifyGatePlanView } from '../src/sealed.js';
 import { testMasterSeed } from './helpers.js';
@@ -39,5 +40,40 @@ describe('GatePlanView (the gate never holds the final split)', () => {
     const missing = sealPlanForGate(plan);
     missing.entries.pop();
     expect(() => verifyGatePlanView(missing)).toThrow('GatePlanViewEntryMissing');
+  });
+
+  it('refuses every other malformed shape with its own code', () => {
+    const fresh = () => sealPlanForGate(plan);
+    const reseal = (view: ReturnType<typeof fresh>) => {
+      // A self-consistent forgery: recompute the commitment hash over the edited payload.
+      const { splitHash: _drop, ...payload } = view.commitment;
+      view.commitment.splitHash = contentHash(payload, 'fixture-splits');
+      return view;
+    };
+    expect(() => verifyGatePlanView(null as never)).toThrow('GatePlanViewMalformed');
+    expect(() => verifyGatePlanView({ entries: [], commitment: undefined } as never)).toThrow(
+      'GatePlanViewMalformed',
+    );
+    const builder = fresh();
+    builder.commitment.splitBuilderHash = 'b'.repeat(64);
+    expect(() => verifyGatePlanView(builder)).toThrow('GatePlanViewBuilderMismatch');
+    const dup = fresh();
+    dup.commitment.entries.push(structuredClone(dup.commitment.entries[0]!));
+    expect(() => verifyGatePlanView(reseal(dup))).toThrow('GatePlanViewDuplicateFixture');
+    const counts = fresh();
+    counts.commitment.counts.train += 1;
+    expect(() => verifyGatePlanView(reseal(counts))).toThrow('GatePlanViewCountsMismatch');
+    const unpublished = fresh();
+    unpublished.entries[0]!.fixtureId = 'train-99';
+    expect(() => verifyGatePlanView(unpublished)).toThrow('GatePlanViewEntryUnpublished');
+    const twice = fresh();
+    twice.entries.push(structuredClone(twice.entries[0]!));
+    expect(() => verifyGatePlanView(twice)).toThrow('GatePlanViewEntryUnpublished');
+    const wrongSplit = fresh();
+    wrongSplit.entries[0]!.split = 'validation';
+    expect(() => verifyGatePlanView(wrongSplit)).toThrow('GatePlanViewEntryUnpublished');
+    const forgedSeed = fresh();
+    forgedSeed.entries[0]!.seed = 'a'.repeat(64);
+    expect(() => verifyGatePlanView(forgedSeed)).toThrow('GatePlanViewEntryForged');
   });
 });
