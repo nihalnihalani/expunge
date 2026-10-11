@@ -21,8 +21,15 @@ import {
   type WorldCollections,
 } from './types.js';
 export type { FixtureManifest, PreservationHash, SealedFixture } from './types.js';
-export { buildSealedSplitPlan } from './splits.js';
-export type { SealedSplitEntry, SplitCommitment, SplitId } from './splits.js';
+export { buildSealedSplitPlan, sealPlanForGate, splitBuilderHash, verifyGatePlanView } from './splits.js';
+export type {
+  GatePlanEntry,
+  GatePlanView,
+  GateSplitId,
+  SealedSplitEntry,
+  SplitCommitment,
+  SplitId,
+} from './splits.js';
 export { isHighEntropySeed } from './entropy.js';
 export {
   DerivationKeyError,
