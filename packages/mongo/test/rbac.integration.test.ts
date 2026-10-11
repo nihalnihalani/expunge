@@ -455,9 +455,18 @@ describeRbac('real authenticated local replica-set RBAC (not Atlas provisioning)
     // A campaign permit is not an eligibility row: the grader cannot make any artifact eligible for a production run.
     await allowed('grader', 'campaign_artifact_permits', ['find', 'insert']);
     await denied('grader', 'campaign_artifact_permits', ['update', 'remove']);
+    await allowed('domain_executor', 'campaign_artifact_permits', ['find']);
     await denied('domain_executor', 'campaign_artifact_permits', ['insert', 'update', 'remove']);
     await denied('grader', 'artifact_eligibility', ['insert', 'update', 'remove']);
     await denied('fixture_builder', 'artifact_eligibility', ['insert', 'update', 'remove']);
+    // Episode evidence for the gate: read-only for the grader.
+    for (const name of ['completion_receipts', 'effects', 'preview_plans']) {
+      await allowed('grader', name, ['find']);
+      await denied('grader', name, ['insert', 'update', 'remove']);
+    }
+    // The operator Evaluation view reads gate reports; it cannot write them.
+    await allowed('projection_reader', 'gate_reports', ['find']);
+    await denied('projection_reader', 'gate_reports', ['insert', 'update', 'remove']);
   });
 
   it('PKT-62 collections: named raw-driver denials', async () => {
