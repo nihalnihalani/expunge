@@ -1,0 +1,125 @@
+# Node service host: worker, evidence process, operator. NO Docker socket, NO candidate computers.
+#   docker compose -p expunge-node --env-file /dev/null -f infra/services/compose.node-host.yml up -d --wait
+# Secrets are never in this file: every service reads a per-service env_file under ${EXPUNGE_ENV_DIR} (default
+# /etc/expunge, root-owned 0600, outside the repository). Names are listed in infra/services/env/*.env.example.
+# Images are built by `node infra/services/build-images.mjs --tag <release>` and referenced by tag; set EXPUNGE_IMAGE_TAG.
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  init: true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: '20m', max-file: '5' }
+
+services:
+  worker:
+    <<: *hardening
+    image: expunge/worker:${EXPUNGE_IMAGE_TAG:?Set EXPUNGE_IMAGE_TAG to the built release tag}
+    env_file:
+      - path: ${EXPUNGE_ENV_DIR:-/etc/expunge}/worker.env
+        required: true
+    environment:
+      NODE_ENV: production
+      EXPUNGE_WORKER_HOST: 0.0.0.0
+      EXPUNGE_WORKER_PORT: '4330'
+    # tsx writes its transform cache under the OS temp dir; nothing else is writable.
+    tmpfs: ['/tmp:size=64m,mode=1777']
+    # Loopback publication only; the reverse proxy / operator reach it on the backend network.
+    ports: ['127.0.0.1:4330:4330']
+    networks: [backend]
+    user: '65532:65532'
+    cpus: 2.0
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 256
+    stop_grace_period: 30s
+    healthcheck:
+      # /readyz is 200 only when configuration is READY; a BLOCKED worker is reported unhealthy by name in its logs.
+      test:
+        [
+          'CMD',
+          '/nodejs/bin/node',
+          '-e',
+          "fetch('http://127.0.0.1:4330/readyz',{signal:AbortSignal.timeout(2500)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+  # Raindrop outbox dispatcher + observer. Profile `evidence`: it exits 3 (BLOCKED) until the guard file
+  # (EXPUNGE_LEAK_GUARD_FILE), observer URI and Raindrop keys are supplied, so it is not started by default.
+  observer:
+    <<: *hardening
+    profiles: [evidence]
+    image: expunge/observer:${EXPUNGE_IMAGE_TAG:?Set EXPUNGE_IMAGE_TAG to the built release tag}
+    restart: on-failure:5
+    env_file:
+      - path: ${EXPUNGE_ENV_DIR:-/etc/expunge}/observer.env
+        required: true
+    environment:
+      NODE_ENV: production
+    tmpfs: ['/tmp:size=64m,mode=1777']
+    networks: [backend]
+    user: '65532:65532'
+    cpus: 1.0
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 128
+    stop_grace_period: 20s
+    # No port and no HTTP surface: no container health check exists (HEALTHCHECK NONE). Watch the JSON log lines and the
+    # telemetry_outbox / observer_cursors collections instead (docs/runbooks/INCIDENT.md).
+    healthcheck:
+      disable: true
+
+  operator:
+    # Upstream OpenDots image (apps/operator/Dockerfile, owned by ui-ux-improver): node:24-bookworm-slim, USER node, NOT
+    # digest-pinned and not read-only. Hardened here at run time; pin the base in that Dockerfile before release.
+    build:
+      context: ../../apps/operator
+      target: app
+    image: expunge/operator:${EXPUNGE_IMAGE_TAG:?Set EXPUNGE_IMAGE_TAG to the built release tag}
+    env_file:
+      - path: ${EXPUNGE_ENV_DIR:-/etc/expunge}/operator.env
+        required: true
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: '4310'
+      DATABASE_PATH: /data/opendots.sqlite
+      DO_NOT_TRACK: '1'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    init: true
+    restart: unless-stopped
+    tmpfs: ['/tmp:size=64m,mode=1777']
+    volumes: ['operator-data:/data']
+    # TLS terminates at the host reverse proxy; the operator itself is published on loopback only.
+    ports: ['127.0.0.1:4310:4310']
+    networks: [backend]
+    cpus: 1.0
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 256
+    healthcheck:
+      # Upstream exposes no /healthz; /api/expunge/readiness is served without the owner token.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4310/api/expunge/readiness',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  backend:
+    driver: bridge
+volumes:
+  operator-data: {}
