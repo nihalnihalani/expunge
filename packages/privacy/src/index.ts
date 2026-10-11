@@ -7,3 +7,5 @@ export * from './retract.js';
 export * from './scan.js';
 export * from './structure.js';
 export * from './export-guard.js';
+export * from './reapply.js';
+export * from './reapply-mongo.js';
