@@ -160,6 +160,76 @@ block for the worker principal (privileges that name the private database, wheth
 code 13, and `rbacEnforced`). On a local replica set without authentication that block says `rbacEnforced: false`; it
 describes the server it ran against and is not evidence about an Atlas custom role.
 
+## Native owner sources (MA-R1; local protocol evidence only)
+A synthetic world is a database this system builds: documents wrapped under `data`, stamped with `tenantId`/`env`/`worldId`/
+`_rev`/`eligibility`/`access`/`lifecycle`, in fixed collections, with one controlled writer advancing `world_revisions`. A
+**native owner source** is the owner's own database, registered as it is, written by the owner's applications at any time.
+The two paths coexist; the synthetic one stays for labeled protocol tests. Code: `native-values.ts`, `owner-source.ts`,
+`native-adapter.ts`, `source-revision.ts`. Tests: `native-source.integration.test.ts` (made-up records, local replica set; not
+authentic owner data, not Atlas).
+
+- **Registration is the contract's** (`NativeSourceRegistration`, `@expunge/contracts` source.ts, stored by `OwnerSourceRepository` in
+  `owner_sources`: insert-only per revision, the registration's own `revision` must be the next one, hashed with
+  `nativeRegistrationHash`, re-hashed and re-parsed on read; written by `fixture_builder`/`setup` only; storing is not authorizing,
+  the registration's `ownerReview` is evidence and a separate owner grant remains what authorizes installation). `compileOwnerSource`
+  adds what the contract leaves to the Mongo layer: no reserved database (`admin`, `local`, `config`, `expunge_*`, every
+  `EXPUNGE_*_DB` value; also rechecked in `connectOwnerSource`), exactly one protected `_id` key field per namespace whose
+  `bsonTypes` are string/objectId/int/long (`binData` is accepted only as a subtype-4 UUID: the contract has no UUID scalar), and a
+  per-deployment connection variable `EXPUNGE_SOURCE_<DEPLOYMENT_ID>_URI` (the value is never stored).
+- **How the adapter reads the contract.** Namespaces may live in several databases. `identity` fields are the subject's exact
+  identity; the referencing side of a declared reference is a reference field; every query and write also carries the namespace's
+  tenant boundary, so another tenant's document in a shared collection is invisible. Policy is the contract's `rules`: an effect is
+  allowed on a document only when a rule of that effect for the namespace has all its conditions true (a legal hold is a condition
+  that is false); a document no rule selects is retained. A rule writes only its `fieldIds`; protected and retained fields can
+  never be in one (the contract refuses it). Interpretation the contract does not state, to be confirmed: in an identity or
+  referencing rule field the adapter replaces values equal to the subject's bindings; in any other rule field every scalar it
+  holds; `restrict` sets each rule field to the replacement even if absent.
+- **Discovery by ownership (DG1)**: `ownedClosure` walks only `owner: to` incoming and `owner: from` outgoing edges, with indexed
+  lookups on the source (no edge table, no scan), never up into a shared parent (`none`) and so never into another subject's
+  records, bounded by `limits.maxHops`/`maxScanned`; `string_to_objectId`/`objectId_to_string` are converted per rule; a cut reports
+  `truncated`.
+- **Conditional effect with read-back** (`NativeSourceAdapter.applyEffect`): the caller holds the preimage hash from preview. The
+  adapter re-reads, refuses on a different hash (`SourceConflict`), selects the rule, then writes with a precondition: under
+  `conditional_preimage` the filter is the whole preimage (`$expr` equality against `$$ROOT`, with BSON types and order); under
+  `native_revision` the owner's revision field plus the exact values being replaced, and the revision field is the owner's:
+  the adapter guards on it and does NOT bump it (it is protected). Writes are targeted (`$set` with `arrayFilters`, `deleteOne`),
+  never the bare array. No match means re-read: equal to the expected post-image is `replayed`, anything else is `SourceConflict` and
+  the external value survives. After the write the document is read again and must equal the expected post-image (the revision
+  field excluded, since the owner's writers may move it), or `ReadbackMismatch` names the diverged top-level keys.
+- **External-writer consistency**: no controlled counter. `SourceRevisionRepository.observe` drains the change stream (filtered to each namespace's tenant boundary; deletes and
+  drops carry no document and count unconditionally, which only over-counts) of EVERY database
+  the source uses (resume token per database, advanced by compare-and-set) into `{observedSeq, epoch}`; a lost history or a
+  dropped/renamed collection bumps `epoch`. The pair is advisory for derived state and never guards a write; every write is
+  guarded by its own document. A conflict means re-preview, never a blind write. Rows use the contract's explicit
+  `staging|production` environment, not the synthetic `dev|evaluation|demo`.
+- **`native_revision` contract** (the owner's own declaration): the owner's writers MUST move the revision field on every write to
+  the document. Under it an update is guarded by the revision and by each value being replaced, but `delete` and `restrict` carry
+  no per-value guard, so an owner write that skips the revision would be deleted or restricted over. Numbers compare by value
+  (MongoDB equality): an int changed to a double of the same value passes `conditional_preimage` and is then caught by the read-back
+  (`ReadbackMismatch`), never silently kept.
+- **Crash recovery is NOT an idempotent replay.** `applyEffect` compares the current document with the preview's preimage hash
+  first and throws `SourceConflict('preimage_changed')` when they differ, so a process that restarts and re-applies with the old
+  preimage after its write already landed gets a conflict, not `replayed`. `replayed: true` covers only a write that lands between
+  the adapter's own preimage read and its conditional update, inside one call. After a crash: re-preview, which finds nothing
+  left to write. A delete whose receipt is lost looks like an external delete (`SourceConflict('absent')`).
+- **OPEN, required before the gateway uses the adapter:**
+  - **NA-2**: a control-plane write-ahead intent `{effectKey, address, preHash, expectedPostHash | null}` committed BEFORE the
+    source write, and a reconcile step that decides from it: current hash equals `expectedPostHash` is applied (receipt labelled
+    `recovered`); absent after a delete intent is recorded as exactly "applied or externally deleted"; equals `preHash` is not
+    applied; anything else is a conflict.
+  - **NA-3**: the gateway's stored plan pins target addresses from `ownedClosure`, and the adapter must refuse a target outside
+    it (for example by taking the pinned address set). Today `planEffect`/`applyEffect` accept any registered address with an
+    allowed effect, and `planEffect` redacts every string in a payload field, which on a shared parent would wipe its content.
+- **Other gaps**: `effectJournal` (source-side effect stamps) and `isolated_replay` case manifests are not implemented (the
+  adapter accepts a physical namespace map for replay but nothing builds one); the gateway and worker do not use native sources
+  yet. `@expunge/contracts` `ReceiptCoverage`, `AppliedEffect` and `DomainAddress` still assume numeric versions and four id
+  types, and `ScopeKey.env` is `dev|evaluation|demo` while a source scope is `staging|production` (proposals in the MA-R1 report).
+- **Databases that cannot be a source** (NA-4): `admin`, `local`, `config`, anything starting `expunge_`, and every value of an
+  `EXPUNGE_*_DB` variable, checked at registration and again in `connectOwnerSource`.
+- **Roles**: `owner_sources` is insert-only (fixture builder INSERT, no UPDATE; everyone who reads the world reads it);
+  `owner_source_state` is written by `domain_executor`. The owner's own database needs a separate Atlas role (find on registered
+  collections; update/remove only where the registration allows; changeStream on the registered collections), provisioned by the owner.
+
 ## Campaign permits, campaign authority and read grants (MA-F1, MA-F2, F-8)
 - `ProvenanceRepository.permitted` accepts a hash with NO eligibility row when a `campaign_artifact_permits` row exists for the scope
   and `assertCampaignScope` passes (evaluation env, no worker deployment pointer). Any eligibility row that is not `permitted` still

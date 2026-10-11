@@ -19,6 +19,8 @@ const EXECUTOR_WORLD_WRITES = [
   'archives',
   'world_revisions',
   'identity_edges',
+  // Native owner sources: the revision the change stream has been observed to (a counter the worker advances).
+  'owner_source_state',
 ] as const;
 /** Atlas Administration API custom-role bodies; apply through Atlas, never createRole on Atlas. */
 export function atlasRoleManifests(
@@ -41,7 +43,7 @@ export function atlasRoleManifests(
       // Domain records, the revision fence and derived edges only. The registry (schema_registry) and retained
       // data (retained_invoices) are never writable by the worker principal.
       action('UPDATE', names.world, EXECUTOR_WORLD_WRITES),
-      action('INSERT', names.world, ['identity_edges']),
+      action('INSERT', names.world, ['identity_edges', 'owner_source_state']),
       action('REMOVE', names.world, ['customers', 'accounts', 'messages', 'events', 'notes', 'archives']),
       control('FIND', [
         'jobs',
@@ -347,7 +349,12 @@ export function atlasRoleManifests(
     fixture_builder: role('expunge_fixture_builder', [
       worldRead,
       action('INSERT', names.world, WORLD_COLLECTIONS),
-      action('UPDATE', names.world, WORLD_COLLECTIONS),
+      // A registered owner source is insert-only per revision: the fixture builder registers a new revision, never edits one.
+      action(
+        'UPDATE',
+        names.world,
+        WORLD_COLLECTIONS.filter((name) => name !== 'owner_sources'),
+      ),
       action('REMOVE', names.world, [
         'customers',
         'accounts',

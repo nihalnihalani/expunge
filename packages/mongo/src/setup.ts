@@ -26,6 +26,8 @@ export const WORLD_COLLECTIONS = [
   'world_revisions',
   'world_scope_bindings',
   'retained_invoices',
+  'owner_sources',
+  'owner_source_state',
 ] as const;
 export const CONTROL_COLLECTIONS = [
   'jobs',
@@ -183,6 +185,8 @@ export const WORLD_INDEXES: IndexEntry[] = [
   { collection: 'schema_registry', key: { ...identity, revision: 1 }, options: { unique: true } },
   { collection: 'world_scope_bindings', key: { ...identity, worldId: 1 }, options: { unique: true } },
   { collection: 'world_revisions', key: { ...identity, worldId: 1 }, options: { unique: true } },
+  { collection: 'owner_sources', key: { ...identity, sourceId: 1, revision: 1 }, options: { unique: true } },
+  { collection: 'owner_source_state', key: { ...identity, sourceId: 1 }, options: { unique: true } },
   { collection: 'identity_edges', key: { edgeKey: 1 }, options: { unique: true } },
   // Edges are versioned by the world revision they were derived at; traversal reads one revision only.
   { collection: 'identity_edges', key: { ...identity, worldId: 1, worldRevision: 1, fromNode: 1 } },
