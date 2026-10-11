@@ -1,6 +1,6 @@
 # Expunge project state (sanitized, version-controlled)
 
-Updated: 2026-10-11 15:40 IST by team-lead. This file holds no credentials. Checkpoint packs live in the ignored `.expunge/checkpoints/` directory; the local briefing is the ignored `HANDOFF.md`.
+Updated: 2026-10-11 16:30 IST (11:00 UTC) by team-lead. This file holds no credentials. Checkpoint packs live in the ignored `.expunge/checkpoints/` directory; the local briefing is the ignored `HANDOFF.md`.
 
 ## Objective
 
@@ -16,7 +16,7 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 
 | Item | State |
 |---|---|
-| Git | branch `main`, UNBORN (no commits) before the baseline commit packet CS-1; remote `origin` = https://github.com/nihalnihalani/expunge (private, created 2026-10-11 at the human's request; push after each verified commit) |
+| Git | branch `main`; commits so far: fe12b51 baseline (470 files), 506b73e ledger, e165d48 mongo A2-R finish, 082d2e1 ledger, d119446 review DA-4, 7cbb983 ledger; remote `origin` = https://github.com/nihalnihalani/expunge (private); every commit is pushed immediately (human instruction); per-lane commit packets with verifier evidence |
 | Root `.env` | MISSING. All Atlas, model-provider, Raindrop and CopilotKit Intelligence live checks are BLOCKED until it exists. Required variable names are listed in `.env.example`. |
 | `apps/operator/.env` | MISSING (operator loads root `.env` through `apps/operator/scripts/run-from-root.mjs`) |
 | Node / npm | v25.2.1 / 11.6.2 (root engines `>=24`) |
@@ -28,10 +28,10 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 | Phase | Status | Evidence |
 |---|---|---|
 | P0 audit | done | see Baseline checks |
-| P0 tooling / continuity skeleton | in progress | this file, OWNERSHIP.md, TASKS.json |
-| Wave A repair (A2-R mongo, A3-R fixtures/grader) | not started | |
-| Wave B (gateway, worker/OpenMuse, operator UX) | not started | |
-| Wave C (Raindrop, compiler/evolver, admission/promotion) | not started | |
+| P0 tooling / continuity skeleton | done | this file, OWNERSHIP.md, TASKS.json; checkpoint tooling 35/35 |
+| Wave A repair (A2-R mongo, A3-R fixtures/grader) | A3-R done; A2-R nearly done (docs/MONGO.md, lint, K8 remaining) | VERIFICATION.md; commit fe12b51 |
+| Wave B (gateway, worker/OpenMuse, operator UX) | B2-1 done, B2-2 in progress; B3 server half done; B1 starting | commit fe12b51 |
+| Wave C (Raindrop, compiler/evolver, admission/promotion) | C2 vocabulary foundation only; C1 and C3 not started | |
 | Wave D (Hider, meta, privacy) | not started | |
 | Wave E (reliability, benchmark, deployment) | not started | |
 

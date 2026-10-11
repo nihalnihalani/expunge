@@ -22,7 +22,7 @@ The setup principal is used only by `npm run setup:mongo` from an operator machi
 
 ## Durable worker (apps/worker)
 
-`EXPUNGE_WORKER_ID`, `EXPUNGE_WORKER_LEASE_MS`, `EXPUNGE_WORKER_MAX_CONCURRENT`, `EXPUNGE_WORKER_MAX_QUEUED`, `EXPUNGE_WORKER_PHASE_TIMEOUT_MS`, `EXPUNGE_WORKER_HOST`, `EXPUNGE_WORKER_PORT`; `EXPUNGE_LIVE_PROVIDER_SMOKE=1` runs the live provider smoke test; `EXPUNGE_REQUIRE_LIVE_TESTS=1` turns missing-credential skips into failures (the lane the verifier and CI use for required live suites). The worker reports `BLOCKED: <reason>` on readiness and refuses wakes with 503 until credentials and domain tools exist.
+`EXPUNGE_WORKER_ID`, `EXPUNGE_WORKER_LEASE_MS`, `EXPUNGE_WORKER_MAX_CONCURRENT`, `EXPUNGE_WORKER_MAX_QUEUED`, `EXPUNGE_WORKER_PHASE_TIMEOUT_MS`, `EXPUNGE_WORKER_POLL_MS` (crash-recovery claim polling; 0 disables), `EXPUNGE_WORKER_POLL_BATCH`, `EXPUNGE_WORKER_TOOL_DRAIN_MS` (grace for in-flight tools on graceful stop; a tool outliving it keeps the lease unreleased until expiry), `EXPUNGE_WORKER_REQUIRE_PRICING` (fail closed when a cost ceiling exists and a call is unpriced), `EXPUNGE_WORKER_HOST`, `EXPUNGE_WORKER_PORT`; the worker is bound to one scope from `EXPUNGE_TENANT_ID`, `EXPUNGE_ENV`, `EXPUNGE_SCOPE_ID` and refuses jobs outside it; `EXPUNGE_LIVE_PROVIDER_SMOKE=1` runs the live provider smoke test; `EXPUNGE_REQUIRE_LIVE_TESTS=1` turns missing-credential skips into failures (the lane the verifier and CI use for required live suites). The worker reports `BLOCKED: <reason>` on readiness and refuses wakes with 503 until credentials and domain tools exist.
 
 ## OpenDots operator (upstream names)
 
