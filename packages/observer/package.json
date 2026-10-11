@@ -1,0 +1,19 @@
+{
+  "name": "@expunge/observer",
+  "version": "0.1.0",
+  "description": "Raindrop Query observer: fixed-identity paging, durable cursors, late-enrichment rereads, evidence bundles, outbox read-back, MCP capture.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/contracts": "0.1.0",
+    "@expunge/mongo": "0.1.0",
+    "@expunge/observability": "0.1.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "mongodb": "7.7.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@expunge/vendor-openmuse": "0.1.0"
+  }
+}
