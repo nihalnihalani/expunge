@@ -116,6 +116,7 @@ export async function openGate(label: string): Promise<Gate> {
         port,
         budget: BUDGET,
         baseScope: BASE_SCOPE,
+        sourceScope: { tenantId: 'owner-tenant', env: 'dev', scopeId: 'owner-scope' },
         concurrency: 4,
         ...over,
       });

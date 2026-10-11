@@ -11,7 +11,13 @@ import { EVALUATOR_HASH } from '@expunge/grader';
 import { FIXTURE_GENERATOR_HASH } from '@expunge/fixtures';
 import { verifyGatePlanView, type GatePlanView } from '@expunge/fixtures/sealed';
 import { COMPILER_HASH, classifyMutation } from '@expunge/harness-compiler';
-import { ArtifactRepository, fail, requirePrincipal, type MongoService } from '@expunge/mongo';
+import {
+  ArtifactRepository,
+  ProvenanceRepository,
+  fail,
+  requirePrincipal,
+  type MongoService,
+} from '@expunge/mongo';
 import {
   ADMISSION_RULE_HASH,
   PLANNED_PAIRS,
@@ -59,7 +65,9 @@ export type GateConfig = {
   signal?: AbortSignal;
   /** Causal-control rows measured elsewhere in the campaign; recorded in the report as supplied. */
   controls?: ControlRow[];
-  /** Whether any evidence of the child is from a source that has since been revoked or deleted. */
+  /** The production scope the candidate would be promoted into: its stored source eligibility is read there. */
+  sourceScope: ScopeKey;
+  /** An additional veto on the child's sources. It can only add ineligibility; it can never replace the built-in checks. */
   sourcesIneligible?: (child: HarnessBundle) => Promise<boolean>;
   /** TEST HOOK, forwarded to the claim: runs between taking an attempt and inserting the claim. */
   betweenAttemptAndInsert?: () => Promise<void>;
@@ -80,10 +88,26 @@ export type GateOutcome = {
 };
 
 const HEX64 = /^[a-f0-9]{64}$/;
-const evidenceIneligible = (bundle: HarnessBundle): boolean =>
+/** The bundle's own labels: a floor only. The stored eligibility below is what decides. */
+const evidenceLabelsIneligible = (bundle: HarnessBundle): boolean =>
   bundle.evidence.some(
     (reference) => reference.permittedUse !== 'training' && reference.permittedUse !== 'gate_only',
   );
+
+/**
+ * Ineligible when ANY of: a self-declared label is not training or gate-only; a stored eligibility row (or an
+ * ancestor's) for the child or one of its evidence hashes is not permitted in the target scope; or the caller's extra
+ * veto says so. The hook is OR-ed in: returning false from it changes nothing.
+ */
+async function sourcesIneligibleFor(config: GateConfig, child: HarnessBundle): Promise<boolean> {
+  if (evidenceLabelsIneligible(child)) return true;
+  const hashes = [
+    ...new Set([config.childHash, ...child.evidence.map((reference) => reference.contentHash)]),
+  ];
+  const tainted = await new ProvenanceRepository(config.grader).tainted(config.sourceScope, hashes);
+  if (tainted.size > 0) return true;
+  return (await config.sourcesIneligible?.(child)) === true;
+}
 
 /**
  * Fresh paired admission. The exact tested parent and child run on separately reset campaign worlds under equal
@@ -108,13 +132,14 @@ export async function runGate(config: GateConfig): Promise<GateOutcome> {
   const child = (await artifacts.read(config.childHash)).payload;
   if (child.parentHash !== config.parentHash) fail('CandidateParentMismatch');
   assertPlanShape(config.view);
-  // A forged, swapped or final-split-bearing view throws here, before any seed is read or any episode is run.
-  const observedCommitment = verifyGatePlanView(config.view);
+  // A forged, swapped, final-split-bearing or foreign (self-consistent but not the frozen) view throws here, before the
+  // claim: nothing is consumed and no seed is read.
+  const observedCommitment = verifyGatePlanView(config.view, freeze.splitManifestCommitment);
 
   const childProjectionHash = childProjectionOf(child);
   const reportId = reportIdOf(config.parentHash, childProjectionHash);
   const mutation = classifyMutation(parent, child).mutationClass;
-  const sourcesIneligible = (await config.sourcesIneligible?.(child)) ?? evidenceIneligible(child);
+  const sourcesIneligible = await sourcesIneligibleFor(config, child);
   const base: Omit<AdmissionInput, 'rows' | 'planned' | 'evidence'> = {
     frozen: freeze,
     observed: {
@@ -233,7 +258,8 @@ export async function runGate(config: GateConfig): Promise<GateOutcome> {
     });
   } catch (error) {
     // An unexpected failure is not a decision about the candidate. Keep what ran and put the pair back on hold.
-    await settleAfterCrash(claims, ticket, freeze, run?.rows ?? []).catch(() => undefined);
+    if (!(error instanceof Error && error.message === 'DecisionAlreadyRecorded'))
+      await settleAfterCrash(claims, ticket, freeze, run?.rows ?? []).catch(() => undefined);
     throw error;
   }
 }
@@ -301,7 +327,18 @@ async function finish(
       ticket,
     };
   }
-  const { digest } = await new GateStore(config.grader).saveReport(report);
+  let digest: string;
+  try {
+    ({ digest } = await new GateStore(config.grader).saveReport(report));
+  } catch (error) {
+    // Only the grader can insert a report, and its _id belongs to this (parent, child) pair alone, so an existing one is
+    // a decision this claim already recorded before a crash. Finish settling it instead of deciding a second time.
+    if (error instanceof Error && error.message === 'GateReportExists') {
+      await claims.settle(ticket, 'decided');
+      return fail('DecisionAlreadyRecorded');
+    }
+    throw error;
+  }
   await claims.settle(ticket, 'decided');
   // The public training rows are derivative of the stored decision; failing to write them does not undo it.
   const publicRows = await new PublicTrialRows(config.grader)
