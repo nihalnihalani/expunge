@@ -9,7 +9,7 @@ import {
 } from '@expunge/observability';
 import { FakeRaindrop } from '../../observability/test/fake-raindrop.js';
 import { InMemoryEvidenceStore, OutboxDispatcher, RaindropQueryClient } from '../src/index.js';
-import { Clock, GUARD, InMemoryOutbox, SCOPE } from './helpers.js';
+import { Clock, GUARD, InMemoryOutbox, SCOPE, NO_SUPPRESSION } from './helpers.js';
 
 const fake = new FakeRaindrop();
 beforeAll(() => fake.start());
@@ -41,6 +41,7 @@ function rig(over: { writeKey?: string; maxAttempts?: number; holdTimeoutMs?: nu
       scope: SCOPE,
       projectId: 'proj-1',
       guard: GUARD,
+      ...NO_SUPPRESSION,
     },
     {
       ownerId: 'dispatcher-1',

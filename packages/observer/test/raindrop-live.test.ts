@@ -21,7 +21,7 @@ import {
   observeEvent,
   type EvidenceObservation,
 } from '../src/index.js';
-import { Clock, InMemoryOutbox, SCOPE } from './helpers.js';
+import { Clock, InMemoryOutbox, SCOPE, NO_SUPPRESSION } from './helpers.js';
 
 /**
  * LIVE Raindrop smoke. It talks to the real Raindrop ingestion and Query APIs with the project's own keys, so it is
@@ -158,6 +158,7 @@ if (missing.length > 0 && !requireLive) {
           scope: SCOPE,
           projectId: query.config.projectId,
           guard,
+          ...NO_SUPPRESSION,
         },
         { ownerId: 'live-smoke', now: clock.now, holdTimeoutMs: 20 * 60_000, leaseMs: 30_000 },
       );

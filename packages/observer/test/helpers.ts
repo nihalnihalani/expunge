@@ -231,3 +231,9 @@ export class InMemoryOutbox implements OutboxPort {
     row.lease.until = new Date(0);
   }
 }
+
+/** Constructor deps for tests that do not exercise the suppression gate: an empty list for a fixed organization. */
+export const NO_SUPPRESSION = {
+  providerOrganizationId: 'org-1',
+  suppression: { suppressedUserIds: async (): Promise<ReadonlySet<string>> => new Set() },
+};
