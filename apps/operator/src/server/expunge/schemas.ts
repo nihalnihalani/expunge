@@ -735,6 +735,25 @@ const gateReport: z.ZodType<GateReportView> = z.object({
   unpricedCalls: int,
   verdict: z.enum(['admit', 'reject', 'hold']),
   reasonCodes: z.array(text(64)).max(20),
+  decisionSummary: z
+    .object({
+      triggerGain: z
+        .number()
+        .int()
+        .min(-Number.MAX_SAFE_INTEGER)
+        .max(Number.MAX_SAFE_INTEGER),
+      triggerRequiredGain: int,
+      splits: z.partialRecord(
+        split,
+        z.object({
+          trials: int,
+          parentSuccesses: int,
+          candidateSuccesses: int,
+        }),
+      ),
+      protectedRegressedWorlds: int,
+    })
+    .optional(),
 });
 const approvalDescriptor: z.ZodType<ApprovalDescriptorView> = z.object({
   proposalId: id,
@@ -823,6 +842,31 @@ const campaign: z.ZodType<CampaignView> = z.object({
     .max(100),
   noiseControl: z.object({ present: z.boolean(), rowId: id.nullable() }),
   noDataControl: z.object({ present: z.boolean(), rowId: id.nullable() }),
+  metaVerdict: z
+    .object({
+      verdict: z.enum(['gain', 'tie', 'loss']),
+      incidents: int,
+      wins: int,
+      losses: int,
+      ties: int,
+      p: z.number().min(0).max(1),
+      net: z
+        .number()
+        .int()
+        .min(-Number.MAX_SAFE_INTEGER)
+        .max(Number.MAX_SAFE_INTEGER),
+      noiseNet: z
+        .number()
+        .int()
+        .min(-Number.MAX_SAFE_INTEGER)
+        .max(Number.MAX_SAFE_INTEGER),
+      noDataNet: z
+        .number()
+        .int()
+        .min(-Number.MAX_SAFE_INTEGER)
+        .max(Number.MAX_SAFE_INTEGER),
+    })
+    .optional(),
 });
 const externalErasure: z.ZodType<ExternalErasureView> = z.object({
   requestKey: id,
