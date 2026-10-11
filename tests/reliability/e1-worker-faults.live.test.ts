@@ -8,7 +8,12 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
 import { contentHash } from '@expunge/contracts';
-import { ArtifactRepository, ProjectionRepository, type MongoService } from '@expunge/mongo';
+import {
+  ArtifactRepository,
+  DeploymentRepository,
+  ProjectionRepository,
+  type MongoService,
+} from '@expunge/mongo';
 import { makeBundle } from '../../packages/runtime/test/fakes.js';
 import {
   HASH,
@@ -60,6 +65,9 @@ describeLive('worker crash, stall and takeover (child processes, real replica se
       sourceIds: [],
       updatedAt: new Date(),
     });
+    // Since PKT-54 the worker refuses a cleanup job at start unless the scope's deployment pointer names its pinned
+    // harness. Deploy the bundle through the real repository, as the setup administrator would.
+    await new DeploymentRepository(setup).initialize(actor, 'worker', harnessHash, 1);
     jobId = await createJob(setup, { harnessHash });
     await recordDecisionFor(setup, buildIntent(jobId, harnessHash));
   });
