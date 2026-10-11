@@ -18,7 +18,7 @@ import {
   scope,
   type LiveEnvironment,
 } from './mongo-support.js';
-import { GUARD, LITERAL, identity, seedWorkerEvents } from './helpers.js';
+import { GUARD, LITERAL, identity, seedWorkerEvents, NO_SUPPRESSION } from './helpers.js';
 
 describeLive('telemetry outbox and observer on a real replica set (local protocol evidence only)', () => {
   const fake = new FakeRaindrop();
@@ -147,6 +147,7 @@ describeLive('telemetry outbox and observer on a real replica set (local protoco
           scope,
           projectId: 'proj-1',
           guard: GUARD,
+          ...NO_SUPPRESSION,
         },
         { ownerId: owner, leaseMs: 20000, baseDelayMs: 100, maxAttempts: 4 },
       );

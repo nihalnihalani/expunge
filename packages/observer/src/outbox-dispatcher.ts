@@ -65,6 +65,17 @@ export type DispatcherOptions = {
 
 const BLOCKED_HOLD_MS = 15 * 60_000;
 
+/**
+ * Telemetry user ids whose export is suppressed locally because an external erasure for them is open (packages/privacy
+ * `ErasureService.suppressedUserIds` satisfies this). It is keyed by the PROVIDER ORGANIZATION, not by scope: the
+ * provider erasure is organization-wide, so a namespaced id is held wherever it appears. Only the HTTP `event` kind
+ * carries a user id; SDK episode events are produced live in the worker before any erasure can exist, and what was
+ * already exported is the provider erasure's job, not this gate's.
+ */
+export interface ExportSuppression {
+  suppressedUserIds(providerOrganizationId: string): Promise<ReadonlySet<string>>;
+}
+
 /** The slice of ProjectionRepository the dispatcher uses; appends are best effort and never fail a dispatch. */
 export interface ProjectionPort {
   append(key: ScopeKey, event: ProjectionEventInput): Promise<unknown>;
@@ -120,10 +131,15 @@ export class OutboxDispatcher {
       /** REQUIRED: subject literals and private ids no stored observation may carry. */
       guard: LeakGuard;
       projection?: ProjectionPort;
+      /** REQUIRED: an `event` intent for a suppressed user id is held (never sent, never dead-lettered). */
+      suppression: ExportSuppression;
+      /** The provider organization of the write key, from trusted configuration; the suppression list is read for it. */
+      providerOrganizationId: string;
     },
     options: DispatcherOptions,
   ) {
     requireGuard(deps.guard);
+    if (!deps.suppression || !deps.providerOrganizationId) throw new Error('SuppressionRequired');
     this.opts = {
       leaseMs: 30_000,
       maxAttempts: 8,
@@ -172,6 +188,11 @@ export class OutboxDispatcher {
     };
 
     try {
+      if (payload.type === 'event' && !row.attained.ingest_accepted) {
+        // Fail closed: when the suppression list cannot be read the event is not sent either (the row is retried).
+        const suppressed = await this.deps.suppression.suppressedUserIds(this.deps.providerOrganizationId);
+        if (suppressed.has(payload.userId)) return await this.block(row, 'ExportSuppressed');
+      }
       // 1. Send (HTTP kinds only). An sdk_event was produced live by the worker's SDK; there is nothing to send.
       if (payload.type !== 'sdk_event' && !row.attained.ingest_accepted) {
         // sdk_enqueued attained but ingest_accepted not: an earlier attempt may have sent and crashed before it could

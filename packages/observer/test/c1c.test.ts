@@ -27,6 +27,7 @@ import {
   identity,
   makeRig,
   seedWorkerEvents,
+  NO_SUPPRESSION,
 } from './helpers.js';
 
 const fake = new FakeRaindrop();
@@ -75,6 +76,7 @@ function rig() {
       scope: SCOPE,
       projectId: 'proj-1',
       guard: GUARD,
+      ...NO_SUPPRESSION,
       projection,
     },
     {

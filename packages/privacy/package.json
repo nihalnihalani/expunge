@@ -1,0 +1,15 @@
+{
+  "name": "@expunge/privacy",
+  "version": "0.1.0",
+  "description": "Provenance registry, source retraction, subject-literal scan and external erasure lifecycle.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/contracts": "0.1.0",
+    "@expunge/mongo": "0.1.0",
+    "@expunge/observability": "0.1.0",
+    "@expunge/observer": "0.1.0",
+    "mongodb": "7.7.0"
+  }
+}
