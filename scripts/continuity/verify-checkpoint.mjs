@@ -5,12 +5,21 @@
 //
 // Reports MATCH / CHANGED / MISSING per file. Exit 0 only if every checked file is MATCH; 1 if any file is
 // CHANGED or MISSING; 2 for usage errors or an unreadable/invalid manifest.
+//
+// Notes for readers of the result:
+// - `latest` resolves <repo>/.expunge/checkpoints/LATEST. .expunge/ is gitignored, so a pack only reaches another
+//   machine if the directory is copied with the repository; otherwise pass an explicit checkpoint directory.
+// - LATEST lags HEAD: it names the last checkpoint taken, not the last commit. After a commit the files still
+//   compare by content, but the checkpoint's briefing describes the tree before it. When HEAD differs from the
+//   checkpoint's base the result says so (`headMoved`, and a `note:` line); take a new checkpoint after each
+//   verified commit (`npm run checkpoint`).
 import fs from 'node:fs';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import {
   countStatuses,
+  headState,
   printErr,
   printLine,
   readManifest,
@@ -26,11 +35,21 @@ export function verifyCheckpoint(checkpointDir, { repo, packOnly = false } = {})
   const pack = verifyPack(checkpointDir, manifest);
   const worktree = packOnly ? [] : verifyWorktree(repo, manifest);
   const ok = [...pack, ...worktree].every((r) => r.status === 'MATCH');
+  let headMoved = null;
+  if (repo) {
+    try {
+      const current = headState(repo).head;
+      if (current !== manifest.head) headMoved = { checkpointBase: manifest.head, current };
+    } catch {
+      headMoved = null;
+    }
+  }
   return {
     manifest,
     pack,
     worktree,
     ok,
+    headMoved,
     counts: { pack: countStatuses(pack), worktree: countStatuses(worktree) },
   };
 }
@@ -82,6 +101,7 @@ function main(argv) {
           checkpointId: result.manifest.checkpointId,
           ok: result.ok,
           counts: result.counts,
+          headMoved: result.headMoved,
           pack: result.pack,
           worktree: result.worktree,
         }),
@@ -100,6 +120,12 @@ function main(argv) {
       printLine(`pack: MATCH=${p.MATCH} CHANGED=${p.CHANGED} MISSING=${p.MISSING}`);
       if (!parsed.values['pack-only'])
         printLine(`worktree (${repo}): MATCH=${w.MATCH} CHANGED=${w.CHANGED} MISSING=${w.MISSING}`);
+      if (result.headMoved) {
+        const short = (h) => (h.length > 12 ? h.slice(0, 12) : h);
+        printLine(
+          `note: HEAD moved since the checkpoint (base ${short(result.headMoved.checkpointBase)}, now ${short(result.headMoved.current)}); files are compared by content, but the checkpoint's briefing describes the older tree. Take a new checkpoint after the commit: npm run checkpoint`,
+        );
+      }
       printLine(result.ok ? 'RESULT: ALL MATCH' : 'RESULT: MISMATCH');
     }
     return result.ok ? 0 : 1;
