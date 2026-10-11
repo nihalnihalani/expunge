@@ -15,6 +15,7 @@ import {
   EffectRepository,
   JobRepository,
   ScopeRepository,
+  WorldRepository,
   createPrincipalService,
   setupMongo,
   type MongoService,
@@ -166,6 +167,8 @@ async function main() {
     );
     return (await graderJobs.readAuthorized(actor, id)).status === 'succeeded';
   });
+  // L2: since the receipt-coverage guard (effects.ts assertReceiptCoversRegistry), the healthy result is
+  // NOT REPRODUCED (refused: ReceiptCoverageIncomplete), by design.
   await check('L2 complete() accepts receipt with zero inspected collections/fields', async (env) => {
     await new ScopeRepository(env.setup).insert(registryOf());
     const { id, executor, jobs, lease } = await claimedJob(env);
@@ -298,6 +301,9 @@ async function main() {
     },
   );
   await check('L7 same logical batch under two tool-call ids commits twice', async (env) => {
+    // Retargeted after PKT-15 (commitEffect refuses PartialEffect when apply reports fewer effects than targets):
+    // apply now writes its one target and reports it, so the first commit really commits and the second call, under
+    // another tool-call id, exercises the saved-receipt replay. Healthy: the same receipt, the target written once.
     const { id, executor, lease } = await claimedJob(env);
     const customers = env.setup.world.collection<{ _id: string }>('customers');
     await customers.insertOne({
@@ -308,20 +314,31 @@ async function main() {
       applied: 0,
     } as never);
     const C = { collectionId: 'customers', recordId: `C-${id}`, recordIdBsonType: 'string' as const };
-    const first = intent(id, { targets: [C], toolCallId: 'call-1' });
-    const second = intent(id, { targets: [C], toolCallId: 'call-2' });
+    const first = intent(id, { targets: [C], effectKind: 'redact', toolCallId: 'call-1' });
+    const second = intent(id, { targets: [C], effectKind: 'redact', toolCallId: 'call-2' });
     await recordDecisionFor(executor, first);
     const effects = new EffectRepository(executor);
     const apply = async (session: ClientSession) => {
       await executor.world
         .collection<{ _id: string }>('customers')
-        .updateOne({ _id: C.recordId }, { $inc: { applied: 1 } }, { session });
-      return [];
+        .updateOne({ _id: C.recordId }, { $inc: { applied: 1, _rev: 1 } }, { session });
+      return [
+        { address: C, kind: 'redact' as const, preHash: HASH, postHash: HASH, preVersion: 1, postVersion: 2 },
+      ];
     };
-    const one = await effects.commitEffect({ actor, lease, intent: first, apply });
+    let one;
+    try {
+      one = await effects.commitEffect({ actor, lease, intent: first, apply });
+    } catch (error) {
+      // Without a committed first effect there is no idempotency to test: report a broken setup, not a fix.
+      throw new Error(`L7 setup: first commit refused (${(error as Error).message})`);
+    }
     const two = await effects.commitEffect({ actor, lease, intent: second, apply });
     const stored = (await customers.findOne({ _id: C.recordId })) as unknown as { applied: number };
-    return one.receiptId !== two.receiptId && stored.applied === 2;
+    console.log(
+      `    L7 receipts ${one.receiptId === two.receiptId ? 'identical' : 'distinct'}; target written ${stored.applied}x`,
+    );
+    return one.receiptId !== two.receiptId || stored.applied !== 1;
   });
   await check('L8 findByField throws on an int32 _id (BSON identity not handled)', async (env) => {
     const registry = registryOf({
@@ -338,18 +355,24 @@ async function main() {
     });
     await new ScopeRepository(env.setup).insert(registry);
     const worldId = `world-int-${randomUUID()}`;
+    // Retargeted: findByField now takes a WorldKey, minted from the stored world row (create, then bind). The old
+    // (actor, worldId, ...) call shifted the registry into `limit` and stopped at InvalidScanLimit, a vacuous refusal.
+    await new WorldRepository(env.setup).create(scope, worldId, 1);
+    const executor = await env.as('domain_executor');
+    const world = await new WorldRepository(executor).bind(scope, worldId);
     await env.setup.world
       .collection('customers')
       .insertOne({ _id: 424242, ...scope, worldId, _rev: 1, data: { handle: 'h1' } } as never);
-    const found = await new ScopeRepository(await env.as('domain_executor')).findByField(
-      actor,
-      worldId,
-      registry,
-      'customers.handle',
-      'h1',
-    );
+    let found;
+    try {
+      found = await new ScopeRepository(executor).findByField(world, registry, 'customers.handle', 'h1');
+    } catch (error) {
+      // The defect under test is a throw on an int32 key, so a throw here reproduces it.
+      console.log(`    L8 findByField threw ${(error as Error).message}`);
+      return true;
+    }
     console.log(`    L8 found ${JSON.stringify(found)}`);
-    return found.length !== 1;
+    return found.length !== 1 || found[0]?.recordIdBsonType !== 'int';
   });
   await check(
     'L9 writeField on non-wildcard path over an array overwrites unrelated elements',
