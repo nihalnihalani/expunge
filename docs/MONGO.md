@@ -159,3 +159,15 @@ and transaction support without printing credentials. With `MONGODB_DOMAIN_EXECU
 block for the worker principal (privileges that name the private database, whether a direct read of it is refused with
 code 13, and `rbacEnforced`). On a local replica set without authentication that block says `rbacEnforced: false`; it
 describes the server it ran against and is not evidence about an Atlas custom role.
+
+## Campaign permits and read grants (MA-F1, F-8)
+- `ProvenanceRepository.permitted` accepts a hash with NO eligibility row when a `campaign_artifact_permits` row exists for the scope
+  and `assertCampaignScope` passes (evaluation env, no worker deployment pointer). Any eligibility row that is not `permitted` still
+  blocks; ancestry blocking is unchanged.
+- Grants added: grader FIND on `completion_receipts`, `effects`, `preview_plans` (it already reads `world_revisions`); projection reader
+  FIND on `gate_reports`.
+
+| Residual | Detail |
+|---|---|
+| GB-2: held-out per-pair rows reach `projection_reader` | the `gate_reports` row carries per-pair protected and validation rows. Accepted until rsi-evolution's F-10 reduces withheld splits to aggregates in the report; until then the projection layer must serve aggregates for withheld splits. |
+| GB-3: the grader's FIND is cluster-wide | `completion_receipts`, `effects`, `preview_plans` are not campaign-scoped, and `preview_plans.bindings` hold subject identity values from every scope. Acceptable for the privileged evaluator; the gate should scope its reads by campaign scope in code. |

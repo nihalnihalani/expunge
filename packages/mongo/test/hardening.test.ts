@@ -341,6 +341,12 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
     expect(holders('INSERT', 'candidates')).toEqual(['proposer']);
     expect(holders('UPDATE', 'candidates')).toEqual(['promoter']);
   });
+  it('lets the grader read the world revision counter and write none of it', () => {
+    expect(holders('FIND', 'world_revisions')).toContain('grader');
+    expect(holders('UPDATE', 'world_revisions')).not.toContain('grader');
+    expect(holders('INSERT', 'world_revisions')).not.toContain('grader');
+  });
+
   it('keeps the gateway step log insert-only and with the worker alone', () => {
     for (const collection of [
       'job_subjects',
@@ -352,9 +358,11 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
       expect(holders('INSERT', collection), collection).toEqual(['domain_executor']);
       expect(holders('UPDATE', collection), collection).toEqual([]);
       expect(holders('REMOVE', collection), collection).toEqual([]);
-      // The grader additionally reads domain_steps: the fault attestation row. Nothing else of the log.
+      // The grader additionally reads domain_steps (the fault attestation row) and preview_plans (episode evidence). Nothing else.
       expect(holders('FIND', collection).sort(), collection).toEqual(
-        collection === 'domain_steps' ? ['domain_executor', 'grader'] : ['domain_executor'],
+        collection === 'domain_steps' || collection === 'preview_plans'
+          ? ['domain_executor', 'grader']
+          : ['domain_executor'],
       );
     }
     // Subject literals live in job_subjects; the projection reader must never see them.

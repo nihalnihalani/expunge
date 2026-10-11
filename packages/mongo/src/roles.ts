@@ -177,6 +177,10 @@ export function atlasRoleManifests(
         'projection_sequences',
         // Read-only: the campaign port reads the fault-plan attestation row (kind 'fault') the gateway wrote.
         'domain_steps',
+        // Episode evidence for the gate, read-only: what a run committed and the plan it was verified against.
+        'completion_receipts',
+        'effects',
+        'preview_plans',
       ]),
       // gate_claims: INSERT, then UPDATE of `state` only through the gate's compare-and-set (a collection grant cannot
       // narrow it). gate_attempts: the atomic per-parent counter (upsert = INSERT + UPDATE). campaign_artifact_permits:
@@ -251,6 +255,8 @@ export function atlasRoleManifests(
         'rollback_refusals',
         'campaign_artifacts',
         'campaign_artifact_rows',
+        // The operator Evaluation view reads the grader's insert-only gate reports.
+        'gate_reports',
         'stream_offsets',
       ]),
       control('CHANGE_STREAM', ['projection_events']),
