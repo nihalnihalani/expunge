@@ -10,12 +10,14 @@
 //   collections, while the worker and observer are writing.
 // - Output: <out>/expunge-<UTC stamp>.{world,control,private}.archive.gz and <same>.manifest.json (per-archive sha256 and
 //   size, tools image, source fingerprint).
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   databasesFromEnv,
+  diffFingerprints,
   fingerprintAll,
   MONGO_TOOLS_IMAGE,
+  refuseSetupPrincipal,
   runTools,
   sha256File,
   summarize,
@@ -27,8 +29,10 @@ export async function backup({
   network = 'host',
   env = process.env,
   uriVariable = 'EXPUNGE_BACKUP_URI',
+  retentionDays = 30,
 }) {
   const uri = uriFromEnv(uriVariable, env);
+  refuseSetupPrincipal(uri, env);
   const names = databasesFromEnv(env);
   const outDir = resolve(out);
   mkdirSync(outDir, { recursive: true });
@@ -43,12 +47,13 @@ export async function backup({
   const archives = {};
   for (const [kind, name] of Object.entries(names)) {
     const file = `${base}.${kind}.archive.gz`;
-    const script = `set -eu; printf 'uri: %s\\n' "$${uriVariable}" > /tmp/dump.yml; mongodump --config=/tmp/dump.yml --db='${name}' --gzip --archive=/backup/${file}; rm -f /tmp/dump.yml`;
+    const script = `set -eu; umask 077; printf 'uri: %s\\n' "$${uriVariable}" > /tmp/dump.yml; mongodump --config=/tmp/dump.yml --db='${name}' --gzip --archive=/backup/${file}; rm -f /tmp/dump.yml`;
     const result = runTools({ script, envNames: [uriVariable], mounts: [[outDir, '/backup']], network, env });
     if (result.status !== 0)
       throw new Error(
         `mongodump ${kind} failed (exit ${result.status}): ${result.stderr.split('\n').slice(-5).join(' | ')}`,
       );
+    chmodSync(`${outDir}/${file}`, 0o600);
     archives[kind] = {
       file,
       sha256: await sha256File(`${outDir}/${file}`),
@@ -56,6 +61,13 @@ export async function backup({
     };
   }
 
+  // B-3: the source must not have changed while it was dumped; otherwise the set is torn and is discarded.
+  const sourceAfter = await fingerprintAll(uri, names);
+  const drift = diffFingerprints(source, sourceAfter);
+  if (drift.length > 0) {
+    for (const a of Object.values(archives)) rmSync(`${outDir}/${a.file}`, { force: true });
+    throw new Error(`SourceChangedDuringBackup: ${drift.length} differences; quiesce writers and retry`);
+  }
   const manifest = {
     format: 'expunge-backup-v2',
     createdAt: new Date().toISOString(),
@@ -64,6 +76,12 @@ export async function backup({
     databases: names,
     sourceSummary: summarize(source),
     sourceFingerprint: source,
+    expiresAt: new Date(Date.now() + retentionDays * 86_400_000).toISOString(),
+    postRestoreRequired: [
+      're-apply erasure suppressions and purges recorded after createdAt',
+      'reconcile effects and receipts against the owner source',
+      'rebuild or reset projection streams',
+    ],
     consistency: 'per-collection logical dump; cross-collection consistency requires quiesced writers',
   };
   const manifestPath = `${outDir}/${base}.manifest.json`;
@@ -82,7 +100,11 @@ if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pat
     console.error('usage: backup-mongo.mjs --out DIR [--docker-network NAME]');
     process.exit(2);
   }
-  backup({ out, network: value('--docker-network') ?? 'host' }).then(
+  backup({
+    out,
+    network: value('--docker-network') ?? 'host',
+    retentionDays: Number(value('--retention-days') ?? 30),
+  }).then(
     ({ archives, manifestPath, manifest }) => {
       console.log(JSON.stringify({ archives, manifest: manifestPath, ...manifest.sourceSummary }));
     },

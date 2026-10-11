@@ -13,7 +13,15 @@ import { dirname, resolve } from 'node:path';
 import mongodb from 'mongodb';
 
 const { MongoClient } = mongodb;
-import { diffFingerprints, fingerprintAll, runTools, sha256File, summarize, uriFromEnv } from './lib.mjs';
+import {
+  diffFingerprints,
+  fingerprintAll,
+  refuseSetupPrincipal,
+  runTools,
+  sha256File,
+  summarize,
+  uriFromEnv,
+} from './lib.mjs';
 
 export async function restore({
   manifestPath,
@@ -24,11 +32,22 @@ export async function restore({
   env = process.env,
   uriVariable = 'EXPUNGE_RESTORE_URI',
   compare = true,
+  acknowledgeReapply = false,
+  allowExpired = false,
 }) {
   const uri = uriFromEnv(uriVariable, env);
+  refuseSetupPrincipal(uri, env);
+  // B-1: a restore can bring back records erased after the backup. It is allowed only when the operator commits to
+  // re-applying erasures afterwards, and an archive past its retention is refused.
+  if (!acknowledgeReapply)
+    throw new Error(
+      'ReapplyNotAcknowledged: pass --reapply-erasures-after-restore, then do it (BACKUP-RESTORE.md)',
+    );
   const manifestFile = resolve(manifestPath);
   const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
   if (manifest.format !== 'expunge-backup-v2') throw new Error('UnsupportedManifest');
+  if (!allowExpired && Date.parse(manifest.expiresAt) < Date.now())
+    throw new Error('BackupExpired: retention elapsed; erased data may still be in it');
   const archiveDir = dirname(manifestFile);
   for (const [kind, info] of Object.entries(manifest.archives)) {
     const file = resolve(archiveDir, info.file);
@@ -78,7 +97,13 @@ export async function restore({
 
   const restored = await fingerprintAll(uri, targetNames);
   const differences = compare ? diffFingerprints(manifest.sourceFingerprint, restored) : [];
-  return { targetNames, restoredSummary: summarize(restored), differences, restored };
+  return {
+    targetNames,
+    restoredSummary: summarize(restored),
+    differences,
+    restored,
+    postRestoreRequired: manifest.postRestoreRequired,
+  };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
@@ -106,6 +131,8 @@ if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pat
     confirm,
     map,
     drop: args.includes('--drop'),
+    acknowledgeReapply: args.includes('--reapply-erasures-after-restore'),
+    allowExpired: args.includes('--allow-expired'),
     network: value('--docker-network') ?? 'host',
   }).then(
     ({ targetNames, restoredSummary, differences }) => {

@@ -11,7 +11,7 @@
 // It refuses any URI whose host is not 127.0.0.1/localhost. Output is one JSON line per step; exit 0 only if all pass.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,8 +49,9 @@ const check = (name, ok, detail = {}) => {
 const drillEnv = {
   ...process.env,
   MONGODB_SETUP_URI: uri,
-  EXPUNGE_BACKUP_URI: uri,
-  EXPUNGE_RESTORE_URI: uri,
+  // Textually different URIs for the same local server: the tools refuse a value equal to the setup URI.
+  EXPUNGE_BACKUP_URI: `${uri}&appName=expunge-drill-backup`,
+  EXPUNGE_RESTORE_URI: `${uri}&appName=expunge-drill-restore`,
   EXPUNGE_WORLD_DB: names.world,
   EXPUNGE_CONTROL_DB: names.control,
   EXPUNGE_PRIVATE_DB: names.private,
@@ -106,6 +107,7 @@ try {
     manifestPath: made.manifestPath,
     confirm: Object.values(names),
     env: drillEnv,
+    acknowledgeReapply: true,
   });
   check('restore', restored.differences.length === 0, {
     ...restored.restoredSummary,
@@ -154,7 +156,12 @@ try {
   badManifest.archives.world.sha256 = '0'.repeat(64);
   const badPath = join(outDir, 'tampered.manifest.json');
   writeFileSync(badPath, JSON.stringify(badManifest));
-  const refused = await restore({ manifestPath: badPath, confirm: Object.values(names), env: drillEnv }).then(
+  const refused = await restore({
+    manifestPath: badPath,
+    confirm: Object.values(names),
+    env: drillEnv,
+    acknowledgeReapply: true,
+  }).then(
     () => 'restored',
     (e) => e.message,
   );
@@ -165,6 +172,7 @@ try {
     manifestPath: made.manifestPath,
     confirm: Object.values(names),
     env: drillEnv,
+    acknowledgeReapply: true,
   }).then(
     () => 'restored',
     (e) => e.message.split(':')[0],
@@ -174,12 +182,57 @@ try {
     manifestPath: made.manifestPath,
     confirm: [names.world],
     env: drillEnv,
+    acknowledgeReapply: true,
   }).then(
     () => 'restored',
     (e) => e.message.split(':')[0],
   );
   check('negative-control-wrong-confirmation-refused', wrongConfirm === 'ConfirmationMismatch', {
     outcome: wrongConfirm,
+  });
+  const modes = Object.values(made.archives).map((a) => statSync(join(outDir, a.file)).mode & 0o777);
+  check(
+    'archives-are-0600',
+    modes.every((m) => m === 0o600),
+    { modes: modes.map((m) => m.toString(8)) },
+  );
+  const noAck = await restore({
+    manifestPath: made.manifestPath,
+    confirm: Object.values(names),
+    env: drillEnv,
+  }).then(
+    () => 'restored',
+    (e) => e.message.split(':')[0],
+  );
+  check('negative-control-restore-requires-reapply-acknowledgement', noAck === 'ReapplyNotAcknowledged', {
+    outcome: noAck,
+  });
+  const expired = JSON.parse(JSON.stringify(made.manifest));
+  expired.expiresAt = new Date(Date.now() - 1000).toISOString();
+  const expiredPath = join(
+    outDir,
+    `${made.manifest.archives.world.file.replace('.world.archive.gz', '')}.expired.manifest.json`,
+  );
+  writeFileSync(expiredPath, JSON.stringify(expired));
+  const exp = await restore({
+    manifestPath: expiredPath,
+    confirm: Object.values(names),
+    env: drillEnv,
+    acknowledgeReapply: true,
+  }).then(
+    () => 'restored',
+    (e) => e.message.split(':')[0],
+  );
+  check('negative-control-expired-backup-refused', exp === 'BackupExpired', { outcome: exp });
+  const asSetup = await backup({
+    out: outDir,
+    env: { ...drillEnv, EXPUNGE_BACKUP_URI: drillEnv.MONGODB_SETUP_URI },
+  }).then(
+    () => 'backed-up',
+    (e) => e.message.split(':')[0],
+  );
+  check('negative-control-setup-principal-refused', asSetup === 'SetupPrincipalRefused', {
+    outcome: asSetup,
   });
 } catch (error) {
   check('drill', false, { error: error instanceof Error ? `${error.name}: ${error.message}` : 'unknown' });
