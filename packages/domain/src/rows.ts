@@ -66,7 +66,7 @@ export type PlanTarget = {
 };
 export type RetainedRecord = {
   address: DomainAddress;
-  reason: 'policy_mismatch' | 'effect_not_allowed' | 'missing_metadata';
+  reason: 'policy_mismatch' | 'effect_not_allowed' | 'missing_metadata' | 'not_subject_owned';
 };
 export type PlanBatch = { ordinal: number; effect: EffectKind; targets: PlanTarget[] };
 
@@ -100,4 +100,12 @@ export type WorkflowPayload = {
   callNumber: number;
   outcome: string;
   visits: Record<string, number>;
+};
+
+/** A fault the trusted fault layer injected into a campaign world's apply path, recorded so a takeover never replays it. */
+export type FaultPayload = {
+  kind: 'transient' | 'lost_ack' | 'interrupt' | 'attest';
+  batchOrdinal: number;
+  /** Only on `attest`: the stored fault plan's hash this job runs under, or null when no plan row exists. */
+  planHash?: string | null;
 };

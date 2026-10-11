@@ -429,3 +429,40 @@ export function completionReceipt(
     ...overrides,
   };
 }
+
+/** A valid `campaign_freezes` row (the validator is strict); the hash fields are placeholders. */
+export function freezeRow(campaignId: string) {
+  return {
+    _id: campaignId,
+    campaignId,
+    evaluatorHash: HASH,
+    fixtureGeneratorHash: HASH,
+    runtimeHash: HASH,
+    compilerHash: HASH,
+    workerProfileHash: HASH,
+    budgetHash: HASH,
+    maxAttemptsPerParent: 3,
+    splitManifestCommitment: HASH,
+    costCeilingMicrousd: null,
+    freezeHash: HASH,
+  };
+}
+/** A valid `gate_claims` row; its `_id` is the candidate key the gate derives. */
+export function claimRow(claim: {
+  campaignId: string;
+  parentHash: string;
+  childProjectionHash: string;
+  state?: 'open' | 'held' | 'decided' | 'failed';
+}) {
+  return {
+    _id: contentHash(
+      { parentHash: claim.parentHash, childProjectionHash: claim.childProjectionHash },
+      'gate-candidate',
+    ),
+    parentHash: claim.parentHash,
+    childProjectionHash: claim.childProjectionHash,
+    campaignId: claim.campaignId,
+    state: claim.state ?? 'open',
+    ordinal: 1,
+  };
+}

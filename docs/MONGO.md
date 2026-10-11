@@ -93,6 +93,22 @@ Administration API; driver `createRole` is used only by the local RBAC test.
 - **Projection events.** Sequences are per job and contiguous from 1: the counter increment and the event insert share one
   transaction, so an aborted transaction gives its number back. Payloads are validated against strict per-kind schemas.
 
+## Gate, campaign, fault and rollback collections (PKT-61)
+- `campaign_freezes` (fixture builder inserts, grader and fixture builder read), `gate_claims`, `gate_attempts`, `gate_held_runs`
+  (grader only), `world_faults` (fixture builder inserts, `domain_executor` and grader read), `rollback_refusals` (promoter
+  inserts, projection reader reads) and `campaign_artifact_permits` (grader inserts, `domain_executor` and grader read) have
+  strict validators and the exact holders pinned in `hardening.test.ts` plus named raw-driver denials in the RBAC lane.
+- A collection grant cannot narrow WHICH fields or transitions a writer changes: the grader's UPDATE on `gate_claims` is
+  limited to `open -> held | failed | decided` and `held -> open` by the gate's compare-and-set, and its UPDATE on
+  `gate_attempts` to the atomic counter upsert. Those two are application-enforced.
+- A campaign permit is its own collection, not an `artifact_eligibility` row: the grader has no write on eligibility, and
+  `ArtifactRepository.readPermitted` consults a permit only in a campaign scope (evaluation env, no worker deployment
+  pointer). `createCampaignJob` and `permitForCampaign` refuse any other scope.
+- Rollback (`DeploymentRepository.rollback`) is one transaction on the scope revision the caller read: the pointer's hash,
+  revision and scope revision are compare-and-set, the reverse class is derived from the two stored bundles, and a grant
+  (`ApprovalRepository.issueRollback`) is consumed once in the same transaction when approval is required. Refusals are
+  written to `rollback_refusals`.
+
 ## Residuals that collection-level RBAC cannot close (application-enforced, with the test that covers each)
 Atlas privileges are per collection and per verb, never per field or value. Three grants are therefore broader than the rule
 they serve, and the rule lives in code:

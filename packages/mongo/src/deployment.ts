@@ -9,11 +9,13 @@ import {
   type DeploymentKey,
   type GateReport,
   type JsonValue,
+  type MutationClass,
   type PromotionReceipt,
 } from '@expunge/contracts';
+import { classifyMutation } from '@expunge/harness-compiler';
 import { ArtifactRepository } from './artifacts.js';
 import { AuthorityRepository } from './authority.js';
-import { deriveGrantBinding, sameDescriptor, type GrantBinding } from './grants.js';
+import { deriveFlipSetDigest, deriveGrantBinding, sameDescriptor, type GrantBinding } from './grants.js';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
 import { AuthorityPolicyRepository, approvalRequired } from './policy.js';
 import { ProvenanceRepository } from './provenance.js';
@@ -52,6 +54,65 @@ export type GrantConsumption = DeploymentKey & {
   consumedAt: Date;
 };
 
+/** The grant a rollback that expands authority needs, as the caller names it. Everything but the id is cross-checked. */
+export type RollbackGrantRef = {
+  grantId: string;
+  /** Optional claims; each must equal what the repository derives from the two stored bundles, or the rollback fails. */
+  reverseClass?: MutationClass;
+  approvedDescriptor?: JsonValue;
+};
+export type RollbackOptions = {
+  /** The scope revision the caller read; the pointer must still be bound to it (compare-and-set in the transaction). */
+  expectedScopeRevision: number;
+  grant?: RollbackGrantRef;
+};
+/** Why a rollback was refused, as recorded in `rollback_refusals`. */
+export const ROLLBACK_REFUSAL_CODES = [
+  'RollbackNeedsGrant',
+  'StaleParent',
+  'StaleScopeRevision',
+  'RollbackTargetIsActive',
+  'ApprovalInvalidOrConsumed',
+] as const;
+
+/**
+ * The class of the REVERSE transition (active -> target) and the binding a grant for it must carry, derived from the
+ * two stored bundles. Neither the caller nor a model supplies any of it. There is no gate report for a rollback, so the
+ * "report" half of the binding is a digest of the exact transition.
+ */
+export async function deriveRollbackBinding(
+  artifacts: ArtifactRepository,
+  activeHash: string,
+  toHash: string,
+  session?: ClientSession,
+): Promise<{ reverseClass: MutationClass; binding: GrantBinding }> {
+  const active = await artifacts.read(activeHash, session);
+  const target = await artifacts.read(toHash, session);
+  const reverse = classifyMutation(active.payload, target.payload);
+  if (!reverse.mutationClass) fail('RollbackClassMissing');
+  const flips = reverse.components
+    .filter((component) => component.kind === 'authority_expansion')
+    .map((component) => component.unit);
+  const digest = contentHash({ kind: 'rollback', activeHash, toHash }, 'rollback-binding');
+  return {
+    reverseClass: reverse.mutationClass,
+    binding: {
+      proposalId: `rollback:${digest.slice(0, 32)}`,
+      parentHash: activeHash,
+      childHash: toHash,
+      gateReportId: 'rollback',
+      gateReportDigest: digest,
+      flipSetDigest: deriveFlipSetDigest(flips),
+      approvedDescriptor: {
+        computedClass: reverse.mutationClass,
+        parentHash: activeHash,
+        childHash: toHash,
+        flips: [...flips].sort(),
+      },
+    },
+  };
+}
+
 export class ApprovalRepository {
   constructor(readonly service: MongoService) {}
   async issue(actor: ActorContext, grant: ApprovalGrant): Promise<void> {
@@ -89,6 +150,56 @@ export class ApprovalRepository {
     await this.service.control
       .collection<IdDocument>('approvals')
       .insertOne({ _id: grant.grantId, ...grant });
+  }
+  /**
+   * Issues the grant a rollback needs. Like `issue`, nothing in it comes from the request: the transition and the
+   * descriptor are derived from the stored pointer and the two stored bundles, and the grant is bound to the pointer's
+   * current revisions, so it is dead once the pointer moves.
+   */
+  async issueRollback(
+    actor: ActorContext,
+    input: {
+      target: DeploymentKey['target'];
+      toHash: string;
+      expiresAt: Date;
+      grantId?: string;
+      nonce?: string;
+    },
+  ): Promise<ApprovalGrant> {
+    requirePrincipal(this.service, ['approval_issuer', 'setup']);
+    if (!(input.expiresAt instanceof Date) || input.expiresAt.getTime() > Date.now() + MAX_GRANT_LIFETIME_MS)
+      fail('InvalidApprovalExpiry');
+    const key: DeploymentKey = { ...scopeFilter(actor), target: input.target };
+    const pointer = await new DeploymentRepository(this.service).read(key);
+    if (!pointer) fail('DeploymentMissing');
+    if (input.toHash === pointer.activeHash) fail('RollbackTargetIsActive');
+    const { binding } = await deriveRollbackBinding(
+      new ArtifactRepository(this.service),
+      pointer.activeHash,
+      input.toHash,
+    );
+    const grant: ApprovalGrant = {
+      ...key,
+      grantId: input.grantId ?? randomUUID(),
+      proposalId: binding.proposalId,
+      parentHash: binding.parentHash,
+      childHash: binding.childHash,
+      parentRevision: pointer.revision,
+      approvedDescriptor: binding.approvedDescriptor,
+      authorizationRevision: actor.authorizationRevision,
+      scopeRevision: pointer.scopeRevision,
+      flipSetDigest: binding.flipSetDigest,
+      gateReportId: binding.gateReportId,
+      gateReportDigest: binding.gateReportDigest,
+      approverId: actor.actorId,
+      expiresAt: input.expiresAt,
+      nonce: input.nonce ?? randomUUID(),
+      createdAt: new Date(),
+    };
+    await this.service.control
+      .collection<IdDocument>('approvals')
+      .insertOne({ _id: grant.grantId, ...grant });
+    return grant;
   }
   /** A grant is consumed when, and only when, the promoter's insert-only consumption row exists. */
   async consumption(grantId: string): Promise<GrantConsumption | null> {
@@ -206,7 +317,15 @@ export class DeploymentRepository {
         const requiresApproval = approvalRequired(report.computedClass, policy);
         if (requiresApproval)
           await this.consumeGrant(
-            input,
+            {
+              grantId: input.grantId,
+              proposalId: input.candidateId,
+              flipSetDigest: input.flipSetDigest,
+              approvedDescriptor: input.approvedDescriptor,
+              parentRevision: input.parentRevision,
+              scopeRevision: input.scopeRevision,
+              authorizationRevision: input.actor.authorizationRevision,
+            },
             key,
             promotionId,
             deriveGrantBinding(report, input.gateReportDigest),
@@ -263,23 +382,32 @@ export class DeploymentRepository {
    * `approvals`, so it cannot edit a grant, only record that one was used.
    */
   private async consumeGrant(
-    input: PromotionInput,
+    claim: {
+      grantId: string | undefined;
+      /** The request's own claims; each must agree with what is derived from stored rows. */
+      proposalId: string;
+      flipSetDigest: string;
+      approvedDescriptor: JsonValue;
+      parentRevision: number;
+      scopeRevision: number;
+      authorizationRevision: number;
+    },
     key: DeploymentKey,
     promotionId: string,
     expected: GrantBinding,
     session: ClientSession,
   ): Promise<void> {
-    if (!input.grantId) fail('ApprovalRequired');
-    // The request's own claims must agree with what the stored gate report says; they cannot choose the binding.
+    if (!claim.grantId) fail('ApprovalRequired');
+    // The request's own claims must agree with what the stored rows say; they cannot choose the binding.
     if (
-      input.candidateId !== expected.proposalId ||
-      input.flipSetDigest !== expected.flipSetDigest ||
-      !sameDescriptor(input.approvedDescriptor, expected.approvedDescriptor)
+      claim.proposalId !== expected.proposalId ||
+      claim.flipSetDigest !== expected.flipSetDigest ||
+      !sameDescriptor(claim.approvedDescriptor, expected.approvedDescriptor)
     )
       fail('ApprovalInvalidOrConsumed');
     const grant = await this.service.control
       .collection<ApprovalGrant & { _id: string }>('approvals')
-      .findOne({ _id: input.grantId, $expr: { $gt: ['$expiresAt', '$$NOW'] } }, { session });
+      .findOne({ _id: claim.grantId, $expr: { $gt: ['$expiresAt', '$$NOW'] } }, { session });
     const bound =
       grant &&
       grant.tenantId === key.tenantId &&
@@ -289,9 +417,9 @@ export class DeploymentRepository {
       grant.proposalId === expected.proposalId &&
       grant.parentHash === expected.parentHash &&
       grant.childHash === expected.childHash &&
-      grant.parentRevision === input.parentRevision &&
-      grant.scopeRevision === input.scopeRevision &&
-      grant.authorizationRevision === input.actor.authorizationRevision &&
+      grant.parentRevision === claim.parentRevision &&
+      grant.scopeRevision === claim.scopeRevision &&
+      grant.authorizationRevision === claim.authorizationRevision &&
       grant.flipSetDigest === expected.flipSetDigest &&
       grant.gateReportId === expected.gateReportId &&
       grant.gateReportDigest === expected.gateReportDigest &&
@@ -299,15 +427,15 @@ export class DeploymentRepository {
       sameDescriptor(grant.approvedDescriptor, expected.approvedDescriptor);
     if (!bound) fail('ApprovalInvalidOrConsumed');
     const consumptions = this.service.control.collection<GrantConsumption>('grant_consumptions');
-    if (await consumptions.findOne({ _id: input.grantId }, { session })) fail('ApprovalInvalidOrConsumed');
+    if (await consumptions.findOne({ _id: claim.grantId }, { session })) fail('ApprovalInvalidOrConsumed');
     try {
       await consumptions.insertOne(
         {
-          _id: input.grantId,
+          _id: claim.grantId,
           ...key,
-          grantId: input.grantId,
+          grantId: claim.grantId,
           promotionId,
-          candidateId: input.candidateId,
+          candidateId: claim.proposalId,
           consumedAt: new Date(),
         },
         { session },
@@ -344,6 +472,13 @@ export class DeploymentRepository {
    * Rollback is a new audited CAS, never a rewrite of historical artifacts. The target must be a hash that was
    * active in this same DeploymentKey before (the target or source of an earlier receipt), must not be the
    * hash already active, and must not have a revoked or deleted source, all checked inside the transaction.
+   *
+   * One transaction: the pointer moves only if its hash, its revision AND the scope revision the caller read are all
+   * still current (a promotion or a rebinding that landed first makes this lose, rolled back). The class of the
+   * reverse transition (active -> target) is derived here from the two stored bundles and the stored policy; when it
+   * needs approval, `opts.grant` must name a grant bound to exactly this transition and the pointer's current
+   * revisions, and it is consumed once by an insert-only row. A post-CAS abort leaves the grant unconsumed because
+   * the consumption is inside the same transaction. A refused rollback is recorded in `rollback_refusals`.
    */
   async rollback(
     actor: ActorContext,
@@ -353,11 +488,62 @@ export class DeploymentRepository {
     toHash: string,
     reason: string,
     validateAuthority: (session: ClientSession) => Promise<void>,
+    opts?: RollbackOptions,
   ): Promise<PromotionReceipt> {
     requirePrincipal(this.service, ['promoter', 'setup']);
     key = { ...scopeFilter(key), target: key.target };
     if (actor.tenantId !== key.tenantId || actor.env !== key.env || actor.scopeId !== key.scopeId)
       fail('UnauthorizedScope');
+    try {
+      return await this.rollbackOnce(
+        actor,
+        key,
+        expectedHash,
+        expectedRevision,
+        toHash,
+        reason,
+        validateAuthority,
+        opts,
+      );
+    } catch (error) {
+      await this.recordRefusal(actor, key, toHash, error);
+      throw error;
+    }
+  }
+
+  private async recordRefusal(actor: ActorContext, key: DeploymentKey, toHash: string, error: unknown) {
+    const code = error instanceof Error ? error.message : '';
+    if (!(ROLLBACK_REFUSAL_CODES as readonly string[]).includes(code)) return;
+    try {
+      await this.service.control.collection<IdDocument>('rollback_refusals').insertOne({
+        _id: randomUUID(),
+        tenantId: key.tenantId,
+        env: key.env,
+        scopeId: key.scopeId,
+        target: key.target,
+        toHash,
+        code,
+        at: new Date(),
+        actor: { actorId: actor.actorId, authorizationRevision: actor.authorizationRevision },
+      });
+    } catch {
+      // The audit row is best effort: it never replaces the refusal the caller must see.
+    }
+  }
+
+  private async rollbackOnce(
+    actor: ActorContext,
+    key: DeploymentKey,
+    expectedHash: string,
+    expectedRevision: number,
+    toHash: string,
+    reason: string,
+    validateAuthority: (session: ClientSession) => Promise<void>,
+    opts: RollbackOptions | undefined,
+  ): Promise<PromotionReceipt> {
+    // Fail closed: a rollback that does not say which scope state it acted on is refused.
+    if (!opts || !Number.isSafeInteger(opts.expectedScopeRevision) || opts.expectedScopeRevision < 1)
+      fail('StaleScopeRevision');
     if (toHash === expectedHash) fail('RollbackTargetIsActive');
     const artifact = await this.artifacts.read(toHash);
     if (artifact.payload.target !== key.target) fail('RollbackTargetMismatch');
@@ -372,12 +558,41 @@ export class DeploymentRepository {
       const authority = await this.authority.fence(key, actor.authorizationRevision, session);
       if (artifact.payload.authorityFloorHash !== authority.floorHash) fail('AuthorityFloorMismatch');
       await validateAuthority(session);
+      const pointerNow = await this.read(key, session);
+      if (!pointerNow || pointerNow.activeHash !== expectedHash || pointerNow.revision !== expectedRevision)
+        fail('StaleParent');
+      if (pointerNow.scopeRevision !== opts.expectedScopeRevision) fail('StaleScopeRevision');
+      // The class of the reverse transition, from the stored bundles; nothing the caller says is used for it.
+      const derived = await deriveRollbackBinding(this.artifacts, expectedHash, toHash, session);
+      const policy = await this.policies.read(key, session);
+      const requiresApproval = approvalRequired(derived.reverseClass, policy);
+      if (requiresApproval) {
+        if (!opts.grant) fail('RollbackNeedsGrant');
+        if (opts.grant.reverseClass !== undefined && opts.grant.reverseClass !== derived.reverseClass)
+          fail('ApprovalInvalidOrConsumed');
+        await this.consumeGrant(
+          {
+            grantId: opts.grant.grantId,
+            proposalId: derived.binding.proposalId,
+            flipSetDigest: derived.binding.flipSetDigest,
+            approvedDescriptor: opts.grant.approvedDescriptor ?? derived.binding.approvedDescriptor,
+            parentRevision: expectedRevision,
+            scopeRevision: opts.expectedScopeRevision,
+            authorizationRevision: actor.authorizationRevision,
+          },
+          key,
+          promotionId,
+          derived.binding,
+          session,
+        );
+      }
       const next = await this.service.control.collection<Deployment>('deployments').findOneAndUpdate(
         {
           _id: deploymentIdentity(key),
           ...key,
           activeHash: expectedHash,
           revision: expectedRevision,
+          scopeRevision: opts.expectedScopeRevision,
         },
         {
           $set: { activeHash: toHash, authorizationRevision: actor.authorizationRevision },
@@ -395,7 +610,8 @@ export class DeploymentRepository {
         fromRevision: expectedRevision,
         toRevision: next.revision,
         gateReportId: 'rollback',
-        gateReportDigest: contentHash({ expectedHash, toHash, reason }, 'rollback'),
+        gateReportDigest: derived.binding.gateReportDigest,
+        ...(requiresApproval ? { consumedGrantId: opts.grant!.grantId } : {}),
         runtimeHash: artifact.payload.runtimeAdapterHash,
         evaluatorHash: 'rollback',
         reason,

@@ -235,13 +235,34 @@ describe('derived effect identity', () => {
 });
 
 describe('role manifests: structural negatives (offline mirror of rbac.integration.test.ts)', () => {
-  it('gives the campaign gate collections a fixed reader and no writer yet (PKT-44)', () => {
+  it('gives the gate, fault, refusal and campaign-permit collections exactly these holders (PKT-61)', () => {
     // Not only manifest equality: the exact holders, so a widened grant fails here by name.
-    for (const collection of ['campaign_freezes', 'gate_claims']) {
-      expect(holders('FIND', collection), collection).toEqual(['grader']);
-      for (const verb of ['INSERT', 'UPDATE', 'REMOVE'])
-        expect(holders(verb, collection), `${verb} ${collection}`).toEqual([]);
-    }
+    const fixed: Array<[string, Partial<Record<'FIND' | 'INSERT' | 'UPDATE' | 'REMOVE', Principal[]>>]> = [
+      ['campaign_freezes', { FIND: ['fixture_builder', 'grader'], INSERT: ['fixture_builder'] }],
+      ['gate_claims', { FIND: ['grader'], INSERT: ['grader'], UPDATE: ['grader'] }],
+      ['gate_attempts', { FIND: ['grader'], INSERT: ['grader'], UPDATE: ['grader'] }],
+      ['gate_held_runs', { FIND: ['grader'], INSERT: ['grader'] }],
+      ['world_faults', { FIND: ['domain_executor', 'grader'], INSERT: ['fixture_builder'] }],
+      ['rollback_refusals', { FIND: ['projection_reader'], INSERT: ['promoter'] }],
+      ['campaign_artifact_permits', { FIND: ['domain_executor', 'grader'], INSERT: ['grader'] }],
+    ];
+    for (const [collection, expected] of fixed)
+      for (const verb of ['FIND', 'INSERT', 'UPDATE', 'REMOVE'] as const)
+        expect(holders(verb, collection).sort(), `${verb} ${collection}`).toEqual(
+          (expected[verb] ?? []).sort(),
+        );
+    // The domain service (domain_executor) reads what it serves; it writes only its own projection appends.
+    for (const collection of ['promotions', 'projection_events', 'projection_sequences'])
+      expect(holders('FIND', collection), `FIND ${collection}`).toContain('domain_executor');
+    expect(holders('INSERT', 'promotions')).toEqual(['promoter']);
+    expect(holders('UPDATE', 'promotions')).toEqual([]);
+    // domain_steps is the gateway's own log: the grader reads the fault attestation, never writes it.
+    expect(holders('FIND', 'domain_steps').sort()).toEqual(['domain_executor', 'grader']);
+    expect(holders('INSERT', 'domain_steps')).toEqual(['domain_executor']);
+    expect(holders('UPDATE', 'domain_steps')).toEqual([]);
+    // The grader may not write the eligibility rows production context loading reads.
+    for (const verb of ['INSERT', 'UPDATE', 'REMOVE'])
+      expect(holders(verb, 'artifact_eligibility'), `${verb} artifact_eligibility`).not.toContain('grader');
   });
   it('keeps authority rows with their owners', () => {
     expect(holders('INSERT', 'authority_revisions')).toEqual([]);
@@ -287,7 +308,10 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
       expect(holders('INSERT', collection), collection).toEqual(['domain_executor']);
       expect(holders('UPDATE', collection), collection).toEqual([]);
       expect(holders('REMOVE', collection), collection).toEqual([]);
-      expect(holders('FIND', collection), collection).toEqual(['domain_executor']);
+      // The grader additionally reads domain_steps: the fault attestation row. Nothing else of the log.
+      expect(holders('FIND', collection).sort(), collection).toEqual(
+        collection === 'domain_steps' ? ['domain_executor', 'grader'] : ['domain_executor'],
+      );
     }
     // Subject literals live in job_subjects; the projection reader must never see them.
     expect(can('projection_reader', 'FIND', 'job_subjects')).toBe(false);

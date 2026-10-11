@@ -377,4 +377,60 @@ describeRbac('real authenticated local replica-set RBAC (not Atlas provisioning)
       ),
     ).resolves.toMatchObject({ modifiedCount: 1 });
   });
+
+  it('gate, fault, refusal and permit collections: named raw-driver denials (DA-8 C1)', async () => {
+    type Kind = 'find' | 'insert' | 'update' | 'remove';
+    const denied = async (principal: Principal, collection: string, kinds: Kind[]) => {
+      for (const kind of kinds)
+        expect(
+          await probe(principal, 'control', collection, kind),
+          `${principal} ${kind} ${collection}`,
+        ).toBe('denied');
+    };
+    const allowed = async (principal: Principal, collection: string, kinds: Kind[]) => {
+      for (const kind of kinds)
+        expect(
+          await probe(principal, 'control', collection, kind),
+          `${principal} ${kind} ${collection}`,
+        ).toBe('allowed');
+    };
+    // Frozen values: written once by the fixture builder, read by the grader, changed by nobody.
+    await allowed('fixture_builder', 'campaign_freezes', ['find', 'insert']);
+    await allowed('grader', 'campaign_freezes', ['find']);
+    await denied('grader', 'campaign_freezes', ['insert', 'update', 'remove']);
+    await denied('fixture_builder', 'campaign_freezes', ['update', 'remove']);
+    await denied('proposer', 'campaign_freezes', ['find', 'insert', 'update', 'remove']);
+    await denied('domain_executor', 'campaign_freezes', ['find', 'insert', 'update', 'remove']);
+    // Claims, attempt counters and held runs belong to the grader alone; nothing is ever removed.
+    for (const collection of ['gate_claims', 'gate_attempts', 'gate_held_runs']) {
+      await allowed('grader', collection, ['find', 'insert']);
+      await denied('grader', collection, ['remove']);
+      await denied('fixture_builder', collection, ['find', 'insert', 'update', 'remove']);
+      await denied('proposer', collection, ['find', 'insert', 'update', 'remove']);
+      await denied('domain_executor', collection, ['find', 'insert', 'update', 'remove']);
+    }
+    await denied('grader', 'gate_held_runs', ['update']);
+    // The fault plan: the worker reads it for a campaign world and can never write it.
+    await allowed('fixture_builder', 'world_faults', ['insert']);
+    await allowed('domain_executor', 'world_faults', ['find']);
+    await denied('domain_executor', 'world_faults', ['insert', 'update', 'remove']);
+    await denied('grader', 'world_faults', ['insert', 'update', 'remove']);
+    await denied('fixture_builder', 'world_faults', ['update', 'remove']);
+    await denied('proposer', 'world_faults', ['find', 'insert']);
+    // The gateway's step log: the grader reads the fault attestation and can write nothing there.
+    await allowed('grader', 'domain_steps', ['find']);
+    await denied('grader', 'domain_steps', ['insert', 'update', 'remove']);
+    await denied('proposer', 'domain_steps', ['find', 'insert']);
+    // Refused rollbacks: inserted by the promoter, audit-only.
+    await allowed('promoter', 'rollback_refusals', ['insert']);
+    await denied('promoter', 'rollback_refusals', ['update', 'remove']);
+    await denied('domain_executor', 'rollback_refusals', ['insert', 'update', 'remove']);
+    await denied('observer', 'rollback_refusals', ['insert']);
+    // A campaign permit is not an eligibility row: the grader cannot make any artifact eligible for a production run.
+    await allowed('grader', 'campaign_artifact_permits', ['find', 'insert']);
+    await denied('grader', 'campaign_artifact_permits', ['update', 'remove']);
+    await denied('domain_executor', 'campaign_artifact_permits', ['insert', 'update', 'remove']);
+    await denied('grader', 'artifact_eligibility', ['insert', 'update', 'remove']);
+    await denied('fixture_builder', 'artifact_eligibility', ['insert', 'update', 'remove']);
+  });
 });
