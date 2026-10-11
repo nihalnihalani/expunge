@@ -1,0 +1,19 @@
+# PKT-46 manifest (Evaluation view), 2026-10-11T16:03:46Z; HEAD 355cd31 (PKT-40 and PKT-45 landed) stacked with the PKT-46, 49, 52, 53, 56 manifests in that order, S5 held tab patch applied; node 24.13.1. Build id of the stack up to and including this packet: 06f719a41e381e7a824830a7cdd1ea6ba85d812db11b82a372da5c8030892406. Evidence (screenshots, results-s*.json) comes from the full stack through PKT-56, build id f7191af190b98436a8348cf006b99869c050cb2bec17efcec21801a34c1c0964. Shows the gate stored decision summary (when projected) as authoritative and labels the browser recount "Counted from the recorded pairs"; tests for stored-vs-recount, parent-side unpriced, verdict-from-stored. UPDATE: tests/expunge-workbench.test.tsx is now a real manifest entry (S5 patch applied: tab list ['workbench','candidate','evaluation','receipt']); the S5 patch file stays as documentation. Proof: scratch export of HEAD e12dd39 + exactly this manifest's apps/ paths: tsc exit 0, workbench test 14 passed, full operator vitest 71 files 532 passed 5 skipped 0 failed.
+baf3fbcf2155654d75453e68834f15ee0e4e37ec0942e4df168a4d9cfc71eac1  apps/operator/src/client/expunge/views/EvaluationView.tsx
+98f374e19f479f909ee236db1543da81c4d20dbe43acf99c378f58465afd7cd0  apps/operator/src/client/expunge/css/55-evaluation.css
+da8ec6a1c4091d687fd464ece1d1c2615cea31be54a9740e0382a65da0fa2928  apps/operator/tests/browser/s5.mjs
+e94e51ee22e2f484d0d854e19a93c1f3729e4dcdd3a5be93a0d49d97c73173ea  apps/operator/tests/expunge-evaluation.test.tsx
+3bdf893587ebd98fcb541909322b8b5ff4c4821e3f35755a85cd388d2ca57279  apps/operator/tests/fixtures/ext/45-evaluation.ts
+f7b05f2fec8b760ddf5243b024668d635aaa990b4d0ee345a24395abda251760  apps/operator/tests/expunge-workbench.test.tsx
+1b9bb44ffe8fe26925f2fd8a9442fbcdc6ecbce852326d38a1bf848a5efd853d  docs/ui/S5-held-expunge-workbench.test.tsx.patch
+3a6dcc8f4c83303c3a11c816661039e08a0400dddd44a17f69306935ae7516fc  docs/ui/screens/s5/results-s5.json
+8e26cbe5f073a7149eccbc3b42494a72f0f89f22b2d352ceeb0fe31a85fbaf51  docs/ui/screens/s5/s5-evaluation-1024-dark.png
+399fed17bef937ea5df68af75df0fba1b8dc2925421d1df0f49e5a4bde8ae9b6  docs/ui/screens/s5/s5-evaluation-1024-light.png
+5a6a6ebf61742fad3e2187679ea342411430375e778d864994fe47161b9582af  docs/ui/screens/s5/s5-evaluation-1440-dark.png
+5e67a7d431a5b6d0a66a6e69b53c05126ea9316153b08e9fa60ec1e1db8f6d76  docs/ui/screens/s5/s5-evaluation-1440-light.png
+5edeb4b072e19c50c1404081d4e9df99a8a4a442ca7712994725786577bb2302  docs/ui/screens/s5/s5-evaluation-390-dark.png
+5b2aed58e817a173cd8c30bb478994af053510e9e570285075274b155d18c908  docs/ui/screens/s5/s5-evaluation-390-light.png
+44c7175e4c7804ed820f61f8ca534e5d1382330bdf0383ba54fc484d600fa57a  docs/ui/screens/s5/s5-evaluation-768-dark.png
+96ab8672af5f1fe98b3f60961d403d469302b100125129af250e05cf13d6082a  docs/ui/screens/s5/s5-evaluation-768-light.png
+5e67a7d431a5b6d0a66a6e69b53c05126ea9316153b08e9fa60ec1e1db8f6d76  docs/ui/screens/s5/s5-evaluation-admit-1440-light.png
+a445603507250f31dde6bffb8955f046dddec36e4e94ff6b389aa707a605e517  docs/ui/screens/s5/s5-evaluation-reject-1440-light.png

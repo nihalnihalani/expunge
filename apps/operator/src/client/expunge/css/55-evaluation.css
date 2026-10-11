@@ -1,0 +1,9 @@
+.ex-root .ex-pair {
+  display: grid;
+  gap: var(--ex-space-1);
+  white-space: nowrap;
+}
+.ex-root .ex-pair-label {
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-xs);
+}
