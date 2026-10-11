@@ -12,6 +12,8 @@
     "@ag-ui/client": "0.0.59",
     "@ag-ui/core": "0.0.59",
     "@expunge/contracts": "0.1.0",
+    "@expunge/domain": "0.1.0",
+    "@expunge/governance": "0.1.0",
     "@expunge/mongo": "0.1.0",
     "@expunge/observability": "0.1.0",
     "@expunge/runtime": "0.1.0",

@@ -118,6 +118,8 @@ export function projectionFailureCode(reason: string): FailureCode {
     case 'ModelRunFailed':
     case 'ModelUnavailable':
       return 'provider_error';
+    case 'HarnessNotDeployed':
+      return 'policy_denied';
     case 'NoCompletionReceipt':
     case 'incomplete_receipt':
     case 'CompletionReceiptRequired':

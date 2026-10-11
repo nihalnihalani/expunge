@@ -7,3 +7,4 @@ export * from './models.js';
 export * from './ports.js';
 export * from './prompt.js';
 export { RunSession, STEP_LIMIT_NOTE } from './session.js';
+export * from './runtime-hash.js';

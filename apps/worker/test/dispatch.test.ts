@@ -78,11 +78,14 @@ function rig(options: {
     projected: Array<{ key: unknown; event: Record<string, any> }>,
   ) => ProjectionSink;
   terminalSweep?: TerminalSweep;
+  runtimeHash?: string;
+  setup?: (store: MultiJobStore) => void;
 }) {
   const bundle = options.bundle ?? makeBundle();
   const store = new MultiJobStore();
   const ids = options.jobIds ?? ['job-1'];
   for (const id of ids) store.add(queued(bundle, id));
+  options.setup?.(store);
   const receipts = new FakeReceipts();
   const fake = new FakeChatModel(options.script);
   const logs: LogEntry[] = [];
@@ -110,6 +113,7 @@ function rig(options: {
       options.projection?.(store, projected) ??
       ({ append: async (key: unknown, event: any) => void projected.push({ key, event }) } as ProjectionSink),
     ...(options.terminalSweep ? { terminalSweep: options.terminalSweep } : {}),
+    ...(options.runtimeHash ? { runtimeHash: options.runtimeHash } : {}),
     log: (entry) => logs.push(entry),
     onResult: (result) => results.push(result),
   });
@@ -849,5 +853,93 @@ describe('V-3 (b) FAKE store and sink: a terminal projection lost on a crash is 
     await r.dispatcher.runJob('job-1');
     const original = r.projected.find((p) => p.event.kind === 'job_failed')!.event;
     expect(terminalEventFor(r.store.jobs.get('job-1')!)).toEqual(original);
+  });
+});
+
+describe('follow-up (FAKE store, FAKE model): the deployed-harness check and the observed runtime hash', () => {
+  const HASH_A = 'a'.repeat(64);
+  const HASH_B = 'b'.repeat(64);
+
+  it('checks that the pinned harness is deployed AFTER the claim and BEFORE any model or tool call', async () => {
+    const r = rig({ script: [fakeText('no receipt')] });
+    await r.dispatcher.runJob('job-1');
+    const order = r.store.calls.map((c) => c.method);
+    expect(order.indexOf('claim')).toBeLessThan(order.indexOf('assertHarnessDeployed'));
+    expect(order.indexOf('assertHarnessDeployed')).toBeLessThan(order.indexOf('recordContextInputs'));
+    expect(r.fake.calls.length).toBeGreaterThan(0);
+  });
+
+  it('a harness that is not (or no longer) deployed is a committed failure: no model call, no tool, no job_started, reason recorded', async () => {
+    let toolRan = false;
+    const r = rig({
+      projection: fakeFencedSink,
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('x')],
+      tools: () => [
+        defineTool({
+          name: 'echo',
+          description: 'e',
+          parameters: z.object({ v: z.number() }),
+          execute: async () => ((toolRan = true), { ok: true }),
+        }),
+      ],
+      setup: (store) => store.undeployed.add('job-1'),
+    });
+    const result = await r.dispatcher.runJob('job-1');
+    expect(result).toMatchObject({ outcome: 'failed', reason: 'HarnessNotDeployed' });
+    expect(r.fake.calls).toHaveLength(0); // the model was never called
+    expect(toolRan).toBe(false);
+    expect(r.store.named('recordContextInputs')).toHaveLength(0);
+    expect(r.store.jobs.get('job-1')!.status).toBe('failed');
+    expect(r.store.named('finish')[0]?.args).toEqual(['failed', []]);
+    const checkpoint = r.store.checkpoints.get('job-1')!.at(-1) as {
+      terminal: { decision: unknown; toolCalls: number };
+    };
+    expect(checkpoint.terminal).toMatchObject({
+      decision: { status: 'failed', reason: 'HarnessNotDeployed' },
+      toolCalls: 0,
+    });
+    expect(r.projected.map((p) => p.event.kind)).toEqual(['job_failed']);
+    expect(r.projected[0]?.event.payload).toMatchObject({
+      code: 'policy_denied',
+      message: 'HarnessNotDeployed',
+    });
+  });
+
+  it('a deployment check that itself fails hands the job back untouched: it is not "not deployed"', async () => {
+    const r = rig({ script: [fakeText('x')], setup: (store) => store.deploymentCheckFails.add('job-1') });
+    const result = await r.dispatcher.runJob('job-1');
+    expect(result).toMatchObject({ outcome: 'released', reason: 'deployment_check_failed' });
+    expect(r.store.jobs.get('job-1')!.status).toBe('queued');
+    expect(r.fake.calls).toHaveLength(0);
+    expect(r.store.named('finish')).toHaveLength(0);
+  });
+
+  it('writes the observed runtime hash into the claimed run checkpoint, keeps it in every snapshot incl. the terminal one, and a takeover by another build records its own', async () => {
+    const first = rig({
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('x')],
+      runtimeHash: HASH_A,
+    });
+    await first.dispatcher.runJob('job-1');
+    const snapshots = first.store.checkpoints.get('job-1') as Array<{ attestedRuntimeHash?: string }>;
+    expect(snapshots.length).toBeGreaterThan(2);
+    expect(snapshots[0]).toMatchObject({ attestedRuntimeHash: HASH_A }); // at claim time, before any phase
+    for (const snapshot of snapshots) expect(snapshot.attestedRuntimeHash).toBe(HASH_A);
+    expect(snapshots.at(-1)).toHaveProperty('terminal');
+
+    const second = rig({ script: [fakeText('y')], runtimeHash: HASH_B });
+    const stored = second.store.jobs.get('job-1')!;
+    stored.status = 'running';
+    stored.lease = { ownerId: 'dead', fence: 4, until: new Date(0), heartbeatAt: new Date(0) };
+    stored.checkpoint = { v: 1, attestedRuntimeHash: HASH_A };
+    await second.dispatcher.runJob('job-1');
+    expect(
+      (second.store.jobs.get('job-1')!.checkpoint as { attestedRuntimeHash: string }).attestedRuntimeHash,
+    ).toBe(HASH_B);
+  });
+
+  it('without a runtime hash no attestation is written (never an invented value)', async () => {
+    const r = rig({ script: [fakeText('x')] });
+    await r.dispatcher.runJob('job-1');
+    expect(JSON.stringify(r.store.checkpoints.get('job-1'))).not.toContain('attestedRuntimeHash');
   });
 });
