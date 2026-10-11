@@ -328,7 +328,7 @@ The demo ran the fixed model under two harnesses: the baseline W0 and a candidat
 
 ## Project status
 
-Snapshot as of 11 October 2026, 16:30 PDT. Per-claim evidence is in [WHAT_IS_REAL.md](WHAT_IS_REAL.md), [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md) and [VERIFICATION.md](VERIFICATION.md).
+Snapshot as of 11 October 2026, 16:50 PDT. Per-claim evidence is in [WHAT_IS_REAL.md](WHAT_IS_REAL.md), [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md) and [VERIFICATION.md](VERIFICATION.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/readme/evidence-dark.svg"/>
@@ -341,9 +341,9 @@ Snapshot as of 11 October 2026, 16:30 PDT. Per-claim evidence is in [WHAT_IS_REA
 | ✅ **Harness compiler and evolution pipeline** | Typed patches, citation checks, three-valued guardrails with Mongo/TypeScript parity, a 61-code rejection catalog and as-of decision replay with score-only and wrong-incident controls |
 | ✅ **MongoDB authority layer** | Three databases, ten principals, validators, fenced leases, exactly-once effects, CAS promotion with grant consumption, rollback and change-stream recovery, all proven on replica sets |
 | ✅ **Operator console** | Eleven views plus human-in-the-loop proposal review, browser-tested |
-| 🟡 **MongoDB Atlas Hackathon Sandbox** | Schema and indexes installed; role-scoped users authenticate; live cleanup jobs are next |
-| 🟡 **Worker and fixed model** | OpenAI configured; the adapter, metering, retries and takeover are built; the first live episode is next |
-| 🟡 **Raindrop** | Project configured; tracing, outbox and Query API read-back are built; the first live trace is next |
+| ✅ **MongoDB Atlas Hackathon Sandbox** | Schema, indexes and least-privilege roles installed; a read-only probe of nine principals matched the role manifests (2,844 outcomes, 0 surprises); live cleanup jobs run against it on synthetic seeded worlds |
+| ✅ **Worker and fixed model** | First live episode done: a real W0 run on the Atlas Sandbox with `openai/gpt-6-luna` (job `job_eea9d347…`, 5 model calls) committed receipt `a685d993…`, marked incomplete, on a synthetic seeded world |
+| ✅ **Raindrop** | Done for one episode: that job's event was read back through the Query API (trace `7002add2…`, 20 spans). The subject was registered by hand; submit-time registration is not wired yet |
 | 🟡 **Gate, deployment, Hider, meta-improver, campaign host, rehearsal, plugin sandbox** | Built and exercised with labelled fakes, and being merged to `main` (a gate rebuild is in PR #1) |
 | ⏳ **Model-generated harness proposals** | The structured proposer interface is in place; so far, candidates come from a labelled fake proposer or are written by hand |
 | ⏳ **First live loop** | Real failure, Raindrop trace, generated change, gate admission, promotion and a pinned next run, all with a real model |
