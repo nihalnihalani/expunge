@@ -115,7 +115,13 @@ export type WorkflowGraph = {
   edges: Array<{
     from: string;
     to: string;
-    when: 'success' | 'more_references' | 'needs_approval' | 'retryable_error' | 'verification_failed';
+    when:
+      | 'success'
+      | 'more_references'
+      | 'batches_remaining'
+      | 'needs_approval'
+      | 'retryable_error'
+      | 'verification_failed';
   }>;
   terminalNodeIds: string[];
 };
@@ -876,6 +882,7 @@ export const harnessBundleSchema: z.ZodType<HarnessBundle> = z
                 when: z.enum([
                   'success',
                   'more_references',
+                  'batches_remaining',
                   'needs_approval',
                   'retryable_error',
                   'verification_failed',

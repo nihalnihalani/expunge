@@ -92,8 +92,10 @@ type WorkflowGraph = {
   edges: Array<{
     from: string;
     to: string;
-    when: "success" | "more_references" | "needs_approval" |
+    when: "success" | "more_references" | "batches_remaining" | "needs_approval" |
       "retryable_error" | "verification_failed";
+    // batches_remaining: apply_cleanup_batch committed a batch and the stored plan has unapplied batches
+    // (one batch per effect kind, at most 25 documents); the last batch reports success (amendment A-1).
   }>;
   terminalNodeIds: string[];
 };

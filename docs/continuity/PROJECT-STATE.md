@@ -46,6 +46,12 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 8. A commit packet that adds a workspace never carries the working-tree package-lock.json: the steward stages the packet, exports the index to a scratch directory, regenerates the lock there with `npm install --package-lock-only --ignore-scripts`, diffs it structurally against HEAD, proves `npm ci --ignore-scripts`, stages the regenerated lock and restores the working-tree lock byte for byte (first used for PKT-8).
 7. Native Agent Teams are unavailable in the Desktop app; the roster runs as named subagents (adapter recorded in OWNERSHIP.md). Lead model is claude-fable-5-1, not the requested claude-opus-5-5; this is reported, not hidden.
 
+11. Amendment A-1 (2026-10-11 13:20Z): model and tool call ceilings rise from 12 to 16 for every arm, and a new workflow outcome `batches_remaining` is added. Plans apply one batch per effect kind (2 to 4 apply calls on the ten families), and with workflow enforcement a 12-call ceiling made the expert verification-failure round impossible. The amendment is recorded in PREREGISTRATION.md before any result and lands inside PKT-16. PKT-32 was withdrawn.
+
+12. PKT-16 lands (14:45Z decision) with two recorded OPEN items, against devils-advocate's blocking recommendation. P2-1: the WorldSpec fault plan is not injected on the domain path; a fault layer driven by a stored grader-written campaign row follows the collections packet. P2-2 / DG1: discovery still reaches shared parents (NT-1b); PKT-16b adds per-edge ownership. Both are pinned by KNOWN GAP tests or labels, and both block the scientific freeze. No real cleanup campaign runs before PKT-16b.
+13. Bounded overlap (GC-a): calls that overlap within one lease are judged from the same settled position. A node may repeat without a self edge, bounded by visits reserved at begin, toolCalls and the tool's own guards. A call_in_flight serialization was rejected because one abandoned tool would wedge the run.
+14. Evaluation runs never use the setup principal. The grader creates candidate- or parent-pinned cleanup jobs only on campaign worlds; fixture_builder seeds and resets.
+
 ## Blocked acceptance items (need human input)
 
 - Root `.env` with the principal URIs, provider key(s), CopilotKit Intelligence key and Raindrop keys. Names only in `.env.example`.

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { BSON, type Document } from 'mongodb';
+import { validBundle } from '../../contracts/test/valid-bundle.js';
 import {
   type ActionIntent,
   type ActorContext,
@@ -9,12 +10,15 @@ import {
   type EffectKind,
   type CompletionReceipt,
   type GateReport,
+  type HarnessBundle,
   type MutationClass,
   type ScopeRegistry,
   contentHash,
 } from '@expunge/contracts';
 import {
   ApprovalRepository,
+  ArtifactRepository,
+  DeploymentRepository,
   JobRepository,
   AuthorityRepository,
   DecisionRepository,
@@ -176,6 +180,19 @@ export async function createJob(
   return id;
 }
 
+/**
+ * Makes `bundle` the scope's active worker harness, as the setup administrator would: stores the artifact and
+ * initializes the deployment pointer at it. Returns the bundle's hash, which a cleanup job must be pinned to.
+ */
+export async function deployWorker(
+  service: MongoService,
+  bundle: HarnessBundle = validBundle(),
+): Promise<string> {
+  const hash = (await new ArtifactRepository(service).insert(bundle))._id;
+  await new DeploymentRepository(service).initialize(actor, 'worker', hash, 1);
+  return hash;
+}
+
 /** Installs the scope's authoritative authorization row at revision 1 with the test floor hash. */
 export async function installAuthority(service: MongoService, floorHash = HASH): Promise<void> {
   await new AuthorityRepository(service).install(scopeKey, floorHash, 1);
@@ -228,16 +245,17 @@ export function intent(
     targetAddresses: options.targets ?? [],
     effectKind: options.effectKind ?? ('delete' as const),
   };
-  const argsDigest = deriveArgsDigest(base);
+  const expectedDocumentVersions = base.targetAddresses.map((address, index) => ({
+    address,
+    version: options.versions?.[index] ?? 1,
+  }));
+  const argsDigest = deriveArgsDigest({ ...base, expectedDocumentVersions });
   const policyDecision = { result: 'allow' as const, ruleIds: [], authorizationRevision: 1 };
   return {
     intentId: `intent-${options.toolCallId ?? 'call-1'}-${base.stepId}-${base.batchOrdinal}-${jobId}`,
     ...base,
     targetHash: deriveTargetHash(base.targetAddresses),
-    expectedDocumentVersions: base.targetAddresses.map((address, index) => ({
-      address,
-      version: options.versions?.[index] ?? 1,
-    })),
+    expectedDocumentVersions,
     worldRevision: options.worldRevision ?? 0,
     policyDecision,
     effectKey: deriveEffectKey(base),

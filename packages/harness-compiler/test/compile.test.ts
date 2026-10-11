@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { contentHash, type GuardrailAst, type HarnessBundle, type WorkflowGraph } from '@expunge/contracts';
-import { WORKER_TOOL_IDS } from '@expunge/baselines';
+import { ACCEPTANCE_LIMITS, WORKER_TOOL_IDS } from '@expunge/baselines';
 import {
   COMPILER_HASH,
   VOCABULARY_HASH,
@@ -34,6 +34,8 @@ function accepted(result: CompileResult) {
   return result.artifact;
 }
 
+/** The call ceiling of the baselines under test: derived, never hard-coded. */
+const LIMIT_CALLS = ACCEPTANCE_LIMITS.modelCalls;
 const CORPUS = [
   ledgerRow('complete_unverified', 'complete_cleanup', {
     verification_status: null,
@@ -129,7 +131,7 @@ describe('baseline bundles compile as root bundles', () => {
     expect(artifact.bundleHash).toBe(contentHash(build()));
     expect(artifact.compilerHash).toBe(COMPILER_HASH);
     expect(artifact.vocabularyHash).toBe(VOCABULARY_HASH);
-    expect(artifact.workflowPlan.worstCaseToolCalls).toBeLessThanOrEqual(12);
+    expect(artifact.workflowPlan.worstCaseToolCalls).toBeLessThanOrEqual(ACCEPTANCE_LIMITS.toolCalls);
     expect(artifact.workflowPlan.entry).toBe('inspect');
     expect(artifact.toolGrants).toEqual(build().toolPolicy.grants);
   });
@@ -189,7 +191,9 @@ describe('one generated candidate per surface compiles with its computed class',
     const artifact = accepted(compileChild(parent, [patch('workflow', 'workflow', parent.workflow, graph)]));
     expect(artifact.mutationClass).toBe('behavioral');
     expect(artifact.workflowPlan.loopNodes).toContain('discover');
-    expect(artifact.workflowPlan.worstCaseToolCalls).toBe(10);
+    expect(artifact.workflowPlan.worstCaseToolCalls).toBe(
+      graph.nodes.reduce((total, node) => total + node.maxVisits, 0),
+    );
   });
   it('guardrails: a scoped deny rule that flips recorded decisions is a tightening', () => {
     const parent = w0();
@@ -266,7 +270,7 @@ describe('authority expansion needs a flag', () => {
   });
   it('the computed class is authoritative: a false claim is recorded as a diagnostic, not trusted', () => {
     const parent = w0();
-    const patches = [patch('limits.modelCalls', 'tool_policy', 12, 8)];
+    const patches = [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8)];
     const result = compileHarness(
       { candidate: childOf(parent, patches), parent, patches, claimedClass: 'authority_expansion' },
       context(),
@@ -475,7 +479,7 @@ describe('rejections: schema, identity and infrastructure', () => {
   });
   it('the child must name its parent by hash, and may not change identity or infrastructure fields', () => {
     const parent = w0();
-    const patches = [patch('limits.modelCalls', 'tool_policy', 12, 8)];
+    const patches = [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8)];
     rejected(
       compileHarness(
         { candidate: childOf(parent, patches, { parentHash: 'f'.repeat(64) }), parent, patches },
@@ -508,15 +512,15 @@ describe('rejections: edits and evidence', () => {
   const parent = w0();
   it('more than three independently justified edits is refused', () => {
     const patches = [
-      patch('limits.modelCalls', 'tool_policy', 12, 11),
-      patch('limits.toolCalls', 'tool_policy', 12, 11),
+      patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS - 1),
+      patch('limits.toolCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS - 1),
       patch('limits.wallTimeMs', 'tool_policy', 120000, 100000),
       patch('limits.totalTokens', 'tool_policy', 24000, 20000),
     ];
     rejected(compileChild(parent, patches), 'edit_budget_exceeded', 'edits');
   });
   it('a change without a patch is refused (a helpful batch cannot launder an unrelated restriction)', () => {
-    const patches = [patch('limits.modelCalls', 'tool_policy', 12, 8)];
+    const patches = [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8)];
     const candidate = childOf(parent, patches);
     candidate.limits.wallTimeMs = 60000;
     rejected(compileHarness({ candidate, parent, patches }, context()), 'unexplained_change', 'edits');
@@ -529,7 +533,7 @@ describe('rejections: edits and evidence', () => {
     rejected(
       compileHarness(
         {
-          candidate: childOf(parent, [patch('limits.modelCalls', 'tool_policy', 12, 8)]),
+          candidate: childOf(parent, [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8)]),
           parent,
           patches: invalid,
         },
@@ -539,12 +543,12 @@ describe('rejections: edits and evidence', () => {
     );
     rejected(
       compileChild(parent, [
-        patch('limits.modelCalls', 'tool_policy', 12, 8),
-        patch('limits.modelCalls', 'tool_policy', 12, 8),
+        patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8),
+        patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8),
       ]),
       'patch_path_duplicate',
     );
-    const wrongSurface = [patch('limits.modelCalls', 'context', 12, 8)];
+    const wrongSurface = [patch('limits.modelCalls', 'context', LIMIT_CALLS, 8)];
     rejected(
       compileHarness({ candidate: childOf(parent, wrongSurface), parent, patches: wrongSurface }, context()),
       'patch_surface_mismatch',
@@ -554,19 +558,22 @@ describe('rejections: edits and evidence', () => {
       compileHarness({ candidate: childOf(parent, wrongBefore), parent, patches: wrongBefore }, context()),
       'patch_before_mismatch',
     );
-    const real = [patch('limits.modelCalls', 'tool_policy', 12, 8)];
-    const lying = [patch('limits.modelCalls', 'tool_policy', 12, 4)];
+    const real = [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8)];
+    const lying = [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 4)];
     rejected(
       compileHarness({ candidate: childOf(parent, real), parent, patches: lying }, context()),
       'patch_after_mismatch',
     );
   });
   it('a no-op patch or an unchanged child is refused', () => {
-    rejected(compileChild(parent, [patch('limits.modelCalls', 'tool_policy', 12, 12)]), 'no_op_patch');
+    rejected(
+      compileChild(parent, [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS)]),
+      'no_op_patch',
+    );
     rejected(compileHarness({ candidate: childOf(parent, []), parent, patches: [] }, context()), 'no_change');
   });
   it('every edit needs a hypothesis and permitted training evidence that exists and is recorded in the bundle', () => {
-    const edit = patch('limits.modelCalls', 'tool_policy', 12, 8);
+    const edit = patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8);
     rejected(compileChild(parent, [{ ...edit, hypothesis: 'short' }]), 'hypothesis_missing');
     rejected(compileChild(parent, [{ ...edit, sourceEvidenceIds: [] }]), 'evidence_missing');
     rejected(
@@ -987,7 +994,7 @@ describe('rejections: workflow', () => {
   });
   it('summed maxVisits above limits.toolCalls and graphs above the declared size limits are refused', () => {
     rejected(
-      edit((g) => void (g.nodes.find((n) => n.id === 'apply')!.maxVisits = 8)),
+      edit((g) => void (g.nodes.find((n) => n.id === 'apply')!.maxVisits = ACCEPTANCE_LIMITS.toolCalls)),
       'workflow_visit_budget',
     );
     const small = patch('limits.graphNodes', 'tool_policy', 16, 4);
@@ -1033,14 +1040,17 @@ describe('rejections: tool policy and limits', () => {
   });
   it('limits above the owner maxima, degenerate limits and a context larger than its limits', () => {
     rejected(
-      compileChild(parent, [patch('limits.modelCalls', 'tool_policy', 12, 13)]),
+      compileChild(parent, [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS + 1)]),
       'limits_exceed_owner',
     );
     rejected(
       compileChild(parent, [patch('limits.maxCostMicrousd', 'tool_policy', 100000, 100001)]),
       'limits_exceed_owner',
     );
-    rejected(compileChild(parent, [patch('limits.modelCalls', 'tool_policy', 12, 0)]), 'limits_degenerate');
+    rejected(
+      compileChild(parent, [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 0)]),
+      'limits_degenerate',
+    );
     rejected(
       compileChild(parent, [patch('contextPolicy.referenceDepth', 'context', 1, 4)]),
       'context_exceeds_limits',

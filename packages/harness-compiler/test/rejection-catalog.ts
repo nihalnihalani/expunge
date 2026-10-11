@@ -3,7 +3,7 @@
 // read it, which is why it stands alone and does not depend on the order of any other test.
 import type { GuardrailAst, HarnessBundle, WorkflowGraph } from '@expunge/contracts';
 import { contentHash } from '@expunge/contracts';
-import { WORKER_TOOL_IDS } from '@expunge/baselines';
+import { ACCEPTANCE_LIMITS, WORKER_TOOL_IDS } from '@expunge/baselines';
 import { compileHarness, type CompileContext, type CompileResult, type RejectionCode } from '../src/index.js';
 import {
   EVIDENCE_REFERENCE,
@@ -18,6 +18,8 @@ import {
   w0,
 } from './helpers.js';
 
+/** The call ceiling of the baselines under test: derived, never hard-coded. */
+const LIMIT_CALLS = ACCEPTANCE_LIMITS.modelCalls;
 const CORPUS = [
   ledgerRow('complete_unverified', 'complete_cleanup', { verification_status: null, retry_count: 0 }),
   ledgerRow('complete_valid', 'complete_cleanup', { verification_status: 'valid', retry_count: 0 }),
@@ -39,7 +41,7 @@ const VERIFY_RULE: GuardrailAst = {
   sourceEvidenceIds: ['evt_01'],
   appliesTo: ['complete_cleanup'],
 };
-const LIMIT = patch('limits.modelCalls', 'tool_policy', 12, 8);
+const LIMIT = patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 8);
 const addRule = (rule: GuardrailAst, ctx: CompileContext = withCorpus()): CompileResult =>
   compileChild(w0(), [patch(`guardrails.${rule.ruleId}`, 'guardrails', null, rule)], ctx);
 const editWorkflow = (
@@ -247,7 +249,9 @@ export const REJECTION_CATALOG: Record<RejectionCode, () => CompileResult> = {
     editWorkflow((g) => void (g.nodes.find((n) => n.id === 'apply')!.maxVisits = 20)),
   workflow_graph_limit: () => compileChild(w0(), [patch('limits.graphNodes', 'tool_policy', 16, 4)]),
   workflow_visit_budget: () =>
-    editWorkflow((g) => void (g.nodes.find((n) => n.id === 'apply')!.maxVisits = 8)),
+    editWorkflow(
+      (g) => void (g.nodes.find((n) => n.id === 'apply')!.maxVisits = ACCEPTANCE_LIMITS.toolCalls),
+    ),
   workflow_forbidden_route: () =>
     editWorkflow((g) => void (g.nodes[2]!.inputBindings = { verdict: 'promoter.output' })),
   workflow_input_binding_invalid: () =>
@@ -275,8 +279,9 @@ export const REJECTION_CATALOG: Record<RejectionCode, () => CompileResult> = {
   duplicate_prerequisite: () => addPrerequisite(prerequisite('apply_cleanup_batch', 'preview_plan')),
   prerequisite_deadlock: () => addPrerequisite(prerequisite('preview_cleanup', 'preview_plan')),
   prerequisite_unsatisfiable: () => addPrerequisite(prerequisite('complete_cleanup', 'completion_receipt')),
-  limits_exceed_owner: () => compileChild(w0(), [patch('limits.modelCalls', 'tool_policy', 12, 13)]),
-  limits_degenerate: () => compileChild(w0(), [patch('limits.modelCalls', 'tool_policy', 12, 0)]),
+  limits_exceed_owner: () =>
+    compileChild(w0(), [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS + 1)]),
+  limits_degenerate: () => compileChild(w0(), [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 0)]),
   context_exceeds_limits: () => compileChild(w0(), [patch('contextPolicy.referenceDepth', 'context', 1, 4)]),
 
   no_change: () => compileHarness({ candidate: childOf(w0(), []), parent: w0(), patches: [] }, context()),
@@ -291,7 +296,7 @@ export const REJECTION_CATALOG: Record<RejectionCode, () => CompileResult> = {
     ),
   patch_path_duplicate: () => compileChild(w0(), [LIMIT, LIMIT]),
   patch_surface_mismatch: () => {
-    const wrong = [patch('limits.modelCalls', 'context', 12, 8)];
+    const wrong = [patch('limits.modelCalls', 'context', LIMIT_CALLS, 8)];
     return compileHarness({ candidate: childOf(w0(), wrong), parent: w0(), patches: wrong }, context());
   },
   patch_before_mismatch: () => {
@@ -303,11 +308,12 @@ export const REJECTION_CATALOG: Record<RejectionCode, () => CompileResult> = {
       {
         candidate: childOf(w0(), [LIMIT]),
         parent: w0(),
-        patches: [patch('limits.modelCalls', 'tool_policy', 12, 4)],
+        patches: [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, 4)],
       },
       context(),
     ),
-  no_op_patch: () => compileChild(w0(), [patch('limits.modelCalls', 'tool_policy', 12, 12)]),
+  no_op_patch: () =>
+    compileChild(w0(), [patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS)]),
   unexplained_change: () => {
     const candidate = childOf(w0(), [LIMIT]);
     candidate.limits.wallTimeMs = 60000;
@@ -315,8 +321,8 @@ export const REJECTION_CATALOG: Record<RejectionCode, () => CompileResult> = {
   },
   edit_budget_exceeded: () =>
     compileChild(w0(), [
-      patch('limits.modelCalls', 'tool_policy', 12, 11),
-      patch('limits.toolCalls', 'tool_policy', 12, 11),
+      patch('limits.modelCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS - 1),
+      patch('limits.toolCalls', 'tool_policy', LIMIT_CALLS, LIMIT_CALLS - 1),
       patch('limits.wallTimeMs', 'tool_policy', 120000, 100000),
       patch('limits.totalTokens', 'tool_policy', 24000, 20000),
     ]),
