@@ -74,7 +74,7 @@ describe('model retry policy (real SDK client, FAKE provider)', () => {
     expect(seen).toEqual([429, 200]);
   });
 
-  it('a 429 that never clears is attempted exactly `attempts` times, then reaches the runtime as ModelUnavailable', async () => {
+  it('a 429 that never clears is attempted exactly `attempts` times, then reaches the runtime as ProviderRateLimited', async () => {
     const { seen, call } = await provider([429]);
     const error = await call().then(
       () => null,
@@ -82,7 +82,7 @@ describe('model retry policy (real SDK client, FAKE provider)', () => {
     );
     expect(seen).toHaveLength(MODEL_RETRY_POLICY.attempts);
     expect(error).toMatchObject({ status: 429 });
-    expect(classifyModelFailure(error)).toBe('ModelUnavailable');
+    expect(classifyModelFailure(error)).toBe('ProviderRateLimited');
   });
 
   it('a request-side 400 is not retried and is ModelRunFailed', async () => {

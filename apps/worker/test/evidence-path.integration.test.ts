@@ -220,7 +220,7 @@ describeLive('Raindrop evidence path as a running process (FAKE Raindrop, local 
     expect(createEvidenceProcess(processEnv(), { guard: GUARD }, {}).status).toBe('BLOCKED');
   });
 
-  it('the process entry exits 3 and prints only BLOCKED lines with names while no suppression or guard source exists', async () => {
+  it('the process entry exits 3 and prints only BLOCKED lines with names while no leak guard file exists (the suppression source is wired from the observer principal)', async () => {
     const lines: string[] = [];
     const original = console.log;
     console.log = (...args: unknown[]) => void lines.push(args.map(String).join(' '));
@@ -231,7 +231,8 @@ describeLive('Raindrop evidence path as a running process (FAKE Raindrop, local 
     }
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.every((line) => line.startsWith('BLOCKED:'))).toBe(true);
-    expect(lines.join('\n')).toContain('export suppression source');
+    expect(lines.join('\n')).toContain('leak guard source');
+    expect(lines.join('\n')).not.toContain('export suppression source'); // main wires it from MONGODB_OBSERVER_URI
     expect(lines.join('\n')).not.toContain(fake.keys().writeKey); // names, never values
   });
 
@@ -251,7 +252,7 @@ describeLive('Raindrop evidence path as a running process (FAKE Raindrop, local 
     expect(held.nextAttemptAt.getTime()).toBeGreaterThan(Date.now()); // retry is scheduled (backoff)
     // 2. Enrichment arrives late; the next attempt (made due here) completes the ladder.
     const eventId = (held.payload as { eventId: string }).eventId;
-    fake.events.get(eventId)!.tool_calls = [{ name: 'echo' }];
+    fake.events.get(eventId)!.tool_calls = [{ tool_name: 'echo' }];
     await outboxRows().updateOne({ jobId, kind: 'sdk_event' } as never, {
       $set: { nextAttemptAt: new Date(0) },
     });
@@ -380,7 +381,7 @@ describeLive('Raindrop evidence path as a running process (FAKE Raindrop, local 
   it('suppression HOLDS an event intent for a suppressed user and for an unreadable list; the process drains the rest', async () => {
     const jobId = await runWorkerJob();
     const sdkRow = (await outboxRows().findOne({ jobId, kind: 'sdk_event' } as never))!;
-    fake.events.get((sdkRow.payload as { eventId: string }).eventId)!.tool_calls = [{ name: 'echo' }];
+    fake.events.get((sdkRow.payload as { eventId: string }).eventId)!.tool_calls = [{ tool_name: 'echo' }];
     // An HTTP `event` intent for a (pseudonymous) user id under an open erasure.
     const USER = 'u_00000000000000000000000000000a01';
     await outboxRows().insertOne({

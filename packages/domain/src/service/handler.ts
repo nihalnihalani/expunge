@@ -13,6 +13,7 @@ import {
 } from './jobs.js';
 import { operatorPreview, previewRequestSchema } from './preview.js';
 import { serveArtifactRoute } from './artifacts.js';
+import { evidenceStatus } from './evidence.js';
 import { serveProjection } from './projection.js';
 import { listWorlds } from './worlds.js';
 
@@ -130,7 +131,13 @@ export function createDomainService(deps: DomainServiceDeps): DomainService {
         return json(200, {
           backend: { kind: 'live', version: SERVICE_VERSION },
           scope: { bound },
-          evidence: { configured: false, writeProvenAt: null, readBackProvenAt: null, deadLetters: 0 },
+          // Derived from the committed telemetry outbox, never a constant; an unreadable outbox is unconfigured, not ready.
+          evidence: await evidenceStatus(env, config.owner.scope).catch(() => ({
+            configured: false,
+            writeProvenAt: null,
+            readBackProvenAt: null,
+            deadLetters: 0,
+          })),
         });
       }
       case 'GET worlds':

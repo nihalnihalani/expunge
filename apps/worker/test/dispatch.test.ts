@@ -14,6 +14,7 @@ import {
 } from '../../../packages/runtime/test/fakes.js';
 import {
   Dispatcher,
+  type AttestationPort,
   terminalEventFor,
   workerConfigFromEnv,
   type JobRunResult,
@@ -79,6 +80,7 @@ function rig(options: {
   ) => ProjectionSink;
   terminalSweep?: TerminalSweep;
   runtimeHash?: string;
+  attestations?: AttestationPort;
   setup?: (store: MultiJobStore) => void;
 }) {
   const bundle = options.bundle ?? makeBundle();
@@ -114,6 +116,7 @@ function rig(options: {
       ({ append: async (key: unknown, event: any) => void projected.push({ key, event }) } as ProjectionSink),
     ...(options.terminalSweep ? { terminalSweep: options.terminalSweep } : {}),
     ...(options.runtimeHash ? { runtimeHash: options.runtimeHash } : {}),
+    ...(options.attestations ? { attestations: options.attestations } : {}),
     log: (entry) => logs.push(entry),
     onResult: (result) => results.push(result),
   });
@@ -138,7 +141,14 @@ describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed 
     expect(recordIndex).toBeLessThan(firstCheckpoint);
     // Phase checkpoint after the tool, then a terminal checkpoint.
     const checkpoints = r.store.checkpoints.get('job-1') as Array<Record<string, unknown>>;
-    expect(checkpoints[0]).toMatchObject({ v: 1, phase: 1, toolCalls: 1, lastTool: 'echo' });
+    // The first snapshot is the worker's model stamp (before any phase); the first phase checkpoint follows it.
+    expect(checkpoints[0]).toMatchObject({ v: 1, attestedModels: [{ source: 'fake' }] });
+    expect(checkpoints.find((c) => c.phase === 1)).toMatchObject({
+      v: 1,
+      phase: 1,
+      toolCalls: 1,
+      lastTool: 'echo',
+    });
     const terminal = checkpoints.at(-1) as {
       terminal: {
         endedBy: string;
@@ -212,6 +222,48 @@ describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed 
     const result = await r.dispatcher.runJob('job-1');
     expect(result.outcome).toBe('succeeded');
     expect(r.store.named('finish')).toHaveLength(0);
+  });
+
+  it('after complete_cleanup commits the terminal state: no renewal, no onMeter/LostLease fault, no TerminalExists error, the final meter is logged', async () => {
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'complete_cleanup', args: {} }]), fakeText('ok')],
+      bundle: makeBundle({ toolPolicy: { grants: ['complete_cleanup'], prerequisites: [] } }),
+      tools: ({ store, receipts }) => [
+        defineTool({
+          name: 'complete_cleanup',
+          description: 'receipt and terminal state commit together',
+          parameters: z.object({}),
+          execute: async () => {
+            const job = store.jobs.get('job-1')!;
+            receipts.byJob.set('job-1', receiptFor(job));
+            job.status = 'succeeded';
+            job.outputRefs = ['rcpt-job-1'];
+            job.lease.until = new Date(0);
+            // Longer than several heartbeats (lease 150 ms, renewal every 50 ms): the old code renewed a released lease.
+            await new Promise((resolve) => setTimeout(resolve, 260));
+            return { receiptId: 'rcpt-job-1' };
+          },
+        }),
+      ],
+      projection: () =>
+        ({
+          append: async () => {
+            throw Object.assign(new Error('TerminalExists'), { code: 'TerminalExists' });
+          },
+        }) as unknown as ProjectionSink,
+    });
+    const result = await r.dispatcher.runJob('job-1');
+    expect(result.outcome).toBe('succeeded');
+    const messages = r.logs.map((l) => l.message);
+    expect(messages).not.toContain('lease renewal failed; stopping run');
+    expect(messages).not.toContain('hook onMeter failed');
+    expect(r.logs.filter((l) => l.level === 'warn' && l.code === 'LostLease')).toEqual([]);
+    expect(r.logs.filter((l) => l.code === 'TerminalExists').every((l) => l.level === 'info')).toBe(true);
+    expect(r.logs.find((l) => l.message.startsWith('final meter not persisted'))?.meter).toBeDefined();
+    // No renewal after the terminal state was read: the renew calls all happened while the lease was live or before the stop.
+    const renews = r.store.named('renew').length;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(r.store.named('renew')).toHaveLength(renews);
   });
 
   it('fails a job whose committed receipt is incomplete, naming the receipt', async () => {
@@ -935,6 +987,130 @@ describe('follow-up (FAKE store, FAKE model): the deployed-harness check and the
     expect(
       (second.store.jobs.get('job-1')!.checkpoint as { attestedRuntimeHash: string }).attestedRuntimeHash,
     ).toBe(HASH_B);
+  });
+
+  type Stamp = { fence: number; source: string; provider: string; modelId: string; spec: string };
+  type Snap = { attestedModels?: Stamp[]; phase?: number };
+
+  it('stamps the RESOLVED model into the claimed run checkpoint before any phase, keeps it in every snapshot, and a fake stays fake', async () => {
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('x')],
+      runtimeHash: HASH_A,
+    });
+    await r.dispatcher.runJob('job-1');
+    const snapshots = r.store.checkpoints.get('job-1') as Snap[];
+    const stamped = snapshots.findIndex((snapshot) => snapshot.attestedModels);
+    expect(stamped).toBeGreaterThanOrEqual(0);
+    expect(snapshots.slice(0, stamped).every((snapshot) => snapshot.phase === undefined)).toBe(true); // before any phase
+    for (const snapshot of snapshots.slice(stamped))
+      expect(snapshot.attestedModels).toEqual([
+        {
+          fence: 1,
+          source: 'fake',
+          provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
+          modelId: 'fake-deterministic-1',
+          spec: 'fake/fake',
+        },
+      ]);
+    expect(snapshots.at(-1)).toHaveProperty('terminal');
+  });
+
+  it('FAIL CLOSED: a stamp write that fails ends the session before any model call and leaves no stamp', async () => {
+    const r = rig({
+      script: [fakeText('x')],
+      setup: (store) => {
+        store.failCheckpointWhen = (checkpoint) => JSON.stringify(checkpoint).includes('attestedModels');
+      },
+    });
+    await r.dispatcher.runJob('job-1');
+    expect(r.fake.calls).toHaveLength(0); // no model call was made
+    expect(JSON.stringify(r.store.checkpoints.get('job-1') ?? [])).not.toContain('attestedModels');
+    const failed = r.projected.find((p) => p.event.kind === 'job_failed');
+    expect(failed?.event.payload).toMatchObject({ retryable: true });
+    expect(r.store.jobs.get('job-1')!.status).not.toBe('succeeded');
+  });
+
+  it('records the attestation through the insert-only port with the session fence BEFORE the checkpoint copy, and a port failure fails closed', async () => {
+    const calls: Array<{ fence: number; source: string; modelId: string; runtimeHash: string; at: Date }> =
+      [];
+    const r = rig({
+      script: [fakeText('x')],
+      runtimeHash: HASH_A,
+      attestations: { record: async (_a, lease, att) => void calls.push({ ...att, fence: lease.fence }) },
+    });
+    await r.dispatcher.runJob('job-1');
+    expect(calls).toHaveLength(1);
+    // The runtime hash goes in the SAME insert as the model stamp.
+    expect(calls[0]).toMatchObject({
+      fence: 1,
+      source: 'fake',
+      modelId: 'fake-deterministic-1',
+      runtimeHash: HASH_A,
+    });
+    const snap = (r.store.checkpoints.get('job-1') as Snap[]).find((c) => c.attestedModels)!;
+    expect(snap.attestedModels![0]).toMatchObject({ fence: 1 }); // convenience copy still written
+
+    // No runtime hash => no truthful stamp => the session ends before any model call.
+    const noHash = rig({ script: [fakeText('x')], attestations: { record: async () => undefined } });
+    await noHash.dispatcher.runJob('job-1');
+    expect(noHash.fake.calls).toHaveLength(0);
+    expect(JSON.stringify(noHash.store.checkpoints.get('job-1') ?? [])).not.toContain('attestedModels');
+
+    const failing = rig({
+      script: [fakeText('x')],
+      runtimeHash: HASH_A,
+      attestations: {
+        record: async () => {
+          throw new Error('AttestationConflict');
+        },
+      },
+    });
+    await failing.dispatcher.runJob('job-1');
+    expect(failing.fake.calls).toHaveLength(0);
+    expect(JSON.stringify(failing.store.checkpoints.get('job-1') ?? [])).not.toContain('attestedModels');
+  });
+
+  it('a takeover by a session with a different model appends a second stamp bound to its own fence and keeps the first', async () => {
+    const r = rig({ script: [fakeText('y')] });
+    const stored = r.store.jobs.get('job-1')!;
+    stored.status = 'running';
+    stored.lease = { ownerId: 'dead', fence: 4, until: new Date(0), heartbeatAt: new Date(0) };
+    const first = {
+      fence: 4,
+      source: 'provider',
+      provider: 'openai',
+      modelId: 'gpt-5',
+      spec: 'openai/gpt-5',
+      endpoint: 'default',
+    };
+    stored.checkpoint = { v: 1, attestedModels: [first] };
+    await r.dispatcher.runJob('job-1');
+    const stamps = (r.store.jobs.get('job-1')!.checkpoint as Snap).attestedModels!;
+    expect(stamps).toHaveLength(2);
+    expect(stamps[0]).toEqual(first);
+    expect(stamps[1]).toMatchObject({ fence: 5, source: 'fake', modelId: 'fake-deterministic-1' });
+  });
+
+  it('a takeover whose own stamp write fails makes no model call and does not inherit the previous stamp as its own', async () => {
+    const r = rig({
+      script: [fakeText('y')],
+      setup: (store) => {
+        const stored = store.jobs.get('job-1')!;
+        stored.status = 'running';
+        stored.lease = { ownerId: 'dead', fence: 4, until: new Date(0), heartbeatAt: new Date(0) };
+        stored.checkpoint = {
+          v: 1,
+          attestedModels: [
+            { fence: 4, source: 'provider', provider: 'openai', modelId: 'gpt-5', spec: 'openai/gpt-5' },
+          ],
+        };
+        store.failCheckpointWhen = (checkpoint) => JSON.stringify(checkpoint).includes('"fence":5');
+      },
+    });
+    await r.dispatcher.runJob('job-1');
+    expect(r.fake.calls).toHaveLength(0);
+    const stamps = (r.store.jobs.get('job-1')!.checkpoint as Snap).attestedModels ?? [];
+    expect(stamps.map((s) => s.fence)).toEqual([4]); // no entry for fence 5: the gate sees a session without a stamp
   });
 
   it('without a runtime hash no attestation is written (never an invented value)', async () => {

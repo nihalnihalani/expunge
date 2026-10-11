@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { contentHash, type HarnessBundle, type Job } from '@expunge/contracts';
 import {
   adapter,
@@ -5,7 +6,7 @@ import {
   requiredCredentialVariable,
   type ProviderEnv,
 } from '@expunge/vendor-openmuse';
-import type { ModelPricing, ModelResolver, ModelSelection } from './ports.js';
+import type { ModelAttestation, ModelPricing, ModelResolver, ModelSelection } from './ports.js';
 
 /**
  * Model selection from the process environment: EXPUNGE_MODEL_PROVIDER (openai | anthropic) and
@@ -112,4 +113,39 @@ export function providerReadiness(env: ProviderEnv): ProviderReadiness {
     };
   }
   return { ready: true, spec, credentialVariable: variable };
+}
+
+/**
+ * What a selection really is. An injected text adapter (the labeled FAKE provider under src/testing, the only way an adapter
+ * can be injected) is ALWAYS `fake`, with the adapter's own name and model, whatever spec the profile declares. Anything else
+ * is `provider`, with provider and model parsed from the selection's spec.
+ */
+export function attestModel(selection: ModelSelection, env: ProviderEnv = {}): ModelAttestation {
+  const adapter = selection.textAdapter as { name?: unknown; model?: unknown } | undefined;
+  if (adapter)
+    return {
+      source: 'fake',
+      provider: typeof adapter.name === 'string' ? adapter.name : 'injected_adapter',
+      modelId: typeof adapter.model === 'string' ? adapter.model : 'unknown',
+      spec: selection.spec,
+    };
+  const { provider, model } = parseModelSpec(selection.spec);
+  // The base-URL variables the vendor adapter honours (vendor-openmuse/src/provider.ts).
+  const base = (provider === 'anthropic' ? env.ANTHROPIC_BASE_URL : env.OPENAI_BASE_URL)?.trim();
+  let host: string | undefined;
+  if (base) {
+    try {
+      host = new URL(base).host.toLowerCase();
+    } catch {
+      host = base.toLowerCase(); // unparsable still counts as overridden; hash what was given
+    }
+  }
+  return {
+    source: 'provider',
+    provider,
+    modelId: model,
+    spec: selection.spec,
+    endpoint: base ? 'overridden' : 'default',
+    ...(host ? { endpointHostHash: createHash('sha256').update(host).digest('hex') } : {}),
+  };
 }

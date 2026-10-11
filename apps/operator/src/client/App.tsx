@@ -11,7 +11,6 @@ import {
   ArrowUpRight,
   BookOpen,
   Clock3,
-  Code2,
   Database,
   Folder,
   Menu,
@@ -45,6 +44,7 @@ import {
   type Notices,
 } from './poll-notice';
 import { Mascot } from './Mascot';
+import { BrandMark } from './BrandMark';
 import { Chat } from './Chat';
 import { ThreadList } from './ThreadList';
 import { ResultPane } from './ResultPane';
@@ -85,6 +85,17 @@ export function App() {
     if (next !== 'space' && next !== 'expunge')
       history.replaceState(null, '', location.pathname + location.search);
     rawSetView(next);
+  };
+  // The brand returns to the Expunge jobs list, the product's home.
+  const openExpungeHome = () => {
+    if (dirtyPage.current && !window.confirm('Leave your unsaved page draft?'))
+      return;
+    dirtyPage.current = false;
+    navigated.current = true;
+    // The hashchange listener switches the view; set it directly when already there.
+    if (location.hash !== '#/expunge') location.hash = '#/expunge';
+    else rawSetView('expunge');
+    setMobile(false);
   };
   useEffect(() => {
     let acceptedHash = location.hash;
@@ -309,12 +320,11 @@ export function App() {
   if (needsAuth)
     return (
       <main className="unlock">
-        <Mascot />
+        <span className="unlock-mark">
+          <BrandMark size={40} />
+        </span>
         <h1>Unlock Expunge</h1>
-        <p>
-          Enter the owner access token configured on this server. Expunge runs
-          on the OpenDots operator shell.
-        </p>
+        <p>Enter the owner access token configured on this server.</p>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -353,8 +363,10 @@ export function App() {
   if (!state || !workspace || !dot)
     return (
       <main className="unlock">
-        <Mascot state="working" />
-        <h1>Finding your dots…</h1>
+        <span className="unlock-mark">
+          <BrandMark size={40} />
+        </span>
+        <h1>Loading Expunge…</h1>
         {error && (
           <>
             <p className="chat-error">{error}</p>
@@ -381,13 +393,10 @@ export function App() {
       <nav className="icon-rail" aria-label="Workspace navigation">
         <button
           className="rail-brand"
-          aria-label="OpenDots home"
-          onClick={() => {
-            setView('chat');
-            setSelectedThread(undefined);
-          }}
+          aria-label="Expunge home"
+          onClick={openExpungeHome}
         >
-          o<span>·</span>
+          <BrandMark size={20} />
         </button>
         <button
           aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -443,18 +452,11 @@ export function App() {
       >
         <button
           className="wordmark"
-          onClick={() => {
-            setView('chat');
-            setSelectedThread(undefined);
-          }}
+          aria-label="Expunge home"
+          onClick={openExpungeHome}
         >
-          <span className="dotted-logo">
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-          OpenDots<span className="wordmark-dot">•</span>
+          <BrandMark size={18} />
+          Expunge
         </button>
         <button
           className={`nav-item ${view === 'expunge' ? 'active' : ''}`}
@@ -593,18 +595,8 @@ export function App() {
             <Settings2 size={17} />
             <span>Settings & setup</span>
           </button>
-          <a
-            className="nav-item"
-            href="https://github.com/CopilotKit/OpenDots"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <Code2 size={17} />
-            <span>Make it your own</span>
-            <ArrowUpRight size={13} />
-          </a>
           <div className="version">
-            OPEN SOURCE TEMPLATE <span>v0.1</span>
+            EXPUNGE <span>v0.1</span>
           </div>
         </div>
       </aside>

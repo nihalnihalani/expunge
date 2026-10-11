@@ -1,4 +1,5 @@
 import { classifyModelFailure } from './model-error.js';
+import { attestModel } from './models.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { EventType, type BaseEvent, type RunAgentInput } from '@ag-ui/core';
 import type { HarnessBundle, Job, ScopeKey } from '@expunge/contracts';
@@ -167,16 +168,14 @@ export class RunSession {
       this.meter = meter;
       // Refuse to start a model call when the job's cumulative totals already reach a limit.
       const refusal = meter.exhausted();
-      if (!refusal.ok) {
-        this.fail(
-          refusal.code,
-          refusal.code === 'TokenBudgetExceeded'
-            ? 'token_budget'
-            : refusal.code === 'CostBudgetExceeded'
-              ? 'cost_budget'
-              : 'error',
-        );
-        return this.finish(); // no adapter or provider dispatch without initial budget/pricing proof
+      if (!refusal.ok)
+        this.fail(refusal.code, refusal.code === 'TokenBudgetExceeded' ? 'token_budget' : 'cost_budget');
+      // FAIL CLOSED (DA-12 M-1): the stamp is taken before any model call, so failing here costs nothing and a run can
+      // never proceed unstamped.
+      try {
+        await this.deps.hooks?.onModelSelected?.(attestModel(selection, this.deps.env ?? process.env));
+      } catch (error) {
+        throw new RuntimeError('ModelAttestationFailed', { cause: error });
       }
       this.provenance = {
         spec: selection.spec,

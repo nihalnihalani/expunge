@@ -1,0 +1,24 @@
+# Docker computer host: the OpenDots supervisor (the ONLY service that mounts the Docker socket). Run on a different
+# machine from the node host. Candidate sandboxes run per job from infra/opendots/compose.candidates.yml on this host.
+#   docker compose -p expunge-docker --env-file /etc/expunge/supervisor.env -f infra/services/compose.docker-host.yml up -d --wait
+# The upstream file interpolates its tokens from the compose environment, so the secrets arrive via --env-file (a path
+# outside the repository, names in env/supervisor.env.example), never through this file.
+# Build the images first (apps/operator/compose.computers.yml, profile build-computers). The supervisor image there is
+# built from upstream OpenBot at the pinned commit; its base is NOT digest-pinned (upstream, read only for this lane).
+services:
+  computer-supervisor:
+    extends:
+      file: ../../apps/operator/compose.computers.yml
+      service: computer-supervisor
+    # Loopback only; the node host reaches it over a private link or SSH tunnel, never the public Internet.
+    ports: !override
+      - '127.0.0.1:4312:4300'
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options: { max-size: '20m', max-file: '5' }
+networks:
+  computer-control:
+    driver: bridge

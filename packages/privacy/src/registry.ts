@@ -93,6 +93,8 @@ export async function registerSubjectTokens(
   return entry;
 }
 
+export const GUARD_LIST_LIMIT = 5000;
+
 /**
  * The leak guard for a scope: every registered subject handle is a forbidden literal, plus the grader's salted private
  * id set when there is one. With neither, the guard cannot exist (MissingForbiddenLiterals): a scan with nothing to
@@ -103,7 +105,11 @@ export async function guardFor(
   scope: ScopeKey,
   extra: { literals?: readonly string[]; privateIds?: PrivateIdSet } = {},
 ): Promise<LeakGuard> {
-  const handles = (await deps.tokens.list(scope)).map((entry) => entry.subjectHandle);
+  // A guard missing a handle would let that subject's text through, so a list that may have been cut off is refused.
+  const listed = await deps.tokens.list(scope, GUARD_LIST_LIMIT);
+  if (listed.length >= GUARD_LIST_LIMIT)
+    throw new PrivacyError('GuardIncomplete', `${GUARD_LIST_LIMIT} entries`);
+  const handles = listed.map((entry) => entry.subjectHandle);
   const guard: LeakGuard = {
     forbiddenLiterals: [...new Set([...handles, ...(extra.literals ?? [])])],
     ...(extra.privateIds ? { privateIds: extra.privateIds } : {}),

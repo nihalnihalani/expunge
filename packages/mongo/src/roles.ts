@@ -22,6 +22,8 @@ const EXECUTOR_WORLD_WRITES = [
   'archives',
   'world_revisions',
   'identity_edges',
+  // Native owner sources: the revision the change stream has been observed to (a counter the worker advances).
+  'owner_source_state',
 ] as const;
 /** Atlas Administration API custom-role bodies; apply through Atlas, never createRole on Atlas. */
 export function atlasRoleManifests(
@@ -44,7 +46,7 @@ export function atlasRoleManifests(
       // Domain records, the revision fence and derived edges only. The registry (schema_registry) and retained
       // data (retained_invoices) are never writable by the worker principal.
       action('UPDATE', names.world, EXECUTOR_WORLD_WRITES),
-      action('INSERT', names.world, ['identity_edges']),
+      action('INSERT', names.world, ['identity_edges', 'owner_source_state']),
       action('REMOVE', names.world, ['customers', 'accounts', 'messages', 'events', 'notes', 'archives']),
       control('FIND', [
         'jobs',
@@ -62,8 +64,15 @@ export function atlasRoleManifests(
         // Effects read the stored authority and decision ledger inside their transaction.
         'authority_revisions',
         'authority_touches',
+        // Evaluation scopes only: the campaign instance's authority row (read by the fence when the scope has no standing row)
+        // and its fence counter.
+        'campaign_authority',
+        'campaign_authority_touches',
         'decisions',
         'wake_commands',
+        'run_attestations',
+        // The service's readiness derives the evidence status from the committed outbox, read-only.
+        'telemetry_outbox',
         // The operator-facing service runs as this principal and serves committed projections: events, the per-job
         // sequence counters and the deployment history (promotions) are read-only here.
         'projection_events',
@@ -96,6 +105,8 @@ export function atlasRoleManifests(
         'decisions',
         // Wake-command deduplication ids, insert-only.
         'wake_commands',
+        // The lease holder's per-fence model attestation, insert-only (AttestationRepository).
+        'run_attestations',
         // The gateway's insert-only step log: subject, resolution, discovery, plans, sweeps, diagnostics.
         ...DOMAIN_STEP_COLLECTIONS,
         ...NATIVE_SOURCE_EXECUTOR_INSERTS,
@@ -106,11 +117,7 @@ export function atlasRoleManifests(
         'runs',
         'projection_sequences',
         'authority_touches',
-        'native_source_heads',
-        'native_source_budgets',
-        'native_source_consistency',
-        'native_source_gap_barriers',
-        'provenance_scope_barriers',
+        'campaign_authority_touches',
       ]),
     ]),
     observer: role('expunge_observer', [
@@ -130,6 +137,10 @@ export function atlasRoleManifests(
         'stream_offsets',
         // The export gate's narrow read: users under erasure, and which split a job's world belongs to.
         'erasure_suppressions',
+        // The latest leak-guard export generation: a guard file older than it, or one that does not cover the current
+        // subject set, is held, not used.
+        'guard_exports',
+        'subject_set_generations',
         'world_splits',
       ]),
       control('INSERT', [
@@ -195,6 +206,12 @@ export function atlasRoleManifests(
         'projection_sequences',
         // Read-only: the campaign port reads the fault-plan attestation row (kind 'fault') the gateway wrote.
         'domain_steps',
+        // Episode evidence for the gate, read-only: what a run committed and the plan it was verified against.
+        'completion_receipts',
+        'effects',
+        'preview_plans',
+        // The model attestation per fence the gate checks (insert-only, written by the worker).
+        'run_attestations',
       ]),
       // gate_claims: INSERT, then UPDATE of `state` only through the gate's compare-and-set (a collection grant cannot
       // narrow it). gate_attempts: the atomic per-parent counter (upsert = INSERT + UPDATE). campaign_artifact_permits:
@@ -225,25 +242,11 @@ export function atlasRoleManifests(
         'deployments',
         'artifacts',
         'authority_revisions',
-        'authority_touches',
-        'grant_consumptions',
-        'native_source_heads',
-        'native_source_registrations',
-        'native_source_owner_grants',
-        'native_source_previews',
-        'native_source_cleanup_requests',
-        'native_source_job_bindings',
-        'jobs',
+        // renderDescriptor runs as the issuer and asks ProvenanceRepository.tainted, which reads eligibility and ancestry.
         'artifact_eligibility',
         'provenance_edges',
-        'native_source_gap_barriers',
       ]),
-      control('INSERT', [
-        'approvals',
-        'native_source_owner_grants',
-        'native_source_cleanup_requests',
-        'native_source_preview_approvals',
-      ]),
+      control('INSERT', ['approvals']),
       // Bumping the authorization revision rewrites the authority row and its touch row together.
       control('UPDATE', ['authority_revisions', 'authority_touches', 'native_source_heads', 'jobs']),
     ]),
@@ -262,13 +265,22 @@ export function atlasRoleManifests(
         'provenance_edges',
         'authority_revisions',
         'authority_touches',
+        'campaign_authority',
+        'campaign_authority_touches',
         'jobs',
         // promote() looks for an already committed promotion (lost acknowledgment) and rollback() for a hash that was active.
         'promotions',
       ]),
       // candidates: the promoted state transition. approvals: grant consumption.
       // No UPDATE on approvals: a grant is consumed by inserting a unique grant_consumptions row.
-      control('UPDATE', ['deployments', 'candidates', 'jobs', 'projection_sequences', 'authority_touches']),
+      control('UPDATE', [
+        'deployments',
+        'candidates',
+        'jobs',
+        'projection_sequences',
+        'authority_touches',
+        'campaign_authority_touches',
+      ]),
       control('INSERT', [
         'deployments',
         'promotions',
@@ -294,10 +306,9 @@ export function atlasRoleManifests(
         'rollback_refusals',
         'campaign_artifacts',
         'campaign_artifact_rows',
-        // The evidence route's reads: outbox state, evidence rows (each carries its split) and a world's split.
-        'telemetry_outbox',
-        'evidence',
-        'world_splits',
+        // The operator Evaluation view reads the grader's insert-only gate reports.
+        'gate_reports',
+        'run_attestations',
         'stream_offsets',
         'native_source_receipts',
         'native_source_readbacks',
@@ -329,7 +340,8 @@ export function atlasRoleManifests(
         'telemetry_outbox',
         'lessons',
         'erasure_suppressions',
-        'native_source_heads',
+        'guard_exports',
+        'subject_set_generations',
       ]),
       control('UPDATE', [
         // A tombstone replaces a raw row or a lesson; a suppression flips `active`.
@@ -343,7 +355,8 @@ export function atlasRoleManifests(
         'jobs',
         'telemetry_outbox',
         'projection_sequences',
-        'native_source_heads',
+        // Bumped (upsert) in the transaction that registers subject tokens.
+        'subject_set_generations',
       ]),
       control('INSERT', [
         'artifact_eligibility',
@@ -358,16 +371,30 @@ export function atlasRoleManifests(
         'projection_events',
         'projection_sequences',
         'jobs',
+        // The leak guard's export generation, insert-only (GuardExportRepository).
+        'guard_exports',
+        'subject_set_generations',
       ]),
       control('REMOVE', ['raw_artifacts', 'subject_tokens']),
     ]),
     fixture_builder: role('expunge_fixture_builder', [
       worldRead,
-      // Seeds the world's records and registry. The derived edge index is written by the gateway alone (DA-5 DG9): a
-      // fixture builder that could write it could plant edges the discovery would then trust.
-      action('INSERT', names.world, SEEDED_WORLD_COLLECTIONS),
-      action('UPDATE', names.world, SEEDED_WORLD_COLLECTIONS),
-      action('REMOVE', names.world, ['customers', 'accounts', 'messages', 'events', 'notes', 'archives']),
+      action('INSERT', names.world, WORLD_COLLECTIONS),
+      // A registered owner source is insert-only per revision: the fixture builder registers a new revision, never edits one.
+      action(
+        'UPDATE',
+        names.world,
+        WORLD_COLLECTIONS.filter((name) => name !== 'owner_sources'),
+      ),
+      action('REMOVE', names.world, [
+        'customers',
+        'accounts',
+        'messages',
+        'events',
+        'notes',
+        'archives',
+        'identity_edges',
+      ]),
       action('FIND', names.private, PRIVATE_COLLECTIONS),
       action('INSERT', names.private, PRIVATE_COLLECTIONS),
       control('FIND', [
@@ -376,6 +403,9 @@ export function atlasRoleManifests(
         'artifact_eligibility',
         'campaign_freezes',
         'meta_draw_commitments',
+        // installForCampaign: refused in a scope with a worker deployment pointer; reads back its own campaign row.
+        'deployments',
+        'campaign_authority',
       ]),
       control('INSERT', [
         'jobs',
@@ -389,6 +419,11 @@ export function atlasRoleManifests(
         'projection_events',
         'projection_sequences',
         'provenance_edges',
+        // Insert-only authority row of an evaluation campaign instance. It lives apart from `authority_revisions`, which the
+        // fixture builder cannot write: the fence consults this collection only for env 'evaluation'. Insert-only, with its
+        // fence counter in a separate row.
+        'campaign_authority',
+        'campaign_authority_touches',
       ]),
       control('UPDATE', ['jobs', 'projection_sequences']),
     ]),

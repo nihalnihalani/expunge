@@ -118,6 +118,8 @@ export function projectionFailureCode(reason: string): FailureCode {
       return 'lease_lost';
     case 'ModelRunFailed':
     case 'ModelUnavailable':
+    case 'ProviderServerError':
+    case 'ProviderRateLimited':
       return 'provider_error';
     case 'HarnessNotDeployed':
       return 'policy_denied';

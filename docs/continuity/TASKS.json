@@ -1,7 +1,7 @@
 {
-  "exportedAt": "2026-10-11T15:27Z",
+  "exportedAt": "2026-10-11T19:22Z",
   "canonicalTracker": "claude-mem work_state list 'expunge-build' (lead-maintained); this file is a sanitized mirror",
-  "engine": "Claude Code CLI 2.1.296, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1; named teammates in the session implicit team",
+  "engine": "Claude Code desktop app 2.1.295, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 (second machine)",
   "leadEffectiveModel": "claude-opus-5-5",
   "teammates": {
     "mongodb-authority": {
@@ -432,15 +432,15 @@
       "id": "PKT-24",
       "title": "C3 P2 packages/gate (18 new; workspace)",
       "owner": "verifier then commit-steward",
-      "status": "doing",
-      "evidence": "verifier PARTIAL GREEN at the barrier (export abafe0b+P1+P2: lock +2 workspace entries, npm ci 0, tsc 0, fast 196/9 skipped, live 205/205, 5 mutations caught; remaining: catalog compile-probe, RBAC denial probe; low finding concurrency:1 runs 2). HELD until DA-8 D8-1, D8-2, D8-4 fixed or waived with reasons"
+      "status": "lost",
+      "evidence": "uncommitted WIP did not travel to the second machine; rebuilt under RSI-G1 / RSI-D1"
     },
     {
       "id": "PKT-25",
       "title": "C3 P3 packages/deployment (10 new; workspace)",
       "owner": "verifier then commit-steward",
-      "status": "doing",
-      "evidence": "verifier NOT STARTED; HELD with PKT-24; D8-3 (JobRepository.create accepts any harnessHash) to mongodb-authority first"
+      "status": "lost",
+      "evidence": "uncommitted WIP did not travel to the second machine; rebuilt under RSI-G1 / RSI-D1"
     },
     {
       "id": "PKT-26",
@@ -506,18 +506,70 @@
       "status": "todo",
       "evidence": "DG1 ownership-directed discovery",
       "owner": "mongodb-authority"
+    },
+    {
+      "id": "V-R1",
+      "title": "E1 fixture regression (HarnessNotDeployed since PKT-54); netguard stack; live-lane table",
+      "owner": "verifier",
+      "status": "doing"
+    },
+    {
+      "id": "RSI-G1",
+      "title": "Rebuild packages/gate (fresh paired admission) against DA-8",
+      "owner": "rsi-evolution",
+      "status": "doing"
+    },
+    {
+      "id": "RSI-D1",
+      "title": "Rebuild packages/deployment (approval descriptor, promotion, rollback)",
+      "owner": "rsi-evolution",
+      "status": "todo",
+      "dependsOn": ["RSI-G1"]
+    },
+    {
+      "id": "MA-R1",
+      "title": "Native owner-source registry/adapters, conditional effects with readback, external-writer consistency; PKT-16b",
+      "owner": "mongodb-authority",
+      "status": "doing"
+    },
+    {
+      "id": "RR-P1",
+      "title": "Non-root pinned service images, production topology, backup/restore drill, runbooks, CI job list",
+      "owner": "runtime-raindrop",
+      "status": "doing"
+    },
+    {
+      "id": "DA-9",
+      "title": "Real-data gap and overclaim audit",
+      "owner": "devils-advocate",
+      "status": "doing"
     }
   ],
   "blocked": [
     {
+      "item": "EXPUNGE-REAL-BUILD-SPEC.txt, EXPUNGE-DOTS-PROVISIONING-TASK.txt",
+      "reason": "absent on this machine",
+      "unblockedBy": "human supplies the files"
+    },
+    {
       "item": "Live Atlas/model/Raindrop/Intelligence proof",
       "reason": "root .env missing",
       "unblockedBy": "human creates root .env with names from .env.example"
+    },
+    {
+      "item": "Real-data protocol, authentic Hider cases, working-loop demo on owner data",
+      "reason": "no authorized real owner sources or rights",
+      "unblockedBy": "human provides authorized sources and retention terms"
+    },
+    {
+      "item": "360 task episodes and meta controls",
+      "reason": "no provider budget configured",
+      "unblockedBy": "human sets provider key and spend limit"
     }
   ],
   "git": {
-    "head": "adab094",
-    "note": "landed since takeover: PKT-30,31,35,36,38,34,41,37,16,33,39"
+    "head": "5b49dfe",
+    "note": "second-machine takeover; origin/main equal; clean tree; baseline checkpoint 20261011T190419Z-31cd0151"
   },
   "switch": {
     "takeoverAt": "2026-10-11T13:01Z",

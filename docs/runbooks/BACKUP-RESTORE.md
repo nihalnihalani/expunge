@@ -1,0 +1,104 @@
+# Backup and restore runbook
+
+Tools: `infra/services/backup/backup-mongo.mjs`, `restore-mongo.mjs`, `restore-drill.mjs`. They use the pinned
+`mongo:8.0.15@sha256:f4d54619...` image (mongodump 100.13.0) and read credentials only from environment variables.
+
+## Principals (BLOCKED on Atlas)
+
+- `EXPUNGE_BACKUP_URI`: a dedicated read-only principal over the three databases (world, control, private). It is not in
+  `PRINCIPALS`, so no Atlas role is defined for it yet; create one with read on those databases plus `listCollections`/`listIndexes`
+  through Atlas administration. It is never the setup principal and never a runtime principal. The private database holds sealed
+  material: keep the archive's destination access-controlled and encrypted at rest.
+- `EXPUNGE_RESTORE_URI`: a restore principal with write, `createCollection`, `collMod` and `createIndex` on the target databases.
+  Use only from the operator machine.
+- Atlas continuous or snapshot backup is the primary durable recovery and is **BLOCKED** (needs the Atlas project and tier). These
+  logical dumps are the portable, tested second layer.
+
+## Back up (SUPPORTED, drilled locally)
+
+1. Quiesce writers: `docker compose -p expunge-node stop worker` (and `observer` if running). A dump is consistent per collection
+   only; with writers running, cross-collection invariants (jobs vs effects vs receipts) can be torn.
+2. `EXPUNGE_BACKUP_URI=... EXPUNGE_WORLD_DB=... EXPUNGE_CONTROL_DB=... EXPUNGE_PRIVATE_DB=... node infra/services/backup/backup-mongo.mjs --out <dir>`
+   (add `--docker-network <net>` when the database is only reachable on a Docker network; the default is host networking).
+3. Output: three `expunge-<stamp>.{world,control,private}.archive.gz` and `expunge-<stamp>.manifest.json` with per-archive sha256 and
+   a fingerprint of the source (per collection: document count, order-independent document hash, validator hash, index hash).
+4. Copy the set off the host; keep the manifest with the archives. Restart workers.
+
+## Erasure, retention and the setup principal
+
+- A backup holds data that may later be erased (including subject literals and records under an erasure request). The manifest
+  carries `expiresAt` (default 30 days; `--retention-days`). Restore refuses an expired set (`BackupExpired`). Keep backups no
+  longer than the shortest erasure deadline you owe, and delete the sets and their off-host copies at expiry; a pruning job is
+  not provided, delete expired sets by hand.
+- A restore can resurrect records erased after the backup, and the facts of those erasures are not in the restored database.
+  They must come from a source that survives the restore, so the order matters:
+  1. **Before wiping the damaged database** (if it is still readable): `node --import tsx packages/privacy/src/reapply-cli.ts export --ledger <file>`
+     with `MONGODB_PRIVACY_CONTROLLER_URI` (never setup). The ledger holds every erasure job and source tombstone (opaque provider ids
+     and hashes, no subject text), mode 0600; keep it with the backup, not beside it in the open. If the database is unreadable and
+     no earlier ledger exists, **there is no independent erasure record in this repository**: reconstruct the list from the
+     provider's own erasure jobs and the privacy controller's request log, or keep the restored system out of service.
+  2. Restore (below), with `--reapply-erasures-after-restore`.
+  3. **Before any service starts:** `reapply-cli.ts apply --ledger <file> --cursor <file>`. It replays erasure jobs (inserted when
+     missing, advanced when behind, never moved back), re-derives the export suppressions, and purges tombstoned sources again. It
+     is idempotent and resumable (the cursor records progress and is bound to the ledger's hash). Exit 0 means DONE; **exit 5 means
+     something is pending and the system must stay out of service**.
+  4. DONE also needs two attestations this tool cannot perform itself, each with a ticket or run reference:
+     `reapply-cli.ts attest --cursor <file> world-effects-reconciled=<ref>` (world-record deletions reconciled against the owner
+     source) and `derived-artifacts-retracted=<ref>` (lessons and eligibility retracted by the retraction runner). Re-run `apply`
+     afterwards; it verifies the database state again.
+  **Ledger integrity and handling.** `export` needs `EXPUNGE_LEDGER_MAC_KEY` (a privacy-controller secret, at least 32 characters;
+  the variable NAME only is documented, the value is never printed or stored in the file) and signs the ledger with HMAC-SHA256;
+  `apply` refuses a ledger whose MAC, header or retention fails (`LedgerMacInvalid`, `LedgerHeaderMismatch`, `LedgerExpired`).
+  The header carries per-collection counts and latest timestamps, so a truncated ledger is visible, and export itself refuses when
+  the collections' counts differ from what it read (`LedgerChangedDuringExport`). Retention is stated in the header
+  (`--retention-days`, default 30): keep the ledger at least as long as the backups it pairs with and delete it at expiry (no
+  pruning job exists). Encryption: set `EXPUNGE_LEDGER_ENC_KEY` (64 hex characters) for built-in AES-256-GCM; without it the file is
+  plaintext JSON mode 0600 and the destination must be an encrypted volume or bucket, which the tool does not check. The MAC detects
+  edits by anyone without the key; it does not hide contents.
+  **Out of service until verified.** If ANY cleanup or erasure completed after the backup, the restored system must stay out of
+  service until a verified re-application exists. The runner is a partial tool: exit 0 means only that the replayed jobs,
+  suppressions and tombstones are present. The two attestations are free text in an unauthenticated cursor file, **ATTESTED, NOT
+  VERIFIED** (no principal vouches for them and nothing checks them against the database), so exit 0 does not mean erasure is
+  complete. Not yet done: replaying committed effects and receipts with read-back, verifying derived artifacts, suppressing
+  every user of post-backup completed jobs, re-registering subjects added after the backup, per-collection counts in the ledger
+  header, and a keyed MAC and encrypted destination for the ledger.
+  Limits: the runner replays what the ledger holds; it cannot recover effects or receipts committed after the backup, which the
+  restore also lost, and it does not delete world records; those are the two attestations.
+- The backup and restore principals are dedicated; the tools refuse a URI equal to `MONGODB_SETUP_URI` (`SetupPrincipalRefused`).
+  The Atlas setup user must not be used for either (BLOCKED: the two Atlas users and their read-only / restore roles are not
+  created; names to create: `expunge_backup` read on the three databases, `expunge_restore` write on the target databases).
+- Archives and the manifest are written mode 0600 by the invoking non-root user (the tools container runs as your uid with a
+  read-only root and no capabilities). After the dump the source is fingerprinted again; a difference deletes the set
+  (`SourceChangedDuringBackup`) so a torn backup cannot be mistaken for a good one.
+
+## Restore (SUPPORTED, drilled locally)
+
+1. Stop every service that holds a runtime principal. Never restore under a running worker: leases and fences would race the data.
+2. The target databases must be empty (a typo cannot overwrite live data: the tool refuses non-empty targets unless `--drop`, and
+   requires the target names to be repeated in `--confirm-databases`). To recover in place, drop the damaged databases first from
+   the operator machine; to recover beside, use `--map old=new,...` and repoint the services.
+3. `EXPUNGE_RESTORE_URI=... node infra/services/backup/restore-mongo.mjs --manifest <file> --confirm-databases a,b,c --reapply-erasures-after-restore`
+4. The tool verifies each archive's sha256 against the manifest, restores with the same pinned image, then fingerprints the target and
+   compares it with the manifest. Exit 0 means validators, indexes and every document hash are identical; exit 4 lists differences.
+5. Run `npm run setup:mongo` once (idempotent) to re-assert validators, indexes and the authority rows, then start services.
+6. Projection streams: clients that had read events newer than the backup hold a sequence the restored stream no longer has.
+   `ProjectionRepository.resetStream(key, jobId, 'restore')` (setup principal) restarts a job's stream under a new epoch so
+   clients re-page; **no script wraps it yet**. Until one exists, restart the operator and treat open job views as stale.
+7. Do not replay Raindrop or provider side effects. Telemetry outbox rows restored in `sdk_enqueued`/`ingest_accepted` states are
+   re-driven by the dispatcher's own ladder, which is idempotent per operation id.
+
+## Drill (SUPPORTED)
+
+```sh
+# own replica set (copy packages/mongo/test/docker-compose.yml, add ulimits nofile 64000, port 127.0.0.1:27318)
+docker compose -p expunge-rr -f <copy> up -d --wait
+node infra/services/backup/restore-drill.mjs
+```
+
+It seeds throwaway databases through `scripts/setup-mongo.ts` and the repositories, backs up, drops the databases, restores,
+compares validators/indexes/documents, checks archive modes (0600), proves the restored validators reject an invalid insert (code 121) and the unique index
+rejects a duplicate (code 11000), and runs negative controls (changed document detected, checksum mismatch, non-empty target, wrong confirmation, missing re-apply acknowledgement, expired backup, setup principal refused). It refuses a non-local URI and drops its databases at the end. Run it before
+every release and after any change under `packages/mongo/src/validators*.ts` or `setup.ts`.
+
+Limits: the drill is a local replica set with 16 seeded documents across 74 collections; it proves the tooling and the validator
+and index round trip, not Atlas RBAC, Atlas sizes, or a restore time objective.

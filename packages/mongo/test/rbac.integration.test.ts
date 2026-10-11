@@ -455,9 +455,60 @@ describeRbac('real authenticated local replica-set RBAC (not Atlas provisioning)
     // A campaign permit is not an eligibility row: the grader cannot make any artifact eligible for a production run.
     await allowed('grader', 'campaign_artifact_permits', ['find', 'insert']);
     await denied('grader', 'campaign_artifact_permits', ['update', 'remove']);
+    await allowed('domain_executor', 'campaign_artifact_permits', ['find']);
     await denied('domain_executor', 'campaign_artifact_permits', ['insert', 'update', 'remove']);
     await denied('grader', 'artifact_eligibility', ['insert', 'update', 'remove']);
     await denied('fixture_builder', 'artifact_eligibility', ['insert', 'update', 'remove']);
+    // Episode evidence for the gate: read-only for the grader.
+    for (const name of ['completion_receipts', 'effects', 'preview_plans']) {
+      await allowed('grader', name, ['find']);
+      await denied('grader', name, ['insert', 'update', 'remove']);
+    }
+    // The operator Evaluation view reads gate reports; it cannot write them.
+    await allowed('projection_reader', 'gate_reports', ['find']);
+    await denied('projection_reader', 'gate_reports', ['insert', 'update', 'remove']);
+    // The approval issuer's descriptor render reads eligibility and ancestry; it can write neither.
+    for (const name of ['artifact_eligibility', 'provenance_edges']) {
+      await allowed('approval_issuer', name, ['find']);
+      await denied('approval_issuer', name, ['insert', 'update', 'remove']);
+    }
+    // The domain service derives the readiness evidence status from the outbox, read-only.
+    await allowed('domain_executor', 'telemetry_outbox', ['find']);
+    // Per-fence model attestations: the worker inserts, the gate reads, nobody changes one.
+    await allowed('domain_executor', 'run_attestations', ['find', 'insert']);
+    await denied('domain_executor', 'run_attestations', ['update', 'remove']);
+    await allowed('grader', 'run_attestations', ['find']);
+    await denied('grader', 'run_attestations', ['insert', 'update', 'remove']);
+    await allowed('projection_reader', 'run_attestations', ['find']);
+    await denied('projection_reader', 'run_attestations', ['insert', 'update', 'remove']);
+    await denied('promoter', 'run_attestations', ['find', 'insert', 'update', 'remove']);
+    // Leak-guard export generations: the privacy controller inserts, the observer reads.
+    await allowed('privacy_controller', 'guard_exports', ['find', 'insert']);
+    await denied('privacy_controller', 'guard_exports', ['update', 'remove']);
+    await allowed('observer', 'guard_exports', ['find']);
+    await denied('observer', 'guard_exports', ['insert', 'update', 'remove']);
+    await denied('domain_executor', 'guard_exports', ['find', 'insert', 'update', 'remove']);
+    await allowed('privacy_controller', 'subject_set_generations', ['find', 'insert', 'update']);
+    await denied('privacy_controller', 'subject_set_generations', ['remove']);
+    await allowed('observer', 'subject_set_generations', ['find']);
+    await denied('observer', 'subject_set_generations', ['insert', 'update', 'remove']);
+    await denied('domain_executor', 'subject_set_generations', ['find', 'insert', 'update', 'remove']);
+    // The fixture builder can write NO standing authority: raw-driver inserts are denied. Its campaign row is separate.
+    await denied('fixture_builder', 'authority_revisions', ['insert', 'update', 'remove']);
+    await denied('fixture_builder', 'authority_touches', ['insert', 'update', 'remove']);
+    await allowed('fixture_builder', 'campaign_authority', ['find', 'insert']);
+    await denied('fixture_builder', 'campaign_authority', ['update', 'remove']);
+    // The floor and revision cannot be rewritten by the principals that fence; only the counter row is theirs.
+    await allowed('domain_executor', 'campaign_authority', ['find']);
+    await denied('domain_executor', 'campaign_authority', ['insert', 'update', 'remove']);
+    await allowed('promoter', 'campaign_authority', ['find']);
+    await denied('promoter', 'campaign_authority', ['insert', 'update', 'remove']);
+    await allowed('fixture_builder', 'campaign_authority_touches', ['insert']);
+    await denied('fixture_builder', 'campaign_authority_touches', ['update', 'remove']);
+    await allowed('domain_executor', 'campaign_authority_touches', ['find', 'update']);
+    await denied('domain_executor', 'campaign_authority_touches', ['insert', 'remove']);
+    await allowed('promoter', 'campaign_authority_touches', ['find', 'update']);
+    await denied('grader', 'campaign_authority', ['insert', 'update', 'remove']);
   });
 
   it('PKT-62 collections: named raw-driver denials', async () => {

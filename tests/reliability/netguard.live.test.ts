@@ -12,12 +12,14 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { containerRunning, dockerAvailable, imagePresent, liveGate } from './support.js';
+import { REQUIRE_LIVE, containerRunning, dockerAvailable, imagePresent, liveGate } from './support.js';
 
 const NETGUARD = process.env.EXPUNGE_NETGUARD_CONTAINER ?? 'expunge-a1-candidate-candidate-netguard-1';
 const NEIGHBOR = process.env.EXPUNGE_NEIGHBOR_CONTAINER ?? 'expunge-a1-neighbor';
 const IMAGE = process.env.EXPUNGE_PROBE_IMAGE ?? 'node:24.18.1-alpine';
-const stackUp = dockerAvailable() && containerRunning(NETGUARD) && imagePresent(IMAGE);
+// Opt-in only: a container that happens to carry the default name never switches this suite on by itself.
+const optedIn = REQUIRE_LIVE || Boolean(process.env.EXPUNGE_NETGUARD_CONTAINER);
+const stackUp = optedIn && dockerAvailable() && containerRunning(NETGUARD) && imagePresent(IMAGE);
 const describeLive = liveGate(
   stackUp,
   `the candidate stack (${NETGUARD}) and image ${IMAGE}`,

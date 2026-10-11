@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createCheckpoint } from '../checkpoint.mjs';
-import { buildRedactionSet, classifyPath, parseEnv, readLatest, safeRelPath, scanBuffer } from '../lib.mjs';
+import {
+  buildRedactionSet,
+  classifyPath,
+  isSecretEnvValue,
+  parseEnv,
+  readLatest,
+  safeRelPath,
+  scanBuffer,
+} from '../lib.mjs';
 import { Buffer } from 'node:buffer';
 import { cleanupTmp, commitAll, mkRepo, secrets, sh, treeContains, write } from './helpers.mjs';
 
@@ -90,6 +98,54 @@ test('values from a present .env are redacted by value; only the key NAME is rep
   );
   assert.equal(treeContains(r.dir, secrets.envValue()), false);
   assert.deepEqual(r.manifest.secretScan.envRedaction, { sources: ['.env'], valueCount: 1 });
+});
+
+test('only secret-looking .env values are withheld: loopback URLs, ports and names are not', () => {
+  const repo = mkRepo();
+  write(repo, 'a.txt', 'a1\n');
+  commitAll(repo);
+  const mongo = `mongodb://appuser:${secrets.envValue()}@127.0.0.1:27018/?replicaSet=rs0`;
+  write(
+    repo,
+    '.env',
+    [
+      'EXPUNGE_WORKER_URL=http://127.0.0.1:4320',
+      'EXPUNGE_PORT=4320',
+      'EXPUNGE_SCOPE_ID=scope-production-main',
+      'MODEL_ID=anthropic/claude-sonnet-5-5',
+      'EXPUNGE_DEBUG=true',
+      'MONGODB_URI=' + mongo,
+      'SERVICE_TOKEN=' + secrets.envValue(),
+      '',
+    ].join('\n'),
+  );
+  write(
+    repo,
+    'docs/runbook.md',
+    'worker listens at http://127.0.0.1:4320 in scope-production-main with port 4320\n',
+  );
+  write(repo, 'docs/leak.md', `uri ${mongo}\n`);
+  const r = createCheckpoint({ repo, now: FIXED });
+  assert.deepEqual(
+    r.manifest.secretScan.findings.map((f) => f.path),
+    ['docs/leak.md'],
+    'the loopback URL, port and scope name in the runbook are not findings; the credentialed URI still is',
+  );
+  assert.ok(r.manifest.untracked.some((e) => e.path === 'docs/runbook.md'));
+  assert.equal(r.manifest.secretScan.envRedaction.valueCount, 2);
+});
+
+test('isSecretEnvValue classifies by name and shape', () => {
+  assert.equal(isSecretEnvValue('EXPUNGE_WORKER_URL', 'http://127.0.0.1:4320'), false);
+  assert.equal(isSecretEnvValue('API_KEY', 'http://127.0.0.1:4320'), false);
+  assert.equal(isSecretEnvValue('DB_URI', 'mongodb://u:pw12345678@127.0.0.1:27018/'), true);
+  assert.equal(isSecretEnvValue('PORT', '4320'), false);
+  assert.equal(isSecretEnvValue('FLAG', 'true'), false);
+  assert.equal(isSecretEnvValue('MODEL', 'anthropic/claude-sonnet-5-5'), false);
+  assert.equal(isSecretEnvValue('OPERATOR_TOKEN_SHA256', 'a'.repeat(8) + 'bc12'.repeat(14)), true);
+  assert.equal(isSecretEnvValue('SOME_KEY', 'sk-live-abcdefgh'), true);
+  assert.equal(isSecretEnvValue('UNNAMED', 'q7Zk2mPx9LrT4vWb8NcY1dHs'), true);
+  assert.equal(isSecretEnvValue('UNNAMED', 'scope-production-main'), false);
 });
 
 test('briefing and notes are scanned too', () => {

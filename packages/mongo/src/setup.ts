@@ -17,6 +17,7 @@ import {
 } from './validators.js';
 import { CAMPAIGN_RESULT_COLLECTIONS, CAMPAIGN_RESULT_INDEXES } from './validators-campaign.js';
 import { GATE_CONTROL_COLLECTIONS, GATE_CONTROL_INDEXES } from './validators-extra.js';
+import { ATTEST_COLLECTIONS, ATTEST_INDEXES } from './validators-attest.js';
 import { PRIVACY_COLLECTIONS, PRIVACY_INDEXES } from './validators-privacy.js';
 import { NATIVE_SOURCE_COLLECTIONS, NATIVE_SOURCE_INDEXES } from './native-source-metadata.js';
 
@@ -32,6 +33,8 @@ export const WORLD_COLLECTIONS = [
   'world_revisions',
   'world_scope_bindings',
   'retained_invoices',
+  'owner_sources',
+  'owner_source_state',
 ] as const;
 export const CONTROL_COLLECTIONS = [
   'jobs',
@@ -68,6 +71,8 @@ export const CONTROL_COLLECTIONS = [
   'grant_consumptions',
   'authority_revisions',
   'authority_touches',
+  'campaign_authority',
+  'campaign_authority_touches',
   'decisions',
   'wake_commands',
   'job_subjects',
@@ -78,7 +83,7 @@ export const CONTROL_COLLECTIONS = [
   ...GATE_CONTROL_COLLECTIONS,
   ...CAMPAIGN_RESULT_COLLECTIONS,
   ...PRIVACY_COLLECTIONS,
-  ...NATIVE_SOURCE_COLLECTIONS,
+  ...ATTEST_COLLECTIONS,
 ] as const;
 export const PRIVATE_COLLECTIONS = [
   'fixture_specs',
@@ -142,6 +147,8 @@ export const CONTROL_INDEXES: IndexEntry[] = [
   { collection: 'grant_consumptions', key: { ...identity, target: 1, candidateId: 1 } },
   { collection: 'authority_revisions', key: { ...identity }, options: { unique: true } },
   { collection: 'authority_touches', key: { ...identity }, options: { unique: true } },
+  { collection: 'campaign_authority', key: { ...identity }, options: { unique: true } },
+  { collection: 'campaign_authority_touches', key: { ...identity }, options: { unique: true } },
   { collection: 'decisions', key: { ...identity, jobId: 1, stepId: 1, batchOrdinal: 1 } },
   { collection: 'job_subjects', key: { ...identity, jobId: 1 }, options: { unique: true } },
   {
@@ -176,7 +183,7 @@ export const CONTROL_INDEXES: IndexEntry[] = [
   ...GATE_CONTROL_INDEXES,
   ...CAMPAIGN_RESULT_INDEXES,
   ...PRIVACY_INDEXES,
-  ...NATIVE_SOURCE_INDEXES,
+  ...ATTEST_INDEXES,
 ];
 export const WORLD_INDEXES: IndexEntry[] = [
   ...WORLD_COLLECTIONS.filter((n) =>
@@ -185,6 +192,8 @@ export const WORLD_INDEXES: IndexEntry[] = [
   { collection: 'schema_registry', key: { ...identity, revision: 1 }, options: { unique: true } },
   { collection: 'world_scope_bindings', key: { ...identity, worldId: 1 }, options: { unique: true } },
   { collection: 'world_revisions', key: { ...identity, worldId: 1 }, options: { unique: true } },
+  { collection: 'owner_sources', key: { ...identity, sourceId: 1, revision: 1 }, options: { unique: true } },
+  { collection: 'owner_source_state', key: { ...identity, sourceId: 1 }, options: { unique: true } },
   { collection: 'identity_edges', key: { edgeKey: 1 }, options: { unique: true } },
   // Edges are versioned by the world revision they were derived at; traversal reads one revision only.
   { collection: 'identity_edges', key: { ...identity, worldId: 1, worldRevision: 1, fromNode: 1 } },

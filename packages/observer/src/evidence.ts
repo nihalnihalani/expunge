@@ -157,7 +157,7 @@ export function observeEvent(
       properties: rawProperties,
       featureFlags: event.feature_flags,
       signals: (event.signals ?? []).map((s) => [s.id, s.name]),
-      toolCalls: (event.tool_calls ?? []).map((t) => t.name),
+      toolCalls: (event.tool_calls ?? []).map((t) => t.tool_name),
       spans: (traces?.spans ?? []).map((span) => [span.span_name, span.span_type, span.model, span.provider]),
     },
     guard,
@@ -227,7 +227,7 @@ export function observeEvent(
         score: s.score ?? null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
-    toolCallNames: (event.tool_calls ?? []).map((t) => sanitizeProperty(t.name, policy)),
+    toolCallNames: (event.tool_calls ?? []).map((t) => sanitizeProperty(t.tool_name, policy)),
     errorSpanCount: event.error_spans?.length ?? 0,
     topicCount: event.topics?.length ?? 0,
   };

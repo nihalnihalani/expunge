@@ -87,7 +87,7 @@ export class MongoEligibilityStore implements EligibilityStore {
   }
 }
 
-const erasureId = (scope: ScopeKey, requestKey: string) =>
+export const erasureId = (scope: ScopeKey, requestKey: string) =>
   contentHash(
     { tenantId: scope.tenantId, env: scope.env, scopeId: scope.scopeId, requestKey },
     'external-deletion',

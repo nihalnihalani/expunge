@@ -7,6 +7,7 @@ import {
   type ScopeKey,
 } from '@expunge/contracts';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
+import { assertCampaignScope } from './campaign.js';
 
 /**
  * Provenance graph traversal and revocation.
@@ -291,10 +292,28 @@ export class ProvenanceRepository {
    */
   async permitted(key: ScopeKey, hashes: string[], session?: ClientSession): Promise<string[]> {
     if (hashes.length > RETRIEVAL_MAX_HASHES) fail('RetrievalBounds');
+    // Every eligibility row decides, whatever its state: a revoked, retracted or pending row blocks the hash.
     const rows = await this.eligibility
-      .find({ ...scopeFilter(key), artifactHash: { $in: hashes }, state: 'permitted' }, { session })
+      .find({ ...scopeFilter(key), artifactHash: { $in: hashes } }, { session })
       .toArray();
-    const candidates = rows.map((row) => row.artifactHash);
+    const decided = new Set(rows.map((row) => row.artifactHash));
+    const candidates = rows.filter((row) => row.state === 'permitted').map((row) => row.artifactHash);
+    // A hash with NO eligibility row at all may still be a gate campaign's pinned harness: the grader's campaign permit
+    // counts, and only in a campaign scope (evaluation env, no worker deployment pointer). Never over an eligibility row.
+    const undecided = [...new Set(hashes)].filter((hash) => !decided.has(hash));
+    if (undecided.length > 0) {
+      const permits = await this.service.control
+        .collection<{ artifactHash: string }>('campaign_artifact_permits')
+        .find({ ...scopeFilter(key), artifactHash: { $in: undecided } }, { session })
+        .toArray();
+      if (permits.length > 0) {
+        const inCampaignScope = await assertCampaignScope(this.service, key).then(
+          () => true,
+          () => false,
+        );
+        if (inCampaignScope) candidates.push(...permits.map((permit) => permit.artifactHash));
+      }
+    }
     const blocked = await this.blockedByAncestry(key, candidates, session);
     return candidates.filter((hash) => !blocked.has(hash));
   }

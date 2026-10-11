@@ -310,6 +310,14 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
   });
   it('keeps authority rows with their owners', () => {
     expect(holders('INSERT', 'authority_revisions')).toEqual([]);
+    // The fixture builder's campaign authority is a separate collection the fence reads only for env 'evaluation'.
+    expect(holders('INSERT', 'campaign_authority')).toEqual(['fixture_builder']);
+    // The floor and revision are insert-only; the fence counter is a separate collection, as for the standing authority.
+    expect(holders('UPDATE', 'campaign_authority')).toEqual([]);
+    expect(holders('REMOVE', 'campaign_authority')).toEqual([]);
+    expect(holders('INSERT', 'campaign_authority_touches')).toEqual(['fixture_builder']);
+    expect(holders('UPDATE', 'campaign_authority_touches').sort()).toEqual(['domain_executor', 'promoter']);
+    expect(holders('REMOVE', 'campaign_authority_touches')).toEqual([]);
     expect(holders('UPDATE', 'authority_revisions')).toEqual(['approval_issuer']);
     expect(holders('UPDATE', 'authority_touches').sort()).toEqual([
       'approval_issuer',
@@ -341,6 +349,42 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
     expect(holders('INSERT', 'candidates')).toEqual(['proposer']);
     expect(holders('UPDATE', 'candidates')).toEqual(['promoter']);
   });
+  it('lets the approval issuer read eligibility and provenance (renderDescriptor taint check) and write neither', () => {
+    for (const collection of ['artifact_eligibility', 'provenance_edges']) {
+      expect(holders('FIND', collection), collection).toContain('approval_issuer');
+      for (const verb of ['INSERT', 'UPDATE', 'REMOVE'])
+        expect(holders(verb, collection), `${verb} ${collection}`).not.toContain('approval_issuer');
+    }
+  });
+  it('lets the worker principal read the telemetry outbox (readiness evidence status) and keeps the writers as they were', () => {
+    expect(holders('FIND', 'telemetry_outbox')).toContain('domain_executor');
+  });
+  it('lets the grader read the world revision counter and write none of it', () => {
+    expect(holders('FIND', 'world_revisions')).toContain('grader');
+    expect(holders('UPDATE', 'world_revisions')).not.toContain('grader');
+    expect(holders('INSERT', 'world_revisions')).not.toContain('grader');
+  });
+
+  it('keeps run attestations and guard exports insert-only with named writers and readers', () => {
+    expect(holders('INSERT', 'run_attestations')).toEqual(['domain_executor']);
+    expect(holders('FIND', 'run_attestations').sort()).toEqual([
+      'domain_executor',
+      'grader',
+      'projection_reader',
+    ]);
+    expect(holders('INSERT', 'guard_exports')).toEqual(['privacy_controller']);
+    expect(holders('FIND', 'guard_exports').sort()).toEqual(['observer', 'privacy_controller']);
+    // The subject-set generation is bumped by the privacy controller when it registers subjects; the observer only reads it.
+    expect(holders('INSERT', 'subject_set_generations')).toEqual(['privacy_controller']);
+    expect(holders('UPDATE', 'subject_set_generations')).toEqual(['privacy_controller']);
+    expect(holders('REMOVE', 'subject_set_generations')).toEqual([]);
+    expect(holders('FIND', 'subject_set_generations').sort()).toEqual(['observer', 'privacy_controller']);
+    for (const collection of ['run_attestations', 'guard_exports']) {
+      expect(holders('UPDATE', collection), collection).toEqual([]);
+      expect(holders('REMOVE', collection), collection).toEqual([]);
+    }
+  });
+
   it('keeps the gateway step log insert-only and with the worker alone', () => {
     for (const collection of [
       'job_subjects',
@@ -352,9 +396,11 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
       expect(holders('INSERT', collection), collection).toEqual(['domain_executor']);
       expect(holders('UPDATE', collection), collection).toEqual([]);
       expect(holders('REMOVE', collection), collection).toEqual([]);
-      // The grader additionally reads domain_steps: the fault attestation row. Nothing else of the log.
+      // The grader additionally reads domain_steps (the fault attestation row) and preview_plans (episode evidence). Nothing else.
       expect(holders('FIND', collection).sort(), collection).toEqual(
-        collection === 'domain_steps' ? ['domain_executor', 'grader'] : ['domain_executor'],
+        collection === 'domain_steps' || collection === 'preview_plans'
+          ? ['domain_executor', 'grader']
+          : ['domain_executor'],
       );
     }
     // Subject literals live in job_subjects; the projection reader must never see them.

@@ -1,0 +1,22 @@
+{
+  "name": "@expunge/gate",
+  "version": "0.1.0",
+  "description": "Fresh paired admission: exact tested parent and child on separately reset campaign worlds, graded by the fixed grader, decided by a frozen rule, recorded as the only source of a candidate's computed class.",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@expunge/contracts": "0.1.0",
+    "@expunge/domain": "0.1.0",
+    "@expunge/fixtures": "0.1.0",
+    "@expunge/grader": "0.1.0",
+    "@expunge/harness-compiler": "0.1.0",
+    "@expunge/mongo": "0.1.0",
+    "mongodb": "7.7.0"
+  },
+  "devDependencies": {
+    "@expunge/baselines": "0.1.0"
+  }
+}

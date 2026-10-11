@@ -1,0 +1,19 @@
+{
+  "name": "@expunge/deployment",
+  "version": "0.1.0",
+  "description": "Approval descriptors rendered from stored rows, grant issue, atomic promotion, pinned jobs and audited rollback over DeploymentRepository.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/contracts": "0.1.0",
+    "@expunge/fixtures": "0.1.0",
+    "@expunge/gate": "0.1.0",
+    "@expunge/grader": "0.1.0",
+    "@expunge/harness-compiler": "0.1.0",
+    "@expunge/mongo": "0.1.0"
+  },
+  "devDependencies": {
+    "@expunge/baselines": "0.1.0"
+  }
+}

@@ -159,3 +159,157 @@ and transaction support without printing credentials. With `MONGODB_DOMAIN_EXECU
 block for the worker principal (privileges that name the private database, whether a direct read of it is refused with
 code 13, and `rbacEnforced`). On a local replica set without authentication that block says `rbacEnforced: false`; it
 describes the server it ran against and is not evidence about an Atlas custom role.
+
+## Native owner sources (MA-R1; local protocol evidence only)
+A synthetic world is a database this system builds: documents wrapped under `data`, stamped with `tenantId`/`env`/`worldId`/
+`_rev`/`eligibility`/`access`/`lifecycle`, in fixed collections, with one controlled writer advancing `world_revisions`. A
+**native owner source** is the owner's own database, registered as it is, written by the owner's applications at any time.
+The two paths coexist; the synthetic one stays for labeled protocol tests. Code: `native-values.ts`, `owner-source.ts`,
+`native-adapter.ts`, `source-revision.ts`. Tests: `native-source.integration.test.ts` (made-up records, local replica set; not
+authentic owner data, not Atlas).
+
+- **Registration is the contract's** (`NativeSourceRegistration`, `@expunge/contracts` source.ts, stored by `OwnerSourceRepository` in
+  `owner_sources`: insert-only per revision, the registration's own `revision` must be the next one, hashed with
+  `nativeRegistrationHash`, re-hashed and re-parsed on read; written by `fixture_builder`/`setup` only; storing is not authorizing,
+  the registration's `ownerReview` is evidence and a separate owner grant remains what authorizes installation). `compileOwnerSource`
+  adds what the contract leaves to the Mongo layer: no reserved database (`admin`, `local`, `config`, `expunge_*`, every
+  `EXPUNGE_*_DB` value; also rechecked in `connectOwnerSource`), exactly one protected `_id` key field per namespace whose
+  `bsonTypes` are string/objectId/int/long (`binData` is accepted only as a subtype-4 UUID: the contract has no UUID scalar), and a
+  per-deployment connection variable `EXPUNGE_SOURCE_<DEPLOYMENT_ID>_URI` (the value is never stored).
+- **How the adapter reads the contract.** Namespaces may live in several databases. `identity` fields are the subject's exact
+  identity; the referencing side of a declared reference is a reference field; every query and write also carries the namespace's
+  tenant boundary, so another tenant's document in a shared collection is invisible. Policy is the contract's `rules`: an effect is
+  allowed on a document only when a rule of that effect for the namespace has all its conditions true (a legal hold is a condition
+  that is false); a document no rule selects is retained. A rule writes only its `fieldIds`; protected and retained fields can
+  never be in one (the contract refuses it). Interpretation the contract does not state, to be confirmed: in an identity or
+  referencing rule field the adapter replaces values equal to the subject's bindings; in any other rule field every scalar it
+  holds; `restrict` sets each rule field to the replacement even if absent.
+- **Discovery by ownership (DG1)**: `ownedClosure` walks only `owner: to` incoming and `owner: from` outgoing edges, with indexed
+  lookups on the source (no edge table, no scan), never up into a shared parent (`none`) and so never into another subject's
+  records, bounded by `limits.maxHops`/`maxScanned`; `string_to_objectId`/`objectId_to_string` are converted per rule; a cut reports
+  `truncated`.
+- **Conditional effect with read-back** (`NativeSourceAdapter.applyEffect`): the caller holds the preimage hash from preview. The
+  adapter re-reads, refuses on a different hash (`SourceConflict`), selects the rule, then writes with a precondition: under
+  `conditional_preimage` the filter is the whole preimage (`$expr` equality against `$$ROOT`, with BSON types and order); under
+  `native_revision` the owner's revision field plus the exact values being replaced, and the revision field is the owner's:
+  the adapter guards on it and does NOT bump it (it is protected). Writes are targeted (`$set` with `arrayFilters`, `deleteOne`),
+  never the bare array. No match means re-read: equal to the expected post-image is `replayed`, anything else is `SourceConflict` and
+  the external value survives. After the write the document is read again and must equal the expected post-image (the revision
+  field excluded, since the owner's writers may move it), or `ReadbackMismatch` names the diverged top-level keys.
+- **External-writer consistency**: no controlled counter. `SourceRevisionRepository.observe` drains the change stream (filtered to each namespace's tenant boundary; deletes and
+  drops carry no document and count unconditionally, which only over-counts) of EVERY database
+  the source uses (resume token per database, advanced by compare-and-set) into `{observedSeq, epoch}`; a lost history or a
+  dropped/renamed collection bumps `epoch`. The pair is advisory for derived state and never guards a write; every write is
+  guarded by its own document. A conflict means re-preview, never a blind write. Rows use the contract's explicit
+  `staging|production` environment, not the synthetic `dev|evaluation|demo`.
+- **`native_revision` contract** (the owner's own declaration): the owner's writers MUST move the revision field on every write to
+  the document. Under it an update is guarded by the revision and by each value being replaced, but `delete` and `restrict` carry
+  no per-value guard, so an owner write that skips the revision would be deleted or restricted over. Numbers compare by value
+  (MongoDB equality): an int changed to a double of the same value passes `conditional_preimage` and is then caught by the read-back
+  (`ReadbackMismatch`), never silently kept.
+- **Crash recovery is NOT an idempotent replay.** `applyEffect` compares the current document with the preview's preimage hash
+  first and throws `SourceConflict('preimage_changed')` when they differ, so a process that restarts and re-applies with the old
+  preimage after its write already landed gets a conflict, not `replayed`. `replayed: true` covers only a write that lands between
+  the adapter's own preimage read and its conditional update, inside one call. After a crash: re-preview, which finds nothing
+  left to write. A delete whose receipt is lost looks like an external delete (`SourceConflict('absent')`).
+- **OPEN, required before the gateway uses the adapter:**
+  - **NA-2**: a control-plane write-ahead intent `{effectKey, address, preHash, expectedPostHash | null}` committed BEFORE the
+    source write, and a reconcile step that decides from it: current hash equals `expectedPostHash` is applied (receipt labelled
+    `recovered`); absent after a delete intent is recorded as exactly "applied or externally deleted"; equals `preHash` is not
+    applied; anything else is a conflict.
+  - **NA-3**: the gateway's stored plan pins target addresses from `ownedClosure`, and the adapter must refuse a target outside
+    it (for example by taking the pinned address set). Today `planEffect`/`applyEffect` accept any registered address with an
+    allowed effect, and `planEffect` redacts every string in a payload field, which on a shared parent would wipe its content.
+- **Other gaps**: `effectJournal` (source-side effect stamps) and `isolated_replay` case manifests are not implemented (the
+  adapter accepts a physical namespace map for replay but nothing builds one); the gateway and worker do not use native sources
+  yet. `@expunge/contracts` `ReceiptCoverage`, `AppliedEffect` and `DomainAddress` still assume numeric versions and four id
+  types, and `ScopeKey.env` is `dev|evaluation|demo` while a source scope is `staging|production` (proposals in the MA-R1 report).
+- **Databases that cannot be a source** (NA-4): `admin`, `local`, `config`, anything starting `expunge_`, and every value of an
+  `EXPUNGE_*_DB` variable, checked at registration and again in `connectOwnerSource`.
+- **Roles**: `owner_sources` is insert-only (fixture builder INSERT, no UPDATE; everyone who reads the world reads it);
+  `owner_source_state` is written by `domain_executor`. The owner's own database needs a separate Atlas role (find on registered
+  collections; update/remove only where the registration allows; changeStream on the registered collections), provisioned by the owner.
+
+## Campaign permits, campaign authority and read grants (MA-F1, MA-F2, F-8)
+- `ProvenanceRepository.permitted` accepts a hash with NO eligibility row when a `campaign_artifact_permits` row exists for the scope
+  and `assertCampaignScope` passes (evaluation env, no worker deployment pointer). Any eligibility row that is not `permitted` still
+  blocks; ancestry blocking is unchanged.
+- `AuthorityRepository.installForCampaign` (fixture builder, GB-1 redesign): writes `campaign_authority`, NOT `authority_revisions`.
+  The fixture builder has no grant on the standing authority or its touch rows (raw-driver inserts are denied). The fence
+  (`read`/`fence`) uses the standing row when one exists everywhere; only when there is none AND the scope's env is `evaluation`
+  does it consult the campaign row; the fence counter lives in a separate `campaign_authority_touches` row (CA-1), so
+  `campaign_authority` itself is insert-only and no principal that fences can rewrite the floor or revision. A `campaign_authority` row for any other env is ignored
+  (and the validator refuses it). Evaluation scope only, refused with a worker deployment pointer, insert-only (identical repeat
+  returns the row, a different floor is `AuthorityConflict`). It cannot be bumped; revoke it by removing the row with setup.
+- Grants added: grader FIND on `completion_receipts`, `effects`, `preview_plans` (it already reads `world_revisions`); projection reader
+  FIND on `gate_reports`; fixture builder FIND `deployments` and INSERT/FIND `campaign_authority` (+ INSERT `campaign_authority_touches`); `domain_executor` and `promoter`
+  FIND `campaign_authority` and FIND/UPDATE `campaign_authority_touches` (the fence counter only).
+- `run_attestations` (`AttestationRepository.record/list`): one insert-only row per (job, fence) holding the lease holder's model
+  attestation. `record` runs in one transaction with the job fence, so a fenced-out holder cannot attest; an identical repeat returns
+  the row, a different stamp for the same fence is `AttestationConflict`. The worker inserts; the grader and projection reader read;
+  nobody updates or removes, so principals that can UPDATE `jobs` cannot rewrite the stamp the gate checks.
+- `guard_exports` (`GuardExportRepository.record/latest`): insert-only leak-guard export generations written by the privacy
+  controller and read by the observer, which holds on a guard file older than `latest` (by maximum generation) or whose
+  export does not cover the current subject set (G-1: `subject_set_generations` is bumped by `SubjectTokenRepository.put` in the
+  same transaction that registers a subject, an export records the subject-set generation it read BEFORE it read the subject
+  list, and `status()` is `covered` only when the latest export's generation is not behind the current one). G-4: `record` takes
+  the latest generation the caller saw and refuses `GuardExportRaced` otherwise, and refuses an unconditional call. A lower generation
+  than the newest, or a subject-set generation older than the previous export's, is `GuardGenerationRegression`; claiming a
+  generation ahead of the current one is `InvalidGuardExport`.
+
+| Residual | Detail |
+|---|---|
+| GB-2: held-out per-pair rows reach `projection_reader` | the `gate_reports` row carries per-pair protected and validation rows. Accepted until rsi-evolution's F-10 reduces withheld splits to aggregates in the report; until then the projection layer must serve aggregates for withheld splits. |
+| GB-3: the grader's FIND is cluster-wide | `completion_receipts`, `effects`, `preview_plans` are not campaign-scoped, and `preview_plans.bindings` hold subject identity values from every scope. Acceptable for the privileged evaluator; the gate should scope its reads by campaign scope in code. |
+
+## Atlas RBAC evidence (first real Atlas run; read-only)
+**What this is.** The role-scoped Atlas database users created from `atlasRoleManifests()` were probed on the invited Sandbox
+cluster (MongoDB 8.0.34, replica set; `probe:mongo` shows `rbacEnforced: true` for the worker principal: 46 privileges, none naming
+`expunge_private`, a direct read of the private database refused with code 13). **What it is not:** evidence about Atlas Search or
+Vector, about the owner's own source database, or about row-level isolation (Atlas privileges are per collection and verb).
+
+**Method** (`scripts/atlas-rbac-probe.ts`, `--matrix` for the full list). Each principal connects with its own `MONGODB_<PRINCIPAL>_URI`
+(read by name; nothing secret is printed) and tries every verb on every collection of the world, control and private databases
+with an operation that cannot change data whether or not it is authorized: `find` is a `findOne` on an `_id` that cannot exist;
+`update` and `remove` use a filter that matches nothing (no upsert); `insert` sends a document with an unknown field to a
+collection whose strict validator has `additionalProperties: false`, so an authorized insert is rejected by the validator (code 121)
+and an unauthorized one by authorization (code 13). Authorization runs before matching and validation, so code 13 means denied and
+anything else means the server got past authorization. Every outcome is compared with what `atlasRoleManifests()` says.
+
+| Principal | probed ops | allowed | denied | insert not probed | errors | surprises |
+|---|---|---|---|---|---|---|
+| approval_issuer | 288 | 10 | 278 | 28 | 0 | 0 |
+| domain_executor | 288 | 81 | 207 | 28 | 0 | 0 |
+| fixture_builder | 288 | 63 | 225 | 28 | 0 | 0 |
+| grader | 288 | 59 | 229 | 28 | 0 | 0 |
+| observer | 288 | 25 | 263 | 28 | 0 | 0 |
+| privacy_controller | 288 | 37 | 251 | 28 | 0 | 0 |
+| projection_reader | 288 | 15 | 273 | 28 | 0 | 0 |
+| promoter | 288 | 39 | 249 | 28 | 0 | 0 |
+| proposer | 288 | 8 | 280 | 28 | 0 | 0 |
+
+**Result: 0 surprises, 0 errors, 0 unexpected writes, no principal missing a URI.** For all nine runtime principals, every
+probed (principal, namespace, verb) outcome equals the manifest: nothing is allowed that the manifest does not grant, and nothing the
+manifest grants is refused. (The `setup` principal has no role manifest and is not probed.)
+
+**Gap: insert is not probed on 28 collections** because their validator is not strict enough for the probe document to be
+certainly rejected (a probe there could write): expunge_control.action_intents, expunge_control.artifact_eligibility, expunge_control.deployment_outbox, expunge_control.evidence, expunge_control.external_deletions, expunge_control.meta_campaigns, expunge_control.observer_cursors, expunge_control.projection_sequences, expunge_control.provenance_edges, expunge_control.public_trial_rows, expunge_control.runs, expunge_control.stream_offsets, expunge_control.telemetry_outbox, expunge_control.telemetry_receipts, expunge_private.expected_poststates, expunge_private.fixture_specs, expunge_private.grader_results, expunge_private.heldout_assignments, expunge_private.oracle_manifests, expunge_private.preservation_hashes, expunge_world.accounts, expunge_world.archives, expunge_world.customers, expunge_world.events, expunge_world.messages, expunge_world.notes, expunge_world.retained_invoices, expunge_world.schema_registry. For those, find, update and remove are probed; the insert
+grant is checked only by the manifest and the local RBAC lane.
+
+
+**Allowed set per principal.** Every other (collection, verb) the probe tried for that principal was refused with code 13. Verbs are `f`=find, `i`=insert, `u`=update, `r`=remove; an insert marked `i` was authorized (the strict validator then rejected the probe document); an insert on a collection not listed under the gap above is not shown even if granted.
+
+- `approval_issuer` (9 collections): approvals:i, artifact_eligibility:f, artifacts:f, authority_revisions:fu, authority_touches:u, candidates:f, deployments:f, gate_reports:f, provenance_edges:f
+- `domain_executor` (46 collections): action_intents:f, action_receipts:fi, approvals:f, artifact_eligibility:f, artifacts:f, authority_revisions:f, authority_touches:fu, campaign_artifact_permits:f, campaign_artifact_rows:f, campaign_artifacts:f, campaign_authority:f, campaign_authority_touches:fu, completion_receipts:fi, decisions:fi, deployments:f, diagnostics:fi, domain_steps:fi, effects:fi, erasure_suppressions:f, job_subjects:fi, jobs:fiu, preview_plans:fi, projection_events:fi, projection_sequences:fu, promotions:f, provenance_edges:f, rollback_refusals:f, run_attestations:fi, runs:fu, telemetry_outbox:f, verification_sweeps:fi, wake_commands:fi, world_faults:f, world.accounts:fur, world.archives:fur, world.customers:fur, world.events:fur, world.identity_edges:fiu, world.messages:fur, world.notes:fur, world.owner_source_state:fiu, world.owner_sources:f, world.retained_invoices:f, world.schema_registry:f, world.world_revisions:fu, world.world_scope_bindings:f
+- `fixture_builder` (32 collections): artifact_eligibility:f, artifacts:fi, campaign_authority:fi, campaign_authority_touches:i, campaign_freezes:fi, deployments:f, jobs:fiu, meta_draw_commitments:fi, projection_events:i, projection_sequences:u, world_faults:i, world_splits:i, private.campaign_keys:fi, private.expected_poststates:f, private.fixture_specs:f, private.grader_results:f, private.heldout_assignments:f, private.oracle_manifests:f, private.preservation_hashes:f, world.accounts:fur, world.archives:fur, world.customers:fur, world.events:fur, world.identity_edges:fiur, world.messages:fur, world.notes:fur, world.owner_source_state:fiu, world.owner_sources:fi, world.retained_invoices:fu, world.schema_registry:fu, world.world_revisions:fiu, world.world_scope_bindings:fiu
+- `grader` (45 collections): adversary_campaigns:fi, adversary_trials:fi, artifact_eligibility:f, artifacts:f, campaign_artifact_permits:fi, campaign_artifact_rows:fi, campaign_artifacts:fi, campaign_freezes:f, completion_receipts:f, deployments:f, domain_steps:f, effects:f, gate_attempts:fiu, gate_claims:fiu, gate_held_runs:fi, gate_reports:i, jobs:fiu, meta_draw_commitments:f, preview_plans:f, projection_events:fi, projection_sequences:fu, provenance_edges:f, run_attestations:f, world_faults:f, world_splits:f, private.campaign_keys:f, private.expected_poststates:f, private.fixture_specs:f, private.grader_results:f, private.heldout_assignments:f, private.oracle_manifests:f, private.preservation_hashes:f, world.accounts:f, world.archives:f, world.customers:f, world.events:f, world.identity_edges:f, world.messages:f, world.notes:f, world.owner_source_state:f, world.owner_sources:f, world.retained_invoices:f, world.schema_registry:f, world.world_revisions:f, world.world_scope_bindings:f
+- `observer` (17 collections): artifact_eligibility:f, erasure_suppressions:f, evidence:f, guard_exports:f, jobs:fiu, observer_cursors:fu, projection_events:fi, projection_sequences:u, provenance_edges:f, runs:f, stream_offsets:fur, subject_set_generations:f, telemetry_outbox:fu, telemetry_receipts:fu, world_splits:f, world.world_revisions:f, world.world_scope_bindings:f
+- `privacy_controller` (17 collections): artifact_eligibility:fu, erasure_suppressions:fiu, evidence:fu, external_deletions:fu, guard_exports:fi, jobs:fiu, lessons:fiu, projection_events:i, projection_sequences:u, provenance_closures:fiu, provenance_edges:f, raw_artifacts:fiur, subject_set_generations:fiu, subject_tokens:fir, telemetry_outbox:fu, world.world_revisions:f, world.world_scope_bindings:f
+- `projection_reader` (13 collections): action_receipts:f, campaign_artifact_rows:f, campaign_artifacts:f, completion_receipts:f, deployments:f, gate_reports:f, jobs:f, projection_events:f, promotions:f, public_trial_rows:f, rollback_refusals:f, run_attestations:f, stream_offsets:fur
+- `promoter` (31 collections): approvals:f, artifact_eligibility:f, artifacts:f, authority_policies:f, authority_revisions:f, authority_touches:fu, campaign_authority:f, campaign_authority_touches:fu, candidates:fu, deployments:fiu, gate_reports:f, grant_consumptions:fi, jobs:fiu, projection_events:i, projection_sequences:u, promotions:i, provenance_edges:f, rollback_refusals:i, world.accounts:f, world.archives:f, world.customers:f, world.events:f, world.identity_edges:f, world.messages:f, world.notes:f, world.owner_source_state:f, world.owner_sources:f, world.retained_invoices:f, world.schema_registry:f, world.world_revisions:f, world.world_scope_bindings:f
+- `proposer` (6 collections): artifact_eligibility:f, artifacts:fi, candidates:fi, evidence:f, lessons:f, provenance_edges:f
+
+**Does the issuer's `tainted()` need `provenance_closures`? No.** `tainted`, `permitted` and `blockedByAncestry` read only `artifact_eligibility` and `provenance_edges`; `provenance_closures` is touched only by the revocation closure methods (`revoke`, `closure`), which the issuer does not call. The issuer therefore holds FIND on the two collections and not on `provenance_closures` (the probe confirms it is denied there).
+
+**Reproduce.** `node --import tsx --env-file-if-exists=.env scripts/atlas-rbac-probe.ts [--matrix]` (exit 1 on any surprise or any
+accepted insert). The run covered all three databases (`expunge_world`, `expunge_control`, `expunge_private`) as configured.
