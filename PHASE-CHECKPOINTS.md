@@ -34,3 +34,20 @@ Append-only. Each entry: UTC time, checkpoint ID (from `.expunge/checkpoints/<ts
 - npm audit: no critical advisories; none reachable in current usage (details in PRODUCTION-READINESS.md).
 - Operator telemetry: Node util.inspect regression nodejs/node#60717; pristine upstream fails identically on 24.11.1 and 25.2.1; fixed in 24.13.1 / 25.4.0 (human to install); never-throwing console wrapper approved for B3.
 - Lanes: A2-R (with DA items) and B2-1 still in flight; C2 and DA-2 started; U-0 in flight; verifier holding the full matrix for A2-R/B2-1.
+
+## 2026-10-11T10:54Z first commits pushed: fe12b51 (baseline, 470 files) and 506b73e (ledger)
+
+- Remote: https://github.com/nihalnihalani/expunge (private), origin/main = 506b73e.
+- Evidence: VERIFICATION.md matrix at checkpoint 20261011T104052Z-d8708c42 plus runtime addendum at 20261011T104733Z-e126f3e6; commit staged against checkpoint 20261011T105339Z-588fbefd (ALL MATCH). typecheck 0; vitest 322 passed / 0 failed / 217 skipped; replica-set + RBAC lane 297 passed / 1 failed (live-provider smoke BLOCKED) / 1 skipped; runtime lanes 126 passed / 7 skipped (132 with replica set); test:continuity 35/35; candidate proxy 6/6; verify-candidate 0; operator typecheck 0, tests 328/328, build 0; all DA repros exit 1.
+- Known failing, named in the commit message: lint 18 errors (docs/review/repro 4, contracts test 2, mongo src 9, mongo test 3); format 15 files (docs/review/repro, infra/opendots).
+- Excluded: research/ (152 files) pending the human's publication decision.
+- Lessons: a reviewer's direct message resumed an idle lane during the barrier (protocol added to OWNERSHIP.md); lead edits after a checkpoint cost two re-checkpoints (lead freezes during staging).
+- Barrier lifted 10:58Z; lanes resumed: A2-R→B1 (mongodb-authority), C2 (rsi-evolution), B3 (ui-ux-improver), B2-2→C1 (runtime-raindrop), V-3 (verifier), DA-4 (devils-advocate). Commit cadence is now per lane packet.
+
+## 2026-10-11T11:04Z to 11:09Z per-lane commits: e165d48 (mongo A2-R finish), d119446 (review DA-4)
+
+- e165d48 + ledger 082d2e1: mongo hardening finish; evidence checkpoint 20261011T110113Z-7399111f (packet tsc 0, eslint 0, prettier 0, fast lane 67 passed / 227 skipped, live lane 294 passed / 0 skipped on local replica set + authenticated RBAC).
+- d119446 + ledger 7cbb983: review corpus; evidence checkpoint 20261011T110624Z-c6c4193c (eslint 0, prettier 0, 11 reproductions exit 1 incl. mg-live 12/12 against a replica set).
+- Approved and in the steward's queue: PKT-4 runtime B2-2 (checkpoint 20261011T110731Z-bf35d38f: 155 passed / 12 skipped, 166 with replica set; K1 to K4 closed). Under verification: PKT-5 compiler C2-1 (owner: 204 passed / 2 skipped; live parity 74 passed, 3,600 predicate evaluations).
+- Lessons: packet text must be derived from the diff, not from the owner's path list (the steward caught four unchanged files I described as modified); package-lock.json changes belong to the lane that added a workspace, never to a lane that only edited an exports map.
+- Live checks still BLOCKED (no root .env). Node floor still needs the human (nvm install 24.13.1).
