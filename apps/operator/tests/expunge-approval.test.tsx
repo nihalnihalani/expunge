@@ -6,7 +6,11 @@ import {
   expiresIn,
 } from '../src/client/expunge/review/approvalState';
 import {
+  APPROVE_HELP,
+  APPROVE_LABEL,
   ApprovalContent,
+  DecisionActions,
+  DecisionRecorded,
   submitDecision,
 } from '../src/client/expunge/review/ApprovalDialog';
 import {
@@ -195,3 +199,90 @@ for (const decision of ['approve', 'decline'] as const)
     expect(Object.keys(body).sort()).toEqual(['decision', 'descriptorDigest']);
     expect(body).toEqual({ decision, descriptorDigest: 'f'.repeat(64) });
   });
+
+it('shows the database-reported state and the minted grant after an approval, never "promoted"', () => {
+  const html = renderToStaticMarkup(
+    <DecisionRecorded
+      decision="approve"
+      state="approved"
+      grantId="grant-minted-1"
+    />,
+  );
+  expect(html).toContain('grant-minted-1');
+  expect(html).toContain('It minted grant');
+  expect(html).toContain('Promotion appears only when the database commits it');
+  expect(html).not.toMatch(/Promoted\b/);
+  const decline = renderToStaticMarkup(
+    <DecisionRecorded decision="decline" state="declined" grantId={null} />,
+  );
+  expect(decline).not.toContain('minted');
+  expect(decline).toContain('Decline sent');
+  // A decline never shows a grant even if one were returned.
+  expect(
+    renderToStaticMarkup(
+      <DecisionRecorded decision="decline" state="declined" grantId="g-1" />,
+    ),
+  ).not.toContain('g-1');
+});
+
+it('does not require a grantId in the stored pending descriptor the dialog shows', () => {
+  const html = renderToStaticMarkup(
+    <ApprovalContent descriptor={descriptor({ grantId: null })} now={NOW} />,
+  );
+  expect(html).toContain('authority expansion');
+  expect(html).not.toContain('grant');
+});
+
+it('the approve button does not claim a promotion, and says approval only grants permission', () => {
+  const noop = () => undefined;
+  const html = renderToStaticMarkup(
+    <DecisionActions
+      canDecide
+      recorded={false}
+      busy={false}
+      onDecline={noop}
+      onApprove={noop}
+      onRefresh={noop}
+      onClose={noop}
+    />,
+  );
+  expect(APPROVE_LABEL).toBe('Approve this change');
+  expect(html).toContain('Approve this change');
+  expect(html).not.toContain('Approve promotion');
+  expect(html).toContain(APPROVE_HELP);
+  expect(APPROVE_HELP).toContain('grants permission to promote');
+  expect(APPROVE_HELP).toContain('only when the database commits it');
+  expect(html).toContain('aria-describedby="ex-approve-help"');
+  // Decline first, approve last.
+  expect(html.indexOf('Decline')).toBeLessThan(
+    html.indexOf('Approve this change'),
+  );
+  // Not decidable: neither decision button nor the helper appears.
+  const closed = renderToStaticMarkup(
+    <DecisionActions
+      canDecide={false}
+      recorded={false}
+      busy={false}
+      onDecline={noop}
+      onApprove={noop}
+      onRefresh={noop}
+      onClose={noop}
+    />,
+  );
+  expect(closed).not.toContain('Approve this change');
+  expect(closed).not.toContain('Decline');
+  expect(closed).not.toContain(APPROVE_HELP);
+  // After a decision was recorded the buttons are gone too.
+  const done = renderToStaticMarkup(
+    <DecisionActions
+      canDecide
+      recorded
+      busy={false}
+      onDecline={noop}
+      onApprove={noop}
+      onRefresh={noop}
+      onClose={noop}
+    />,
+  );
+  expect(done).not.toContain('Approve this change');
+});
