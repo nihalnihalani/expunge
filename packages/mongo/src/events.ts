@@ -107,7 +107,21 @@ export type StreamCheckpoint = {
   resumeToken: ResumeToken;
   updatedAt: Date;
 };
-export type StreamRecovery = { kind: 'snapshot_backfill'; consumerId: string; pipelineVersion: string };
+export type StreamRecovery = {
+  kind: 'snapshot_backfill';
+  consumerId: string;
+  pipelineVersion: string;
+  /** Present when recovery was caused by an unusable stored resume token: the server error code that rejected it. */
+  cause?: { code: number };
+};
+/**
+ * Server codes for a stored resume token the server cannot use (unparseable BSON, wrong type, not a resume token, from
+ * another stream, history gone). Codes 9 and 14 are generic, so they only count while the stream is being opened from a
+ * stored token and no event has been delivered yet: after events flowed they are ordinary pipeline errors and rethrow.
+ */
+export const RESUME_FAILURE_CODES: ReadonlySet<number> = new Set([
+  9, 14, 280, 286, 40585, 40645, 40646, 40647, 40648, 50811, 50874,
+]);
 /** Opaque BSON tokens stay in the backend; UI resumes by durable event sequence. */
 export class ProjectionStreamConsumer {
   private stream?: ChangeStream<Document, ChangeStreamDocument<Document>>;
@@ -139,12 +153,15 @@ export class ProjectionStreamConsumer {
         ...(previous?.pipelineVersion === this.pipelineVersion ? { resumeAfter: previous.resumeToken } : {}),
         maxAwaitTimeMS: 1000,
       });
+    const resumedFrom = previous?.pipelineVersion === this.pipelineVersion ? previous.resumeToken : undefined;
+    let received = false; // any change from the server, delivered or skipped
     const close = () => {
       void this.stream?.close();
     };
     signal.addEventListener('abort', close, { once: true });
     try {
       for await (const change of this.stream) {
+        received = true;
         if (signal.aborted) break;
         if (change.operationType === 'invalidate') {
           await recover({
@@ -174,6 +191,23 @@ export class ProjectionStreamConsumer {
           pipelineVersion: this.pipelineVersion,
         });
         await offsets.deleteOne({ _id: this.consumerId });
+        return;
+      }
+      if (
+        resumedFrom !== undefined &&
+        !received &&
+        typeof code === 'number' &&
+        RESUME_FAILURE_CODES.has(code)
+      ) {
+        // The stored token was rejected while opening the stream. Record the recovery first (never only a log), then
+        // forget exactly that token: a concurrent consumer that already stored a newer offset keeps it.
+        await recover({
+          kind: 'snapshot_backfill',
+          consumerId: this.consumerId,
+          pipelineVersion: this.pipelineVersion,
+          cause: { code },
+        });
+        await offsets.deleteOne({ _id: this.consumerId, resumeToken: resumedFrom } as never);
         return;
       }
       throw error;
