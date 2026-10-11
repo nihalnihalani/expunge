@@ -336,6 +336,8 @@ const CANDIDATE_STATES = [
 ] as const satisfies readonly CandidateState[];
 const PROVIDER_STATUSES = [
   'unsubmitted',
+  'submitting',
+  'submission_ambiguous',
   'pending',
   'in_progress',
   'completed',

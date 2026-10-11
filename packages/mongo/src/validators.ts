@@ -1,6 +1,8 @@
 import type { Document } from 'mongodb';
 import { GUARDRAIL_MAX_DEPTH, PROJECTION_EVENT_KINDS } from '@expunge/contracts';
+import { CAMPAIGN_RESULT_VALIDATORS } from './validators-campaign.js';
 import { GATE_CONTROL_VALIDATORS } from './validators-extra.js';
+import { PRIVACY_VALIDATORS } from './validators-privacy.js';
 
 type Schema = Document;
 const str: Schema = { bsonType: 'string', maxLength: 256 };
@@ -753,6 +755,8 @@ export const CONTROL_VALIDATORS: Record<string, Document> = {
     }),
   },
   ...GATE_CONTROL_VALIDATORS,
+  ...CAMPAIGN_RESULT_VALIDATORS,
+  ...PRIVACY_VALIDATORS,
 };
 export const WORLD_VALIDATORS: Record<string, Document> = {
   // The revision counter only. The binding to a scope revision lives in world_scope_bindings.

@@ -21,3 +21,7 @@ export * from './authority.js';
 export * from './decisions.js';
 export * from './wake.js';
 export * from './grants.js';
+export * from './campaign.js';
+export * from './campaign-artifacts.js';
+export * from './privacy-stores.js';
+export * from './world-splits.js';

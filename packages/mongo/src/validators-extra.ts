@@ -18,7 +18,6 @@ const integer: Schema = {
   multipleOf: 1,
 };
 const date: Schema = { bsonType: 'date' };
-const bool: Schema = { bsonType: 'bool' };
 const anyObject: Schema = { bsonType: 'object' };
 const nullable = (schema: Schema): Schema => ({
   ...schema,
@@ -33,16 +32,6 @@ const object = (properties: Record<string, Schema>, required = Object.keys(prope
   properties,
 });
 const scope = { tenantId: str, env: en(['dev', 'evaluation', 'demo']), scopeId: str };
-const SUBJECT_ERASURE_REASONS = [
-  'source_retracted',
-  'subject_erasure_request',
-  'owner_withdrawal',
-  'scan_SubjectLiteral',
-  'scan_HeldOutLeak',
-  'scan_PrivateIdLeak',
-  'scan_raw_retention',
-];
-const SOURCE_KINDS = ['telemetry_event', 'trace', 'transcript', 'evidence_bundle', 'tool_output'];
 
 export const GATE_CONTROL_COLLECTIONS = [
   'campaign_freezes',
@@ -53,7 +42,6 @@ export const GATE_CONTROL_COLLECTIONS = [
   'rollback_refusals',
   'campaign_artifact_permits',
 ] as const;
-export const LATER_CONTROL_COLLECTIONS = ['adversary_trials', 'erasure_suppressions'] as const;
 
 export const GATE_CONTROL_VALIDATORS: Record<string, Document> = {
   // Written once by the fixture builder before a campaign runs; the gate only reads it (hash-checked on read).
@@ -152,183 +140,6 @@ export const GATE_CONTROL_VALIDATORS: Record<string, Document> = {
   },
 };
 
-/** Validators wired with the privacy, adversary and erasure packet (PKT-62). */
-export const LATER_CONTROL_VALIDATORS: Record<string, Document> = {
-  adversary_campaigns: {
-    $jsonSchema: object({
-      _id: str,
-      campaignId: str,
-      campaignHash: str,
-      frozen: {},
-      seedCommitment: str,
-      hider: object({ id: str, kind: en(['enumerator', 'fake', 'provider']) }),
-      workerBundleHash: hash,
-      parentBundleHash: hash,
-      rounds: integer,
-      perRound: integer,
-      targetAdmitted: integer,
-      summary: {},
-      digest: str,
-      createdAt: date,
-    }),
-  },
-  // One row per Hider proposal, admitted or quarantined. Insert-only; the grader writes it, the Hider never does.
-  adversary_trials: {
-    $jsonSchema: object(
-      {
-        _id: str,
-        adversaryTrialId: str,
-        specHash: hash,
-        referenceSolverHash: hash,
-        admitted: bool,
-        reasonCodes: arr(str, 64),
-        noveltyFamily: str,
-        resourceBounds: anyObject,
-        workerRunId: nullable(str),
-        metrics: nullable(anyObject),
-        campaignId: str,
-        round: integer,
-        ordinal: integer,
-        hiderId: str,
-        hiderKind: en(['enumerator', 'fake', 'provider']),
-        hypothesis: nullable(str),
-        category: nullable(str),
-        family: nullable(str),
-        structuralHash: nullable(str),
-        noveltyShape: nullable(str),
-        referenceResultHash: nullable(str),
-        plan: nullable(anyObject),
-        limitation: nullable(anyObject),
-        reward: { bsonType: ['int', 'long', 'double'] },
-      },
-      [
-        '_id',
-        'adversaryTrialId',
-        'specHash',
-        'referenceSolverHash',
-        'admitted',
-        'reasonCodes',
-        'noveltyFamily',
-        'resourceBounds',
-        'workerRunId',
-        'metrics',
-        'campaignId',
-        'round',
-        'ordinal',
-        'hiderId',
-        'hiderKind',
-        'reward',
-      ],
-    ),
-  },
-  // The narrow read export suppression needs: which provider-side users are being erased. No subject literal and no
-  // erasure job detail; observer and domain_executor may read this and nothing about `external_deletions`.
-  erasure_suppressions: {
-    $jsonSchema: object({
-      _id: str,
-      tenantId: str,
-      env: en(['dev', 'evaluation', 'demo']),
-      providerOrganizationId: str,
-      userKey: str,
-      active: bool,
-      updatedAt: date,
-    }),
-  },
-  // Raw evidence the privacy controller holds, or the tombstone that replaces it: the tombstone has no content hash, no
-  // size and no content, only that the source existed, when it was removed and why.
-  raw_artifacts: {
-    $jsonSchema: {
-      bsonType: 'object',
-      anyOf: [
-        object(
-          {
-            _id: str,
-            tenantId: str,
-            env: en(['dev', 'evaluation', 'demo']),
-            scopeId: str,
-            sourceId: str,
-            kind: en(SOURCE_KINDS),
-            contentSha256: hash,
-            sizeBytes: integer,
-            retention: en(['raw', 'hash_only']),
-            content: nullable({ bsonType: 'string', maxLength: 1_048_576 }),
-            registeredAt: date,
-          },
-          [
-            '_id',
-            'tenantId',
-            'env',
-            'sourceId',
-            'kind',
-            'contentSha256',
-            'sizeBytes',
-            'retention',
-            'content',
-            'registeredAt',
-          ],
-        ),
-        object(
-          {
-            _id: str,
-            tenantId: str,
-            env: en(['dev', 'evaluation', 'demo']),
-            scopeId: str,
-            sourceId: str,
-            kind: en(SOURCE_KINDS),
-            deletedAt: date,
-            reasonCode: en(SUBJECT_ERASURE_REASONS),
-            policyHash: hash,
-            closureId: nullable(str),
-          },
-          [
-            '_id',
-            'tenantId',
-            'env',
-            'sourceId',
-            'kind',
-            'deletedAt',
-            'reasonCode',
-            'policyHash',
-            'closureId',
-          ],
-        ),
-      ],
-    },
-  },
-  // Subject handle -> provider-side opaque identities. A subject literal lives here and nowhere the model reads.
-  subject_tokens: {
-    $jsonSchema: object(
-      {
-        _id: str,
-        tenantId: str,
-        env: en(['dev', 'evaluation', 'demo']),
-        scopeId: str,
-        subjectHandle: str,
-        provider: str,
-        tokenGeneration: integer,
-        tokens: arr(str, 1024),
-        registeredAt: date,
-      },
-      ['_id', 'tenantId', 'env', 'subjectHandle', 'provider', 'tokenGeneration', 'tokens', 'registeredAt'],
-    ),
-  },
-  // Structural learning only: closed-vocabulary ids, counts, hashes. Never raw source text.
-  lessons: {
-    $jsonSchema: object({
-      _id: str,
-      ...scope,
-      lessonId: str,
-      moduleId: str,
-      family: str,
-      structure: {},
-      retention: en(['structural']),
-      sourceIds: arr(str, 1024),
-      policyHash: hash,
-      registeredAt: date,
-    }),
-  },
-};
-
 type IndexEntry = { collection: string; key: Document; options?: Document };
 const identity = { tenantId: 1, env: 1, scopeId: 1 } as const;
 export const GATE_CONTROL_INDEXES: IndexEntry[] = [
@@ -337,16 +148,4 @@ export const GATE_CONTROL_INDEXES: IndexEntry[] = [
   { collection: 'gate_held_runs', key: { claimKey: 1, campaignId: 1, attempt: 1 } },
   { collection: 'world_faults', key: { ...identity, worldId: 1 }, options: { unique: true } },
   { collection: 'rollback_refusals', key: { ...identity, target: 1, at: -1 } },
-];
-export const LATER_CONTROL_INDEXES: IndexEntry[] = [
-  { collection: 'adversary_trials', key: { campaignId: 1, ordinal: 1 } },
-  { collection: 'adversary_trials', key: { adversaryTrialId: 1 }, options: { unique: true } },
-  {
-    collection: 'erasure_suppressions',
-    // The provider erasure is organization-wide, so one row per (organization, user), whatever tenant or env wrote it.
-    key: { providerOrganizationId: 1, userKey: 1 },
-    options: { unique: true },
-  },
-  { collection: 'erasure_suppressions', key: { providerOrganizationId: 1, active: 1 } },
-  { collection: 'lessons', key: { lessonId: 1, ...identity }, options: { unique: true } },
 ];

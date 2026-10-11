@@ -243,8 +243,50 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
       ['gate_attempts', { FIND: ['grader'], INSERT: ['grader'], UPDATE: ['grader'] }],
       ['gate_held_runs', { FIND: ['grader'], INSERT: ['grader'] }],
       ['world_faults', { FIND: ['domain_executor', 'grader'], INSERT: ['fixture_builder'] }],
-      ['rollback_refusals', { FIND: ['projection_reader'], INSERT: ['promoter'] }],
+      ['rollback_refusals', { FIND: ['domain_executor', 'projection_reader'], INSERT: ['promoter'] }],
       ['campaign_artifact_permits', { FIND: ['domain_executor', 'grader'], INSERT: ['grader'] }],
+      // PKT-62: campaign results, the meta draw record, world splits and the privacy stores.
+      [
+        'campaign_artifacts',
+        { FIND: ['domain_executor', 'grader', 'projection_reader'], INSERT: ['grader'] },
+      ],
+      [
+        'campaign_artifact_rows',
+        { FIND: ['domain_executor', 'grader', 'projection_reader'], INSERT: ['grader'] },
+      ],
+      ['adversary_campaigns', { FIND: ['grader'], INSERT: ['grader'] }],
+      ['adversary_trials', { FIND: ['grader'], INSERT: ['grader'] }],
+      ['meta_draw_commitments', { FIND: ['fixture_builder', 'grader'], INSERT: ['fixture_builder'] }],
+      ['world_splits', { FIND: ['grader', 'observer'], INSERT: ['fixture_builder'] }],
+      [
+        'erasure_suppressions',
+        {
+          FIND: ['domain_executor', 'observer', 'privacy_controller'],
+          INSERT: ['privacy_controller'],
+          UPDATE: ['privacy_controller'],
+        },
+      ],
+      [
+        'raw_artifacts',
+        {
+          FIND: ['privacy_controller'],
+          INSERT: ['privacy_controller'],
+          UPDATE: ['privacy_controller'],
+          REMOVE: ['privacy_controller'],
+        },
+      ],
+      [
+        'subject_tokens',
+        { FIND: ['privacy_controller'], INSERT: ['privacy_controller'], REMOVE: ['privacy_controller'] },
+      ],
+      [
+        'lessons',
+        {
+          FIND: ['privacy_controller', 'proposer'],
+          INSERT: ['privacy_controller'],
+          UPDATE: ['privacy_controller'],
+        },
+      ],
     ];
     for (const [collection, expected] of fixed)
       for (const verb of ['FIND', 'INSERT', 'UPDATE', 'REMOVE'] as const)
@@ -256,6 +298,8 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
       expect(holders('FIND', collection), `FIND ${collection}`).toContain('domain_executor');
     expect(holders('INSERT', 'promotions')).toEqual(['promoter']);
     expect(holders('UPDATE', 'promotions')).toEqual([]);
+    // The export gate reads erasure_suppressions; nobody but the privacy controller reads the erasure jobs themselves.
+    expect(holders('FIND', 'external_deletions')).toEqual(['privacy_controller']);
     // domain_steps is the gateway's own log: the grader reads the fault attestation, never writes it.
     expect(holders('FIND', 'domain_steps').sort()).toEqual(['domain_executor', 'grader']);
     expect(holders('INSERT', 'domain_steps')).toEqual(['domain_executor']);

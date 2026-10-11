@@ -75,6 +75,8 @@ export const EXTERNAL_ERASURE_STATUSES = [
 export type ExternalErasureStatus = (typeof EXTERNAL_ERASURE_STATUSES)[number];
 export const PROVIDER_ERASURE_STATUSES = [
   'unsubmitted',
+  'submitting',
+  'submission_ambiguous',
   'pending',
   'in_progress',
   'completed',

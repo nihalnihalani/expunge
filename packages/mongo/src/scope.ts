@@ -255,11 +255,14 @@ export class ScopeRepository {
       if (ids.has(field.fieldId) || !registry.collectionIds.includes(field.collectionId) || !field.sanitized)
         fail('InvalidFieldRegistry');
       ids.add(field.fieldId);
+      if (field.identity !== undefined && typeof field.identity !== 'boolean') fail('InvalidFieldRegistry');
       compileReadPath(field);
       assertDeclaredArrayShape(field);
     }
     for (const edge of registry.referenceEdges) {
       if (!ids.has(edge.fromFieldId) || !ids.has(edge.toFieldId)) fail('InvalidReferenceRegistry');
+      if (edge.owner !== undefined && !['from', 'to', 'none'].includes(edge.owner))
+        fail('InvalidReferenceRegistry');
     }
     const _id = contentHash({ ...scopeFilter(registry), revision: registry.revision }, 'scope-revision');
     await this.service.world
