@@ -1,0 +1,26 @@
+.ex-root .ex-lin-chain {
+  display: grid;
+  gap: var(--ex-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ex-root .ex-lin-node {
+  padding: var(--ex-space-4);
+  border: 1px solid var(--ex-rule);
+  border-inline-start: 4px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-lin-node[data-state='active'] {
+  border-inline-start-color: var(--ex-ink);
+}
+.ex-root .ex-lin-node[data-state='rolled_back'] {
+  border-inline-start-style: dashed;
+}
+.ex-root .ex-lin-head {
+  margin: 0 0 var(--ex-space-3);
+}
+.ex-root .ex-lin-dl {
+  gap: var(--ex-space-2) var(--ex-space-5);
+}
