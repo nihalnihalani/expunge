@@ -1,10 +1,10 @@
 # Expunge project state (sanitized, version-controlled)
 
-Updated: 2026-10-11 13:10Z (real UTC) by team-lead after the takeover in the Claude Code CLI. The takeover brief is `docs/continuity/briefs/TAKEOVER-2026-10-11.md`.
+Updated: 2026-10-11 ~19:20Z (real UTC) by team-lead (claude-opus-5-5) after the second-machine takeover in the Claude Code desktop app (2.1.295, agent teams enabled). Session brief: `docs/continuity/briefs/REAL-BUILD-2026-10-11.md`. The earlier 13:10Z content below is retained as history where not superseded.
 
 ## Objective
 
-Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt` (sections 1 to 20) in this workspace. Local commits are authorized; the human's standing instruction is to push every commit to the private origin. Public publishing, visibility changes, production deployment changes, paid upgrades and external messaging require explicit human authorization.
+Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt` (sections 1 to 20) in this workspace. Local commits are authorized. Second-machine sessions commit on branch `charlie`, push to `origin charlie` and merge to `main` only through pull requests (human steering 2026-10-11); the original team still pushes to `main`. Public publishing, visibility changes, production deployment changes, paid upgrades and external messaging require explicit human authorization.
 
 ## Engine and team
 
@@ -58,17 +58,26 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 17. Meta draw commitment (16:11Z, DA-8 R3 gap): `meta_draw_commitments` is INSERT-only. It is written with `forceServerObjectId`, its time is `_id.getTimestamp()` (server time to 1 s), and each row must be at least 2 s (META_DRAW_MIN_GAP_MS) after the previous one (commitment, I1, freeze, draw). I1's creation time is server-stamped the same way. No `$currentDate` upsert, so there is no UPDATE grant. Lands in PKT-62 (grants) and PKT-43 (use).
 18. PKT-24/25 must carry the `packages/fixtures/src/sealed.ts` and `splits.ts` changes. The gate imports their sealed-plan exports, and HEAD typecheck fails without them (verifier pre-run, 16:09Z).
 
+19. Second-machine takeover (2026-10-11 ~19:05Z): the checkout arrived by git only. HEAD 5b49dfe = origin/main, clean. Ignored state (HANDOFF.md, .expunge/checkpoints, scratchpad packet snapshots) did not travel, so the uncommitted packages/gate (PKT-24) and packages/deployment (PKT-25) are lost and are being rebuilt from the C3 brief and DA-8 (RSI-G1). The human's new goal names `EXPUNGE-REAL-BUILD-SPEC.txt` and `EXPUNGE-DOTS-PROVISIONING-TASK.txt`; neither exists on this machine, so the work follows the goal text and the original spec, and anything only those files define is BLOCKED. New baseline checkpoint 20261011T190419Z-31cd0151. Local replica sets need `ulimits nofile 64000` under the full suite (mongod died with EMFILE at the default); the committed compose files also share the project name `test`, so run each under its own `-p`.
+20. Baseline at 5b49dfe on node 25.8.0: typecheck 0; lint 0 (0 errors, 43 warnings); format:check 0; continuity 42/42; default vitest 998 passed / 557 skipped; live lane (local replica sets, EXPUNGE_REQUIRE_LIVE_TESTS=1) 1532 passed / 14 failed / 1 skipped, of which 4 are correct BLOCKED (provider, Raindrop x2, erasure), 2 need the candidate netguard stack running, and 8 are a real regression in tests/reliability/e1-worker-faults (fixture deploys no harness since PKT-54). Operator (own lock): typecheck 0, 77 files / 586 tests passed, build 0.
+
 ## Blocked acceptance items (need human input)
+
+- Root `.env` exists since 12:12 local but holds only the Atlas setup URI and names; principal URIs, provider, Raindrop and CopilotKit keys are empty, and the cluster is not yet confirmed as the invited Sandbox.
+- `EXPUNGE-REAL-BUILD-SPEC.txt` and `EXPUNGE-DOTS-PROVISIONING-TASK.txt` are absent on this machine.
+- Authorized real owner data sources (rights, access, retention terms) for the real-data protocol, Hider case selection and the working-loop demonstration. None is available; no generated substitute will be used.
+- Provider and campaign budget for 360 task episodes and the eight-incident meta controls.
 
 - Root `.env` with the principal URIs, provider key(s), CopilotKit Intelligence key and Raindrop keys. Names only in `.env.example`.
 - Confirmation that the Atlas deployment is the email-invitation Hackathon Sandbox, and whether the account can create custom roles.
 - Raindrop plan entitlement (Issues/Experiments are Pro-only per research notes).
 - `research/` publication decision and repository visibility.
 
-## Next actions (13:10Z)
+## Next actions (19:20Z, second machine)
 
-1. PKT-16 domain gateway: gateway-controls finishes durable workflow/visit enforcement, lease-fenced step log, replay digests and cumulative budgets (controls.ts, workflow.ts, budget.ts); mongodb-authority finishes the rest of the packet; devils-advocate re-reads DA-5; a verifier runs the matrix; commit.
-2. C1b worker packet plus durable phase meters across takeover (runtime-raindrop); then V-3 fixes: zombie failure fencing, crash-lost terminal projection, corrupt resume-token recovery.
-3. Wire createDomainToolProvider into the worker; worker-backed EpisodePort with grader reads of committed receipts (runtime-raindrop with rsi-evolution).
-4. DA-8 closure (rsi-evolution fixes, D8-3 by mongodb-authority, devils-advocate re-read), then PKT-24 and PKT-25.
-5. Operator S3 to S8 and DA-7 (ui-ux-improver); D1, D3, then D2, E1, E2 and E3.
+1. V-R1 (verifier): fix the E1 fixture regression; run the netguard stack; full live-lane table.
+2. RSI-G1 (rsi-evolution): rebuild packages/gate against DA-8; then packages/deployment.
+3. MA-R1 (mongodb-authority): audit synthetic-world assumptions; native owner-source registry, adapter, conditional effects with readback, external-writer conflicts; PKT-16b.
+4. RR-P1 (runtime-raindrop): non-root pinned service images with private-file exclusion tests, production topology, backup/restore drill, runbooks, CI job list.
+5. DA-9 (devils-advocate): real-data gap audit and overclaim review; then reviews of each packet.
+6. commit-steward: gated commits pushed to the private origin after verifier and devils-advocate dispositions.
