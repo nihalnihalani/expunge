@@ -139,6 +139,8 @@ describeLive('post-restore erasure re-application (real replica set)', () => {
     const cursorPath = join(dir, 'cursor2.json');
     const cliEnv = {
       MONGODB_PRIVACY_CONTROLLER_URI: process.env.MONGODB_TEST_URI!,
+      EXPUNGE_LEDGER_MAC_KEY: 'k'.repeat(40),
+      EXPUNGE_LEDGER_ENC_KEY: 'ef'.repeat(32),
       EXPUNGE_WORLD_DB: env.service.world.databaseName,
       EXPUNGE_CONTROL_DB: env.service.control.databaseName,
       EXPUNGE_PRIVATE_DB: env.service.privateDb!.databaseName,

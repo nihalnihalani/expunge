@@ -51,6 +51,12 @@ const PAGE = 500;
 export async function exportErasureLedger(service: MongoService, now = new Date()): Promise<ErasureLedger> {
   const jobs: ExternalErasureJob[] = [];
   const deletions = service.control.collection('external_deletions');
+  const rawsForCount = service.control.collection('raw_artifacts');
+  const tombFilter = { deletedAt: { $exists: true } };
+  const before = {
+    jobs: await deletions.countDocuments({}),
+    tombstones: await rawsForCount.countDocuments(tombFilter),
+  };
   for (let after: string | null = null; ;) {
     const rows = await deletions
       .find(after === null ? {} : { _id: { $gt: after as never } })
@@ -86,6 +92,20 @@ export async function exportErasureLedger(service: MongoService, now = new Date(
     if (rows.length < PAGE) break;
     after = rows.at(-1)!._id as unknown as string;
   }
+  // A ledger that does not account for every row the collections held before and after the read is incomplete: refuse it.
+  const after = {
+    jobs: await deletions.countDocuments({}),
+    tombstones: await rawsForCount.countDocuments(tombFilter),
+  };
+  if (
+    before.jobs !== jobs.length ||
+    after.jobs !== jobs.length ||
+    before.tombstones !== tombstones.length ||
+    after.tombstones !== tombstones.length
+  )
+    throw new Error(
+      'LedgerChangedDuringExport: counts differ between the read and the collections; retry with writers quiet',
+    );
   return { format: LEDGER_FORMAT, exportedAt: now.toISOString(), jobs, tombstones };
 }
 
