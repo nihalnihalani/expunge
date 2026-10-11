@@ -562,6 +562,28 @@ export const CONTROL_VALIDATORS: Record<string, Document> = {
       updatedAt: date,
     }),
   },
+  // An evaluation campaign instance's authority (insert-only). Consulted only for env 'evaluation'.
+  campaign_authority: {
+    $jsonSchema: object({
+      _id: hash,
+      ...scope,
+      env: en(['evaluation']),
+      authorizationRevision: integer,
+      floorHash: hash,
+      updatedAt: date,
+    }),
+  },
+  // The campaign fence counter, apart from `campaign_authority` so the principals that fence cannot rewrite the floor.
+  campaign_authority_touches: {
+    $jsonSchema: object({
+      _id: hash,
+      ...scope,
+      env: en(['evaluation']),
+      authorizationRevision: integer,
+      touches: integer,
+      updatedAt: date,
+    }),
+  },
   authority_touches: {
     $jsonSchema: object({
       _id: hash,

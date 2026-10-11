@@ -467,6 +467,22 @@ describeRbac('real authenticated local replica-set RBAC (not Atlas provisioning)
     // The operator Evaluation view reads gate reports; it cannot write them.
     await allowed('projection_reader', 'gate_reports', ['find']);
     await denied('projection_reader', 'gate_reports', ['insert', 'update', 'remove']);
+    // The fixture builder can write NO standing authority: raw-driver inserts are denied. Its campaign row is separate.
+    await denied('fixture_builder', 'authority_revisions', ['insert', 'update', 'remove']);
+    await denied('fixture_builder', 'authority_touches', ['insert', 'update', 'remove']);
+    await allowed('fixture_builder', 'campaign_authority', ['find', 'insert']);
+    await denied('fixture_builder', 'campaign_authority', ['update', 'remove']);
+    // The floor and revision cannot be rewritten by the principals that fence; only the counter row is theirs.
+    await allowed('domain_executor', 'campaign_authority', ['find']);
+    await denied('domain_executor', 'campaign_authority', ['insert', 'update', 'remove']);
+    await allowed('promoter', 'campaign_authority', ['find']);
+    await denied('promoter', 'campaign_authority', ['insert', 'update', 'remove']);
+    await allowed('fixture_builder', 'campaign_authority_touches', ['insert']);
+    await denied('fixture_builder', 'campaign_authority_touches', ['update', 'remove']);
+    await allowed('domain_executor', 'campaign_authority_touches', ['find', 'update']);
+    await denied('domain_executor', 'campaign_authority_touches', ['insert', 'remove']);
+    await allowed('promoter', 'campaign_authority_touches', ['find', 'update']);
+    await denied('grader', 'campaign_authority', ['insert', 'update', 'remove']);
   });
 
   it('PKT-62 collections: named raw-driver denials', async () => {

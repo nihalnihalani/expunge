@@ -160,12 +160,20 @@ block for the worker principal (privileges that name the private database, wheth
 code 13, and `rbacEnforced`). On a local replica set without authentication that block says `rbacEnforced: false`; it
 describes the server it ran against and is not evidence about an Atlas custom role.
 
-## Campaign permits and read grants (MA-F1, F-8)
+## Campaign permits, campaign authority and read grants (MA-F1, MA-F2, F-8)
 - `ProvenanceRepository.permitted` accepts a hash with NO eligibility row when a `campaign_artifact_permits` row exists for the scope
   and `assertCampaignScope` passes (evaluation env, no worker deployment pointer). Any eligibility row that is not `permitted` still
   blocks; ancestry blocking is unchanged.
+- `AuthorityRepository.installForCampaign` (fixture builder, GB-1 redesign): writes `campaign_authority`, NOT `authority_revisions`.
+  The fixture builder has no grant on the standing authority or its touch rows (raw-driver inserts are denied). The fence
+  (`read`/`fence`) uses the standing row when one exists everywhere; only when there is none AND the scope's env is `evaluation`
+  does it consult the campaign row; the fence counter lives in a separate `campaign_authority_touches` row (CA-1), so
+  `campaign_authority` itself is insert-only and no principal that fences can rewrite the floor or revision. A `campaign_authority` row for any other env is ignored
+  (and the validator refuses it). Evaluation scope only, refused with a worker deployment pointer, insert-only (identical repeat
+  returns the row, a different floor is `AuthorityConflict`). It cannot be bumped; revoke it by removing the row with setup.
 - Grants added: grader FIND on `completion_receipts`, `effects`, `preview_plans` (it already reads `world_revisions`); projection reader
-  FIND on `gate_reports`.
+  FIND on `gate_reports`; fixture builder FIND `deployments` and INSERT/FIND `campaign_authority` (+ INSERT `campaign_authority_touches`); `domain_executor` and `promoter`
+  FIND `campaign_authority` and FIND/UPDATE `campaign_authority_touches` (the fence counter only).
 
 | Residual | Detail |
 |---|---|

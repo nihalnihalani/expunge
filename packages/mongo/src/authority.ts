@@ -1,5 +1,6 @@
 import type { ClientSession, Document } from 'mongodb';
 import { scopeIdentity, type ActorContext, type AuthorityRevision, type ScopeKey } from '@expunge/contracts';
+import { assertCampaignScope } from './campaign.js';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
 
 type AuthorityRow = AuthorityRevision & { _id: string };
@@ -58,6 +59,59 @@ export class AuthorityRepository {
     return row;
   }
 
+  private get campaign() {
+    return this.service.control.collection<AuthorityRevision & { _id: string } & Document>(
+      'campaign_authority',
+    );
+  }
+  /** The campaign fence counter, apart from the authority row, mirroring `authority_touches`. */
+  private get campaignTouches() {
+    return this.service.control.collection<TouchRow & Document>('campaign_authority_touches');
+  }
+
+  /**
+   * The fixture builder's installer for one campaign instance. The row goes into `campaign_authority`, never into
+   * `authority_revisions`: the fixture builder holds no grant on the standing authority, and the fence consults the
+   * campaign row only in the evaluation environment. Evaluation scope only, refused when the scope has a worker
+   * deployment pointer, insert-only (an identical repeat returns the row, a different floor is `AuthorityConflict`). The fence
+   * counter is a separate row in `campaign_authority_touches`, so no principal that fences can rewrite the floor or revision.
+   */
+  async installForCampaign(key: ScopeKey, floorHash: string): Promise<AuthorityRevision> {
+    requirePrincipal(this.service, ['fixture_builder']);
+    if (!HASH_PATTERN.test(floorHash)) fail('InvalidAuthority');
+    await assertCampaignScope(this.service, key);
+    const _id = scopeIdentity(key);
+    const row: AuthorityRevision = {
+      ...scopeFilter(key),
+      authorizationRevision: 1,
+      floorHash,
+      updatedAt: new Date(),
+    };
+    try {
+      await this.service.transaction(async (session) => {
+        await this.campaign.insertOne({ _id, ...row } as never, { session });
+        await this.campaignTouches.insertOne(
+          {
+            _id,
+            ...scopeFilter(key),
+            authorizationRevision: 1,
+            touches: 0,
+            updatedAt: row.updatedAt,
+          } as never,
+          { session },
+        );
+      });
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 11000)) throw error;
+      const stored = await this.campaign.findOne({ _id, ...scopeFilter(key) });
+      if (!stored || stored.authorizationRevision !== 1 || stored.floorHash !== floorHash)
+        fail('AuthorityConflict');
+      const { _id: _i, ...authority } = stored;
+      return authority;
+    }
+    return row;
+  }
+
   /**
    * Revokes every run pinned to the current revision: increments the stored revision (and optionally replaces the
    * floor hash) and rewrites the touch row in the same transaction. Returns the new row.
@@ -91,11 +145,31 @@ export class AuthorityRepository {
   }
 
   async read(key: ScopeKey, session?: ClientSession): Promise<AuthorityRevision> {
-    const row = await this.rows.findOne({ _id: scopeIdentity(key), ...scopeFilter(key) }, { session });
-    // No stored authority means nobody has authorized this scope: fail closed.
-    if (!row) fail('AuthorityMissing');
-    const { _id: _ignored, ...authority } = row;
-    return authority;
+    return (await this.locate(key, session)).authority;
+  }
+
+  /**
+   * The standing row wins everywhere. Only when there is none AND the scope is an evaluation scope is the campaign
+   * instance's row consulted; a `campaign_authority` row for any other environment is ignored. No row: fail closed.
+   */
+  private async locate(
+    key: ScopeKey,
+    session?: ClientSession,
+  ): Promise<{ authority: AuthorityRevision; source: 'standing' | 'campaign' }> {
+    const _id = scopeIdentity(key);
+    const row = await this.rows.findOne({ _id, ...scopeFilter(key) }, { session });
+    if (row) {
+      const { _id: _ignored, ...authority } = row;
+      return { authority, source: 'standing' };
+    }
+    if (key.env === 'evaluation') {
+      const campaign = await this.campaign.findOne({ _id, ...scopeFilter(key) }, { session });
+      if (campaign) {
+        const { _id: _i, ...authority } = campaign;
+        return { authority, source: 'campaign' };
+      }
+    }
+    return fail('AuthorityMissing');
   }
 
   /**
@@ -103,13 +177,13 @@ export class AuthorityRepository {
    * `AuthorityRevisionStale` when the stored revision differs, or when it changes before this transaction commits.
    */
   async fence(key: ScopeKey, expectedRevision: number, session: ClientSession): Promise<AuthorityRevision> {
-    const authority = await this.read(key, session);
+    const { authority, source } = await this.locate(key, session);
     if (authority.authorizationRevision !== expectedRevision) fail('AuthorityRevisionStale');
-    const touched = await this.touches.updateOne(
-      { _id: scopeIdentity(key), ...scopeFilter(key), authorizationRevision: expectedRevision },
-      { $inc: { touches: 1 } },
-      { session },
-    );
+    const filter = { _id: scopeIdentity(key), ...scopeFilter(key), authorizationRevision: expectedRevision };
+    const touched =
+      source === 'campaign'
+        ? await this.campaignTouches.updateOne(filter, { $inc: { touches: 1 } }, { session })
+        : await this.touches.updateOne(filter, { $inc: { touches: 1 } }, { session });
     if (touched.matchedCount !== 1) fail('AuthorityRevisionStale');
     return authority;
   }
