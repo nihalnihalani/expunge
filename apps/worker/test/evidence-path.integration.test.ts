@@ -220,7 +220,7 @@ describeLive('Raindrop evidence path as a running process (FAKE Raindrop, local 
     expect(createEvidenceProcess(processEnv(), { guard: GUARD }, {}).status).toBe('BLOCKED');
   });
 
-  it('the process entry exits 3 and prints only BLOCKED lines with names while no suppression or guard source exists', async () => {
+  it('the process entry exits 3 and prints only BLOCKED lines with names while no leak guard file exists (the suppression source is wired from the observer principal)', async () => {
     const lines: string[] = [];
     const original = console.log;
     console.log = (...args: unknown[]) => void lines.push(args.map(String).join(' '));
@@ -231,7 +231,8 @@ describeLive('Raindrop evidence path as a running process (FAKE Raindrop, local 
     }
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.every((line) => line.startsWith('BLOCKED:'))).toBe(true);
-    expect(lines.join('\n')).toContain('export suppression source');
+    expect(lines.join('\n')).toContain('leak guard source');
+    expect(lines.join('\n')).not.toContain('export suppression source'); // main wires it from MONGODB_OBSERVER_URI
     expect(lines.join('\n')).not.toContain(fake.keys().writeKey); // names, never values
   });
 

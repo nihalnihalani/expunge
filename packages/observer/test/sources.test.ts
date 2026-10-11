@@ -1,9 +1,15 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { serializeGuardFile, type LeakGuard } from '@expunge/observability';
-import { EvidenceSourceError, loadGuardFile, windowFromEnv } from '../src/index.js';
+import {
+  EvidenceSourceError,
+  guardFreshness,
+  loadGuardFile,
+  startGuardWatch,
+  windowFromEnv,
+} from '../src/index.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'observer-sources-'));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -19,7 +25,7 @@ const EXPECT = { scope: SCOPE, providerOrganizationId: 'org-1' };
 const guardText = (
   guard = { forbiddenLiterals: ['subject-handle-1', 'subject-handle-2'] } as LeakGuard,
   meta = {},
-) => serializeGuardFile(guard, { scope: SCOPE, providerOrganizationId: 'org-1', ...meta });
+) => serializeGuardFile(guard, { scope: SCOPE, providerOrganizationId: 'org-1', generation: 1, ...meta });
 
 describe('loadGuardFile', () => {
   it('returns undefined when no file is configured (the process stays BLOCKED)', () => {
@@ -57,12 +63,12 @@ describe('loadGuardFile', () => {
   it('refuses another scope and another provider organization', () => {
     const other = serializeGuardFile(
       { forbiddenLiterals: ['x-handle'] },
-      { scope: { ...SCOPE, scopeId: 'other' }, providerOrganizationId: 'org-1' },
+      { scope: { ...SCOPE, scopeId: 'other' }, providerOrganizationId: 'org-1', generation: 1 },
     );
     expect(reason(write('scope.json', other))).toContain('scope_mismatch');
     const org = serializeGuardFile(
       { forbiddenLiterals: ['x-handle'] },
-      { scope: SCOPE, providerOrganizationId: 'org-2' },
+      { scope: SCOPE, providerOrganizationId: 'org-2', generation: 1 },
     );
     expect(reason(write('org.json', org))).toContain('organization_mismatch');
   });
@@ -100,7 +106,10 @@ describe('loadGuardFile', () => {
       'forbiddenLiterals',
     );
     expect(() =>
-      serializeGuardFile({ forbiddenLiterals: [] }, { scope: SCOPE, providerOrganizationId: 'org-1' }),
+      serializeGuardFile(
+        { forbiddenLiterals: [] },
+        { scope: SCOPE, providerOrganizationId: 'org-1', generation: 1 },
+      ),
     ).toThrow();
     expect(reason(join(dir, 'missing.json'))).toContain('unreadable');
   });
@@ -141,5 +150,81 @@ describe('windowFromEnv', () => {
     expect(() => windowFromEnv({ ...base, EXPUNGE_OBSERVER_VERSION: 'bad version' })).toThrow(
       EvidenceSourceError,
     );
+  });
+});
+
+describe('guardFreshness: HOLD unless the held guard is exactly the latest export AND covers the current subject set', () => {
+  const held = { generation: 3, digest: 'a'.repeat(64) };
+  type Status = Awaited<ReturnType<Parameters<typeof guardFreshness>[0]['status']>>;
+  const check = (status: Status | Error) =>
+    guardFreshness(
+      { status: async () => (status instanceof Error ? Promise.reject(status) : status) },
+      EXPECT,
+      held,
+    );
+  const latest = (generation: number, digest = 'a'.repeat(64)) => ({ generation, digest });
+  it('is fresh only on an exact generation and digest match with the subject set covered', async () => {
+    expect(await check({ latest: latest(3), subjectSetGeneration: 5, covered: true })).toBe('fresh');
+  });
+  it('HOLDs when never exported, when a newer export exists, when the file is newer than the record, on a digest mismatch, when a subject was registered after the export and when the record is unreadable', async () => {
+    expect(await check({ latest: null, subjectSetGeneration: 0, covered: false })).toBe('never_exported');
+    expect(await check({ latest: latest(4), subjectSetGeneration: 5, covered: true })).toBe('stale');
+    expect(await check({ latest: latest(2), subjectSetGeneration: 5, covered: true })).toBe('stale');
+    expect(await check({ latest: latest(3, 'b'.repeat(64)), subjectSetGeneration: 5, covered: true })).toBe(
+      'digest_mismatch',
+    );
+    expect(await check({ latest: latest(3), subjectSetGeneration: 6, covered: false })).toBe(
+      'subject_set_ahead',
+    );
+    expect(await check(new Error('boom'))).toBe('unreadable');
+  });
+});
+
+describe('startGuardWatch: the loop and the per-batch gate (fake timers)', () => {
+  it('isFresh runs a fresh check every time (never a cached pass) and answers false on a throw', async () => {
+    let verdict: string | Error = 'fresh';
+    const check = vi.fn(async () => (verdict instanceof Error ? Promise.reject(verdict) : verdict));
+    const watch = startGuardWatch({ check, intervalMs: 60_000, onStale: () => undefined });
+    try {
+      expect(await watch.isFresh()).toBe(true);
+      verdict = 'stale';
+      expect(await watch.isFresh()).toBe(false);
+      verdict = new Error('boom');
+      expect(await watch.isFresh()).toBe(false);
+      expect(check).toHaveBeenCalledTimes(3);
+    } finally {
+      watch.stop();
+    }
+  });
+  it('the 60 s backstop calls onStale once when a check is not fresh, then the watch is stopped and isFresh stays false', async () => {
+    vi.useFakeTimers();
+    try {
+      let verdict = 'fresh';
+      const onStale = vi.fn();
+      const check = vi.fn(async () => verdict);
+      const watch = startGuardWatch({ check, intervalMs: 60_000, onStale });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(onStale).not.toHaveBeenCalled();
+      verdict = 'stale';
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(onStale).toHaveBeenCalledTimes(1);
+      expect(onStale).toHaveBeenCalledWith('stale');
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(onStale).toHaveBeenCalledTimes(1); // stopped
+      expect(await watch.isFresh()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('an unreadable record on the backstop also stops the process (verdict unreadable)', async () => {
+    vi.useFakeTimers();
+    try {
+      const onStale = vi.fn();
+      startGuardWatch({ check: async () => Promise.reject(new Error('x')), intervalMs: 1000, onStale });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onStale).toHaveBeenCalledWith('unreadable');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -16,6 +16,8 @@ export type GuardFile = {
   format: typeof GUARD_FILE_FORMAT;
   scope: ScopeKey;
   providerOrganizationId: string;
+  /** The export generation recorded in `guard_exports` by the privacy controller; the observer HOLDs when it is not the latest. */
+  generation: number;
   generatedAt: string;
   count: number;
   digest: string;
@@ -40,13 +42,14 @@ export const guardDigest = (guard: LeakGuard): string => contentHash(body(guard)
 
 export function serializeGuardFile(
   guard: LeakGuard,
-  meta: { scope: ScopeKey; providerOrganizationId: string; now?: Date },
+  meta: { scope: ScopeKey; providerOrganizationId: string; generation: number; now?: Date },
 ): string {
   requireGuard(guard);
   const file: GuardFile = {
     format: GUARD_FILE_FORMAT,
     scope: { tenantId: meta.scope.tenantId, env: meta.scope.env, scopeId: meta.scope.scopeId },
     providerOrganizationId: meta.providerOrganizationId,
+    generation: meta.generation,
     generatedAt: (meta.now ?? new Date()).toISOString(),
     count: guard.forbiddenLiterals.length + (guard.privateIds?.hashes.length ?? 0),
     digest: guardDigest(guard),
@@ -68,7 +71,7 @@ const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x)
 export function parseGuardFile(
   text: string,
   expected: { scope: ScopeKey; providerOrganizationId: string },
-): { guard: LeakGuard; generatedAt: string; count: number; digest: string } {
+): { guard: LeakGuard; generation: number; generatedAt: string; count: number; digest: string } {
   let raw: Record<string, unknown>;
   try {
     raw = JSON.parse(text) as Record<string, unknown>;
@@ -102,6 +105,14 @@ export function parseGuardFile(
   if (raw.digest !== guardDigest(guard)) throw new GuardFileError('digest_mismatch');
   if (typeof raw.generatedAt !== 'string' || Number.isNaN(Date.parse(raw.generatedAt)))
     throw new GuardFileError('generatedAt');
+  if (typeof raw.generation !== 'number' || !Number.isSafeInteger(raw.generation) || raw.generation < 1)
+    throw new GuardFileError('generation');
   requireGuard(guard);
-  return { guard, generatedAt: raw.generatedAt, count, digest: raw.digest as string };
+  return {
+    guard,
+    generation: raw.generation,
+    generatedAt: raw.generatedAt,
+    count,
+    digest: raw.digest as string,
+  };
 }

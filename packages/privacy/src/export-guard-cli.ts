@@ -1,5 +1,10 @@
 import { pathToFileURL } from 'node:url';
-import { createPrincipalService, mongoConfigFromEnv, SubjectTokenRepository } from '@expunge/mongo';
+import {
+  GuardExportRepository,
+  createPrincipalService,
+  mongoConfigFromEnv,
+  SubjectTokenRepository,
+} from '@expunge/mongo';
 import { exportGuardFile } from './export-guard.js';
 
 /**
@@ -29,7 +34,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
   try {
     await service.client.connect();
     const counts = await exportGuardFile(
-      { tokens: new SubjectTokenRepository(service) },
+      { tokens: new SubjectTokenRepository(service), exports: new GuardExportRepository(service) },
       { tenantId, env: scopeEnv as 'dev' | 'evaluation' | 'demo', scopeId },
       path,
       { providerOrganizationId: organization },

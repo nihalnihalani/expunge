@@ -40,13 +40,45 @@ const store = (count: number): SubjectTokenStore => ({
   tokensFor: async () => [],
 });
 
+const exportsPort = (
+  rows: Array<{ generation: number; digest: string; count: number; subjectSetGeneration?: number }> = [],
+  options: { raceOnce?: boolean; subjectSet?: number } = {},
+) => {
+  let raced = false;
+  return {
+    rows,
+    calls: { latest: 0, record: 0 },
+    latest: async function (this: { calls: { latest: number } }) {
+      this.calls.latest++;
+      return rows.length ? rows.reduce((a, b) => (b.generation > a.generation ? b : a)) : null;
+    },
+    subjectSetGeneration: async () => options.subjectSet ?? 4,
+    record: async function (
+      this: { calls: { record: number } },
+      _scope: ScopeKey,
+      input: { generation: number; digest: string; count: number; subjectSetGeneration: number },
+      expectedLatest: number | null,
+    ) {
+      this.calls.record++;
+      if (options.raceOnce && !raced) {
+        raced = true;
+        rows.push({ generation: (expectedLatest ?? 0) + 1, digest: 'f'.repeat(64), count: 1 }); // another export got in
+        throw new Error('GuardExportRaced');
+      }
+      const newest = rows.reduce((m, r) => Math.max(m, r.generation), 0);
+      if ((rows.length ? newest : null) !== expectedLatest) throw new Error('GuardExportRaced');
+      rows.push(input);
+    },
+  };
+};
+
 describe('exportGuardFile', () => {
   it('writes a verified, owner-only file the evidence process can load', async () => {
     const path = join(dir, 'guard.json');
-    const counts = await exportGuardFile({ tokens: store(3) }, SCOPE, path, {
+    const counts = await exportGuardFile({ tokens: store(3), exports: exportsPort() }, SCOPE, path, {
       providerOrganizationId: 'org-1',
     });
-    expect(counts).toEqual({ literals: 3, privateIdHashes: 0 });
+    expect(counts).toEqual({ literals: 3, privateIdHashes: 0, generation: 1 });
     expect(statSync(path).mode & 0o777).toBe(0o600);
     const parsed = parseGuardFile(readFileSync(path, 'utf8'), {
       scope: SCOPE,
@@ -59,7 +91,9 @@ describe('exportGuardFile', () => {
     const path = join(dir, 'loose.json');
     writeFileSync(path, 'old');
     chmodSync(path, 0o644);
-    await exportGuardFile({ tokens: store(1) }, SCOPE, path, { providerOrganizationId: 'org-1' });
+    await exportGuardFile({ tokens: store(1), exports: exportsPort() }, SCOPE, path, {
+      providerOrganizationId: 'org-1',
+    });
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
   it('does not write through a symlink at the target name', async () => {
@@ -67,7 +101,9 @@ describe('exportGuardFile', () => {
     writeFileSync(victim, 'untouched');
     const link = join(dir, 'link.json');
     symlinkSync(victim, link);
-    await exportGuardFile({ tokens: store(1) }, SCOPE, link, { providerOrganizationId: 'org-1' });
+    await exportGuardFile({ tokens: store(1), exports: exportsPort() }, SCOPE, link, {
+      providerOrganizationId: 'org-1',
+    });
     expect(readFileSync(victim, 'utf8')).toBe('untouched');
     expect(statSync(link).isFile()).toBe(true);
     expect(JSON.parse(readFileSync(link, 'utf8')).format).toBe('expunge-guard-v1');
@@ -78,7 +114,9 @@ describe('exportGuardFile', () => {
     });
     const path = join(dir, 'never.json');
     await expect(
-      exportGuardFile({ tokens: store(GUARD_LIST_LIMIT) }, SCOPE, path, { providerOrganizationId: 'org-1' }),
+      exportGuardFile({ tokens: store(GUARD_LIST_LIMIT), exports: exportsPort() }, SCOPE, path, {
+        providerOrganizationId: 'org-1',
+      }),
     ).rejects.toMatchObject({ code: 'GuardIncomplete' });
     expect(() => statSync(path)).toThrow();
     await expect(guardFor({ tokens: store(GUARD_LIST_LIMIT - 1) }, SCOPE)).resolves.toBeDefined();
@@ -86,7 +124,9 @@ describe('exportGuardFile', () => {
   it('refuses an empty guard (nothing to look for would pass everything) and writes nothing', async () => {
     const path = join(dir, 'empty.json');
     await expect(
-      exportGuardFile({ tokens: store(0) }, SCOPE, path, { providerOrganizationId: 'org-1' }),
+      exportGuardFile({ tokens: store(0), exports: exportsPort() }, SCOPE, path, {
+        providerOrganizationId: 'org-1',
+      }),
     ).rejects.toMatchObject({ code: 'MissingForbiddenLiterals' });
     expect(() => statSync(path)).toThrow();
   });
@@ -94,9 +134,70 @@ describe('exportGuardFile', () => {
     const target = join(dir, 'is-a-dir');
     mkdirSync(target); // renaming a file over a directory fails
     await expect(
-      exportGuardFile({ tokens: store(1) }, SCOPE, target, { providerOrganizationId: 'org-1' }),
+      exportGuardFile({ tokens: store(1), exports: exportsPort() }, SCOPE, target, {
+        providerOrganizationId: 'org-1',
+      }),
     ).rejects.toThrow();
     expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
     expect(statSync(target).isDirectory()).toBe(true);
+  });
+  it('records a rising generation per export, in the file and in guard_exports, written BEFORE the file', async () => {
+    const port = exportsPort();
+    const path = join(dir, 'gen.json');
+    const first = await exportGuardFile({ tokens: store(2), exports: port }, SCOPE, path, {
+      providerOrganizationId: 'org-1',
+    });
+    const second = await exportGuardFile({ tokens: store(3), exports: port }, SCOPE, path, {
+      providerOrganizationId: 'org-1',
+    });
+    expect([first.generation, second.generation]).toEqual([1, 2]);
+    expect(port.rows.map((r) => r.generation)).toEqual([1, 2]);
+    const parsed = parseGuardFile(readFileSync(path, 'utf8'), {
+      scope: SCOPE,
+      providerOrganizationId: 'org-1',
+    });
+    expect(parsed.generation).toBe(2);
+    expect(parsed.digest).toBe(port.rows[1]!.digest);
+    // A failed record writes no file.
+    const failing = {
+      ...exportsPort(),
+      record: async () => {
+        throw new Error('GuardGenerationRegression');
+      },
+    };
+    const other = join(dir, 'nofile.json');
+    await expect(
+      exportGuardFile({ tokens: store(1), exports: failing }, SCOPE, other, {
+        providerOrganizationId: 'org-1',
+      }),
+    ).rejects.toThrow();
+    expect(() => statSync(other)).toThrow();
+  });
+  it('records the subject-set generation read before the list, conditional on the latest export, and retries a lost race from the top', async () => {
+    const port = exportsPort([], { raceOnce: true, subjectSet: 7 });
+    const path = join(dir, 'race.json');
+    const result = await exportGuardFile({ tokens: store(2), exports: port }, SCOPE, path, {
+      providerOrganizationId: 'org-1',
+    });
+    expect(port.calls.record).toBe(2); // first lost the race, second succeeded
+    expect(result.generation).toBe(2); // re-read latest (the racing export) and went one above it
+    expect(port.rows.at(-1)).toMatchObject({ generation: 2, subjectSetGeneration: 7 });
+    expect(
+      parseGuardFile(readFileSync(path, 'utf8'), { scope: SCOPE, providerOrganizationId: 'org-1' })
+        .generation,
+    ).toBe(2);
+  });
+  it('gives up after repeated lost races and writes no file', async () => {
+    const port = {
+      ...exportsPort(),
+      record: async () => {
+        throw new Error('GuardExportRaced');
+      },
+    };
+    const path = join(dir, 'always-race.json');
+    await expect(
+      exportGuardFile({ tokens: store(1), exports: port }, SCOPE, path, { providerOrganizationId: 'org-1' }),
+    ).rejects.toThrow('GuardExportRaced');
+    expect(() => statSync(path)).toThrow();
   });
 });

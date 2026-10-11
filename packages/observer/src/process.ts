@@ -113,6 +113,11 @@ export type EvidenceProcessDeps = {
   dispatcher: OutboxDispatcher;
   observer?: { runner: ObserverRunner; identity: ObserverQueryIdentity; options: ScanOptions };
   log?: EvidenceLog;
+  /**
+   * Checked before EACH drain batch and each scan. Anything but `true` (or a throw) HOLDs: nothing is sent or paged. Wired to the
+   * leak-guard freshness check, so a stale guard can never be used for another batch.
+   */
+  holdUnless?: () => Promise<boolean>;
 };
 
 /**
@@ -131,8 +136,21 @@ export class EvidenceProcess {
   }
 
   /** Processes due outbox rows until none is due or `max` rows were handled. */
+  private async held(what: string): Promise<boolean> {
+    if (!this.deps.holdUnless) return false;
+    let ok = false;
+    try {
+      ok = await this.deps.holdUnless();
+    } catch {
+      ok = false;
+    }
+    if (!ok) this.log('warn', `${what} held: the leak guard is not the latest export`);
+    return !ok;
+  }
+
   async drain(max = 100): Promise<DispatchOutcome[]> {
     const outcomes: DispatchOutcome[] = [];
+    if (await this.held('outbox dispatch')) return outcomes;
     for (let i = 0; i < max; i++) {
       let outcome: DispatchOutcome | null;
       try {
@@ -151,6 +169,7 @@ export class EvidenceProcess {
   async scan(): Promise<ScanResult | null> {
     const observer = this.deps.observer;
     if (!observer) return null;
+    if (await this.held('observer scan')) return null;
     try {
       return await observer.runner.runOnce(observer.identity, observer.options);
     } catch (error) {
@@ -207,6 +226,7 @@ export function createEvidenceProcess(
     /** Dispatcher tuning (lease, attempt bound, backoff, hold timeout). Defaults are the dispatcher's own. */
     dispatcher?: Partial<Omit<DispatcherOptions, 'ownerId'>>;
     log?: EvidenceLog;
+    holdUnless?: () => Promise<boolean>;
   } = {},
 ): StartedEvidence {
   const readiness = evidenceReadiness(env, sources);
@@ -277,6 +297,7 @@ export function createEvidenceProcess(
       dispatcher,
       ...(observer ? { observer } : {}),
       ...(options.log ? { log: options.log } : {}),
+      ...(options.holdUnless ? { holdUnless: options.holdUnless } : {}),
     }),
   };
 }

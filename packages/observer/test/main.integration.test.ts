@@ -27,7 +27,7 @@ describeLive('evidence process entry (main) wiring', () => {
       guardPath,
       serializeGuardFile(
         { forbiddenLiterals: ['subject-handle-1'] },
-        { scope, providerOrganizationId: 'org-1' },
+        { scope, providerOrganizationId: 'org-1', generation: 1 },
       ),
     );
     chmodSync(guardPath, 0o600);
