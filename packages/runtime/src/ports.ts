@@ -122,6 +122,11 @@ export interface ExecutionHooks {
    * usage. Persist it (the worker writes it into the checkpoint) so a takeover starts from the committed totals.
    */
   onMeter?(carry: MeterCarry): Promise<void>;
+  /**
+   * Called once per session, right after the model is resolved and before any model call, with what was resolved. The worker
+   * persists it in the claimed run's checkpoint next to the runtime hash. Errors go to onHookError and do not abort the run.
+   */
+  onModelSelected?(attestation: ModelAttestation): Promise<void>;
   onSecurityEvent?(event: SecurityEvent): void;
   onHookError?(hook: string, error: unknown): void;
 }
@@ -205,6 +210,18 @@ export type RunProvenance = {
   /** Hash of {spec, pricing}; compared with the job's workerProfileHash once a profile store exists. */
   profileHash: string;
   boundWorkerProfileHash: string;
+};
+
+/**
+ * The model a run actually resolved, stated by the worker (never by a caller or the profile). `source: 'fake'` whenever the
+ * adapter was injected (the labeled test provider), whatever the profile declares; `'provider'` only for a selection built
+ * from environment configuration. For a fake, `provider` and `modelId` are the injected adapter's own name and model.
+ */
+export type ModelAttestation = {
+  source: 'provider' | 'fake';
+  provider: string;
+  modelId: string;
+  spec: string;
 };
 
 export type RunStats = {

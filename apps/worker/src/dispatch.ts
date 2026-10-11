@@ -256,7 +256,7 @@ class CheckpointWriter {
   replace(value: JsonValue): Promise<void> {
     // A full replacement (the terminal checkpoint) must not drop the job's meter or the attested runtime hash.
     if (value && typeof value === 'object' && !Array.isArray(value))
-      for (const key of ['meter', 'attestedRuntimeHash'] as const)
+      for (const key of ['meter', 'attestedRuntimeHash', 'attestedModel'] as const)
         if (!(key in value) && key in this.state) value = { ...value, [key]: this.state[key] as JsonValue };
     const write = this.chain.then(() => this.jobs.checkpoint(this.actor, this.lease, value));
     this.chain = write.catch(() => undefined);
@@ -536,6 +536,20 @@ export class Dispatcher implements WakeTarget {
       }
     }
     const hooks: ExecutionHooks = {
+      // Written by the worker only, from what the runtime resolved (never from the profile or a caller): the gate derives
+      // "real evidence" from this stored fact. A takeover by another session records its own.
+      onModelSelected: async (attestation) => {
+        try {
+          await writer.update({ attestedModel: { ...attestation } });
+        } catch (error) {
+          this.log({
+            level: 'warn',
+            message: 'model attestation checkpoint failed',
+            jobId,
+            code: errorCode(error),
+          });
+        }
+      },
       onContextInputs: async (hashes) => void (await jobs.recordContextInputs(actor, lease, hashes)),
       onPhaseComplete: async (info) => {
         try {

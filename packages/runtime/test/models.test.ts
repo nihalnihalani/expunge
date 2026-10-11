@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EnvModelResolver, modelSpecFromEnv, providerReadiness } from '../src/index.js';
+import { EnvModelResolver, attestModel, modelSpecFromEnv, providerReadiness } from '../src/index.js';
+import { FAKE_PROVIDER_NAME, FakeChatModel, fakeText } from '../src/testing/index.js';
 import { makeBundle, makeJob } from './fakes.js';
 
 describe('model selection and provider readiness', () => {
@@ -50,5 +51,40 @@ describe('model selection and provider readiness', () => {
     });
     expect(result.ready).toBe(false);
     if (!result.ready) expect(result.blockers[0]?.blocker).toBe('model configuration');
+  });
+});
+
+describe('attestModel: what the run really resolved', () => {
+  it('a provider selection gets provider kind and model id parsed from the environment-built spec', () => {
+    const bundle = makeBundle();
+    const job = makeJob(bundle);
+    const selection = new EnvModelResolver({
+      EXPUNGE_MODEL_PROVIDER: 'Anthropic',
+      EXPUNGE_MODEL_ID: 'claude-sonnet-4.5',
+    }).select(job, bundle);
+    expect(attestModel(selection)).toEqual({
+      source: 'provider',
+      provider: 'anthropic',
+      modelId: 'claude-sonnet-4.5',
+      spec: 'anthropic/claude-sonnet-4.5',
+    });
+    expect(attestModel({ spec: 'openai/gpt-5' })).toMatchObject({
+      source: 'provider',
+      provider: 'openai',
+      modelId: 'gpt-5',
+    });
+  });
+
+  it('an injected FakeChatModel is recorded as fake whatever spec the profile declares', () => {
+    const fake = new FakeChatModel([fakeText('x')]);
+    for (const spec of ['fake/fake', 'openai/gpt-5', 'anthropic/claude-opus-5']) {
+      const stamp = attestModel({ spec, textAdapter: fake.adapter });
+      expect(stamp).toEqual({
+        source: 'fake',
+        provider: FAKE_PROVIDER_NAME,
+        modelId: 'fake-deterministic-1',
+        spec,
+      });
+    }
   });
 });

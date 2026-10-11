@@ -138,7 +138,14 @@ describe('Dispatcher: claim, renew, run, checkpoint and finalize from committed 
     expect(recordIndex).toBeLessThan(firstCheckpoint);
     // Phase checkpoint after the tool, then a terminal checkpoint.
     const checkpoints = r.store.checkpoints.get('job-1') as Array<Record<string, unknown>>;
-    expect(checkpoints[0]).toMatchObject({ v: 1, phase: 1, toolCalls: 1, lastTool: 'echo' });
+    // The first snapshot is the worker's model stamp (before any phase); the first phase checkpoint follows it.
+    expect(checkpoints[0]).toMatchObject({ v: 1, attestedModel: { source: 'fake' } });
+    expect(checkpoints.find((c) => c.phase === 1)).toMatchObject({
+      v: 1,
+      phase: 1,
+      toolCalls: 1,
+      lastTool: 'echo',
+    });
     const terminal = checkpoints.at(-1) as {
       terminal: {
         endedBy: string;
@@ -935,6 +942,31 @@ describe('follow-up (FAKE store, FAKE model): the deployed-harness check and the
     expect(
       (second.store.jobs.get('job-1')!.checkpoint as { attestedRuntimeHash: string }).attestedRuntimeHash,
     ).toBe(HASH_B);
+  });
+
+  it('stamps the RESOLVED model into the claimed run checkpoint before any phase, keeps it in every snapshot, and a fake stays fake', async () => {
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('x')],
+      runtimeHash: HASH_A,
+    });
+    await r.dispatcher.runJob('job-1');
+    type Snap = {
+      attestedModel?: { source: string; provider: string; modelId: string; spec: string };
+      phase?: number;
+    };
+    const snapshots = r.store.checkpoints.get('job-1') as Snap[];
+    const stamped = snapshots.findIndex((snapshot) => snapshot.attestedModel);
+    expect(stamped).toBeGreaterThanOrEqual(0);
+    expect(snapshots.slice(0, stamped).every((snapshot) => snapshot.phase === undefined)).toBe(true); // before any phase
+    for (const snapshot of snapshots.slice(stamped))
+      expect(snapshot.attestedModel).toEqual({
+        source: 'fake',
+        provider: 'FAKE_DETERMINISTIC_TEST_PROVIDER',
+        modelId: 'fake-deterministic-1',
+        spec: 'fake/fake',
+      });
+    expect(snapshots.at(-1)).toHaveProperty('terminal');
+    expect(snapshots.at(-1)).toHaveProperty('attestedModel');
   });
 
   it('without a runtime hash no attestation is written (never an invented value)', async () => {

@@ -1,4 +1,5 @@
 import { classifyModelFailure } from './model-error.js';
+import { attestModel } from './models.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { EventType, type BaseEvent, type RunAgentInput } from '@ag-ui/core';
 import type { HarnessBundle, Job, ScopeKey } from '@expunge/contracts';
@@ -168,6 +169,11 @@ export class RunSession {
       const refusal = meter.exhausted();
       if (!refusal.ok)
         this.fail(refusal.code, refusal.code === 'TokenBudgetExceeded' ? 'token_budget' : 'cost_budget');
+      try {
+        await this.deps.hooks?.onModelSelected?.(attestModel(selection));
+      } catch (error) {
+        this.deps.hooks?.onHookError?.('onModelSelected', error);
+      }
       this.provenance = {
         spec: selection.spec,
         adapterInjected: selection.textAdapter !== undefined,
