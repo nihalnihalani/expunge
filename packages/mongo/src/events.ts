@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { ChangeStream, ChangeStreamDocument, ClientSession, Document, ResumeToken } from 'mongodb';
 import {
   contentHash,
+  environmentSchema,
+  isProjectionEventKind,
+  sameScope,
   validateProjectionPayload,
   type JsonValue,
   type ProjectionEvent,
@@ -22,6 +25,120 @@ export type ProjectionEventInput = {
     payload: ProjectionPayloadByKind[K];
   };
 }[ProjectionEventKind];
+
+const INPUT_KEYS = new Set(['eventId', 'jobId', 'runId', 'artifactIds', 'kind', 'payload']);
+const ENVELOPE_KEYS = new Set(['_id', 'tenantId', 'env', 'scopeId', 'sequence', 'createdAt', ...INPUT_KEYS]);
+const identifier = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 256;
+const objectRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  [Object.prototype, null].includes(Object.getPrototypeOf(value));
+function checkedScope(input: ScopeKey): ScopeKey {
+  const env = environmentSchema.safeParse(input.env);
+  if (!identifier(input.tenantId) || !identifier(input.scopeId) || !env.success)
+    fail('InvalidProjectionHistoryEnvelope');
+  return { tenantId: input.tenantId, env: env.data, scopeId: input.scopeId };
+}
+function checkedInput(input: unknown): ProjectionEventInput {
+  if (
+    !objectRecord(input) ||
+    Object.keys(input).some((key) => !INPUT_KEYS.has(key)) ||
+    !identifier(input.eventId) ||
+    !identifier(input.jobId) ||
+    !identifier(input.runId) ||
+    !Array.isArray(input.artifactIds) ||
+    input.artifactIds.length > 256 ||
+    !Array.from(input.artifactIds).every(identifier) ||
+    !isProjectionEventKind(input.kind)
+  )
+    fail('InvalidProjectionHistoryEnvelope');
+  let payload: unknown;
+  try {
+    payload = validateProjectionPayload(input.kind, input.payload);
+  } catch {
+    fail('InvalidProjectionHistoryPayload');
+  }
+  return {
+    eventId: input.eventId,
+    jobId: input.jobId,
+    runId: input.runId,
+    artifactIds: [...input.artifactIds],
+    kind: input.kind,
+    payload,
+  } as ProjectionEventInput;
+}
+
+/** New producers never receive the legacy waiver. Deep validated payload and scope copies precede every await. */
+export function captureProjectionEventInput(
+  scope: ScopeKey,
+  input: ProjectionEventInput,
+): { scope: ScopeKey; event: ProjectionEventInput } {
+  return { scope: checkedScope(scope), event: checkedInput(input) };
+}
+
+/** Versionless persisted history supports only the complete documented legacy shapes; unknown history fails closed. */
+export function decodeStoredProjectionEvent(
+  input: unknown,
+  expected?: { scope: ScopeKey; jobId?: string },
+): ProjectionEvent {
+  if (
+    !objectRecord(input) ||
+    Object.keys(input).some((key) => !ENVELOPE_KEYS.has(key)) ||
+    !Number.isSafeInteger(input.sequence) ||
+    Number(input.sequence) < 1 ||
+    !(input.createdAt instanceof Date) ||
+    !Number.isFinite(input.createdAt.getTime()) ||
+    (Object.hasOwn(input, '_id') && input._id !== input.eventId)
+  )
+    fail('InvalidProjectionHistoryEnvelope');
+  const scope = checkedScope(input as unknown as ScopeKey);
+  if (
+    expected &&
+    (!sameScope(scope, checkedScope(expected.scope)) ||
+      (expected.jobId !== undefined && input.jobId !== expected.jobId))
+  )
+    fail('InvalidProjectionHistoryScope');
+  let payload = input.payload;
+  if (objectRecord(payload) && input.kind === 'trial_completed') {
+    const legacy = payload;
+    const retired = ['split', 'parentUseful', 'candidateUseful'];
+    if (retired.some((key) => Object.hasOwn(legacy, key))) {
+      if (
+        !retired.every((key) => Object.hasOwn(legacy, key)) ||
+        typeof legacy.split !== 'string' ||
+        !['train', 'protected', 'validation', 'final'].includes(legacy.split) ||
+        typeof legacy.parentUseful !== 'boolean' ||
+        typeof legacy.candidateUseful !== 'boolean'
+      )
+        fail('UnsupportedProjectionHistory');
+      payload = Object.fromEntries(Object.entries(legacy).filter(([key]) => !retired.includes(key)));
+    }
+  } else if (
+    objectRecord(payload) &&
+    input.kind === 'campaign_row_committed' &&
+    Object.hasOwn(payload, 'admitted')
+  ) {
+    if (typeof payload.admitted !== 'boolean') fail('UnsupportedProjectionHistory');
+    payload = Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'admitted'));
+  }
+  const event = checkedInput({
+    eventId: input.eventId,
+    jobId: input.jobId,
+    runId: input.runId,
+    artifactIds: input.artifactIds,
+    kind: input.kind,
+    payload,
+  });
+  return {
+    ...scope,
+    ...event,
+    payload: event.payload as unknown as JsonValue,
+    sequence: Number(input.sequence),
+    createdAt: new Date(input.createdAt.getTime()),
+  };
+}
 
 /** Identity of one job's event stream: its sequence counter is private to (scope, job). */
 export function projectionStreamId(key: ScopeKey, jobId: string): string {
@@ -52,40 +169,42 @@ export class ProjectionRepository {
       'fixture_builder',
       'setup',
     ]);
-    validateProjectionPayload(event.kind, event.payload);
+    const captured = captureProjectionEventInput(key, event);
+    const boundScope = captured.scope;
+    const boundEvent = captured.event;
     const execute = async (active: ClientSession) => {
       const existing = await this.service.control
         .collection<ProjectionEvent & { _id: string }>('projection_events')
-        .findOne({ _id: event.eventId, ...scopeFilter(key) }, { session: active });
+        .findOne({ _id: boundEvent.eventId, ...boundScope }, { session: active });
       if (existing) {
-        const { _id: _ignored, sequence: _sequence, createdAt: _createdAt, ...prior } = existing;
+        const decoded = decodeStoredProjectionEvent(existing, { scope: boundScope, jobId: boundEvent.jobId });
+        const { sequence: _sequence, createdAt: _createdAt, ...prior } = decoded;
         if (
           contentHash(prior, 'projection-event') !==
-          contentHash({ ...scopeFilter(key), ...event }, 'projection-event')
+          contentHash({ ...boundScope, ...boundEvent }, 'projection-event')
         )
           fail('EventIdConflict');
-        const { _id: _ignoredId, ...result } = existing;
-        return result;
+        return decoded;
       }
       const counter = await this.service.control
         .collection<{ _id: string; sequence: number }>('projection_sequences')
         .findOneAndUpdate(
-          { _id: projectionStreamId(key, event.jobId) },
+          { _id: projectionStreamId(boundScope, boundEvent.jobId) },
           // The epoch is born with the stream and never changes on an append (only `resetStream` replaces it).
           { $inc: { sequence: 1 }, $setOnInsert: { epoch: randomUUID() } },
           { session: active, upsert: true, returnDocument: 'after', includeResultMetadata: false },
         );
       if (!counter) fail('SequenceAllocationFailed');
       const result: ProjectionEvent = {
-        ...scopeFilter(key),
-        ...event,
-        payload: event.payload as unknown as JsonValue,
+        ...boundScope,
+        ...boundEvent,
+        payload: boundEvent.payload as unknown as JsonValue,
         sequence: counter.sequence,
         createdAt: new Date(),
       };
       await this.service.control
         .collection<import('mongodb').Document & { _id: string }>('projection_events')
-        .insertOne({ _id: event.eventId, ...result }, { session: active });
+        .insertOne({ _id: boundEvent.eventId, ...result }, { session: active });
       return result;
     };
     return session ? execute(session) : this.service.transaction(execute);
@@ -116,10 +235,11 @@ export class ProjectionRepository {
     jobId: string,
     limit = 500,
   ): Promise<{ events: ProjectionEvent[]; streamEpoch: string | null }> {
+    const boundScope = checkedScope(key);
     for (let attempt = 0; attempt < 3; attempt++) {
-      const before = await this.epochOf(key, jobId);
-      const events = await this.read(key, afterSequence, jobId, limit);
-      if ((await this.epochOf(key, jobId)) === before) return { events, streamEpoch: before };
+      const before = await this.epochOf(boundScope, jobId);
+      const events = await this.read(boundScope, afterSequence, jobId, limit);
+      if ((await this.epochOf(boundScope, jobId)) === before) return { events, streamEpoch: before };
     }
     fail('StreamEpochUnstable');
   }
@@ -170,14 +290,17 @@ export class ProjectionRepository {
     key: ScopeKey,
     jobId: string,
   ): Promise<{ receiptId: string; receiptSequence: number; verifiedWorldRevision: number } | null> {
+    const boundScope = checkedScope(key);
     const row = await this.service.control
       .collection<ProjectionEvent & { _id: string }>('projection_events')
-      .findOne({ ...scopeFilter(key), jobId, kind: 'receipt_committed' }, { sort: { sequence: -1 } });
+      .findOne({ ...boundScope, jobId, kind: 'receipt_committed' }, { sort: { sequence: -1 } });
     if (!row) return null;
-    const payload = row.payload as unknown as ProjectionPayloadByKind['receipt_committed'];
+    const decoded = decodeStoredProjectionEvent(row, { scope: boundScope, jobId });
+    if (decoded.kind !== 'receipt_committed') fail('InvalidProjectionHistoryPayload');
+    const payload = decoded.payload as unknown as ProjectionPayloadByKind['receipt_committed'];
     return {
       receiptId: payload.receiptId,
-      receiptSequence: row.sequence,
+      receiptSequence: decoded.sequence,
       verifiedWorldRevision: payload.verifiedWorldRevision,
     };
   }
@@ -186,13 +309,14 @@ export class ProjectionRepository {
   async read(key: ScopeKey, afterSequence: number, jobId: string, limit = 500): Promise<ProjectionEvent[]> {
     if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || limit < 1 || limit > 1000 || !jobId)
       fail('InvalidEventWindow');
+    const boundScope = checkedScope(key);
     const events = await this.service.control
       .collection<ProjectionEvent & { _id: string }>('projection_events')
-      .find({ ...scopeFilter(key), jobId, sequence: { $gt: afterSequence } })
+      .find({ ...boundScope, jobId, sequence: { $gt: afterSequence } })
       .sort({ sequence: 1 })
       .limit(limit)
       .toArray();
-    return events.map(({ _id, ...event }) => event);
+    return events.map((event) => decodeStoredProjectionEvent(event, { scope: boundScope, jobId }));
   }
 }
 export type StreamCheckpoint = {
@@ -267,7 +391,7 @@ export class ProjectionStreamConsumer {
           break;
         }
         if (change.operationType !== 'insert') continue;
-        const { _id: _recordId, ...event } = change.fullDocument as ProjectionEvent & { _id: string };
+        const event = decodeStoredProjectionEvent(change.fullDocument);
         await onEvent(event);
         await offsets.updateOne(
           { _id: this.consumerId },

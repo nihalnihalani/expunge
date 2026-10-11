@@ -10,6 +10,7 @@ export default mergeConfig(
         'tests/expunge-{environment,source-scope,source-readiness,source-binding,operator-environment}.test.{ts,tsx}',
         'tests/expunge-{css,safe-console,toolchain}.test.ts',
         'tests/expunge-{domain-origin,startup-config,subject-normalization}.test.ts',
+        'tests/expunge-heldout-projection.test.ts',
       ],
     },
   }),

@@ -380,16 +380,15 @@ const payloadSchemas = {
     hypothesis: text(1000),
     state: z.enum(CANDIDATE_STATES),
   }),
-  trial_completed: z.object({
-    reportId: id.nullable(),
-    candidateId: id,
-    pairId: id,
-    family: id,
-    split: z.enum(['train', 'protected', 'validation', 'final']),
-    parentUseful: z.boolean(),
-    candidateUseful: z.boolean(),
-    verdict: z.enum(['admit', 'reject', 'hold']).nullable(),
-  }),
+  trial_completed: z
+    .object({
+      reportId: id.nullable(),
+      candidateId: id,
+      pairId: id,
+      family: id,
+      verdict: z.enum(['admit', 'reject', 'hold']).nullable(),
+    })
+    .strict(),
   approval_required: z.object({
     proposalId: id,
     candidateId: id,
@@ -460,16 +459,17 @@ const payloadSchemas = {
     runsCancelled: int,
     failClosed: z.boolean(),
   }),
-  campaign_row_committed: z.object({
-    campaignId: id,
-    manifestHash: hash,
-    kind: z.enum(['hider', 'meta']),
-    rowId: id,
-    admitted: z.boolean().optional(),
-    w0ResetProof: text(256).optional(),
-    budgetHash: hash.optional(),
-    result: z.enum(['measured', 'null', 'invalid']),
-  }),
+  campaign_row_committed: z
+    .object({
+      campaignId: id,
+      manifestHash: hash,
+      kind: z.enum(['hider', 'meta']),
+      rowId: id,
+      w0ResetProof: text(256).optional(),
+      budgetHash: hash.optional(),
+      result: z.enum(['measured', 'null', 'invalid']),
+    })
+    .strict(),
 } satisfies Record<ProjectionKind, z.ZodType>;
 
 export const MAX_EVENT_PAYLOAD_BYTES = 16_384;
@@ -890,6 +890,10 @@ const deployment: z.ZodType<DeploymentView> = z.object({
     )
     .max(100),
 });
+// Only the authenticated artifact reader consumes this admission-bearing detail schema.
+const campaignDetailRow = payloadSchemas.campaign_row_committed.extend({
+  admitted: z.boolean().optional(),
+});
 const campaign: z.ZodType<CampaignView> = z.object({
   campaignId: id,
   kind: z.enum(['hider', 'meta']),
@@ -897,7 +901,7 @@ const campaign: z.ZodType<CampaignView> = z.object({
   plannedRows: int,
   w0ResetProof: text(128).nullable(),
   budgetHash: hash.nullable(),
-  rows: z.array(payloadSchemas.campaign_row_committed).max(500),
+  rows: z.array(campaignDetailRow).max(500),
   quarantined: z
     .array(z.object({ rowId: id, reasonCodes: z.array(text(64)).max(20) }))
     .max(100),

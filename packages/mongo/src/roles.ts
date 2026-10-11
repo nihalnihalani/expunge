@@ -1,5 +1,6 @@
 import { WORLD_COLLECTIONS, PRIVATE_COLLECTIONS } from './setup.js';
 import type { Principal } from './client.js';
+import { NATIVE_SOURCE_EXECUTOR_READS, NATIVE_SOURCE_EXECUTOR_INSERTS } from './native-source-metadata.js';
 export type AtlasAction = { action: string; resources: Array<{ db: string; collection: string }> };
 export type AtlasRoleManifest = { roleName: string; actions: AtlasAction[]; inheritedRoles: never[] };
 const DOMAIN_STEP_COLLECTIONS = [
@@ -10,6 +11,8 @@ const DOMAIN_STEP_COLLECTIONS = [
   'diagnostics',
 ] as const;
 const JOB_BINDING_WORLD_ROWS = ['world_revisions', 'world_scope_bindings'] as const;
+/** Every world collection the fixture builder seeds: all of them except the gateway's derived edge index. */
+const SEEDED_WORLD_COLLECTIONS = WORLD_COLLECTIONS.filter((name) => name !== 'identity_edges');
 const EXECUTOR_WORLD_WRITES = [
   'customers',
   'accounts',
@@ -35,7 +38,7 @@ export function atlasRoleManifests(
     actions,
     inheritedRoles: [],
   });
-  return {
+  const manifests: Partial<Record<Principal, AtlasRoleManifest>> = {
     domain_executor: role('expunge_domain_executor', [
       worldRead,
       // Domain records, the revision fence and derived edges only. The registry (schema_registry) and retained
@@ -69,12 +72,15 @@ export function atlasRoleManifests(
         // The campaign fault plan and campaign artifact permits are read only for a campaign world's run.
         'world_faults',
         'campaign_artifact_permits',
-        // Served read-only by the operator-facing service.
-        'campaign_artifacts',
-        'campaign_artifact_rows',
+        // The deployment view lists rejected candidates (state only: proposals carry no split).
+        'candidates',
+        // Served read-only by the operator-facing service. NOT here: the split of a world, evidence rows (they carry
+        // their split) and campaign results (they carry held-out measures). domain_executor is the worker's credential,
+        // so those are read through projection_reader.
         'rollback_refusals',
         'erasure_suppressions',
         ...DOMAIN_STEP_COLLECTIONS,
+        ...NATIVE_SOURCE_EXECUTOR_READS,
       ]),
       control('INSERT', [
         'jobs',
@@ -92,9 +98,20 @@ export function atlasRoleManifests(
         'wake_commands',
         // The gateway's insert-only step log: subject, resolution, discovery, plans, sweeps, diagnostics.
         ...DOMAIN_STEP_COLLECTIONS,
+        ...NATIVE_SOURCE_EXECUTOR_INSERTS,
       ]),
       // authority_touches: the fence counter only. The authoritative authority_revisions row is not writable here.
-      control('UPDATE', ['jobs', 'runs', 'projection_sequences', 'authority_touches']),
+      control('UPDATE', [
+        'jobs',
+        'runs',
+        'projection_sequences',
+        'authority_touches',
+        'native_source_heads',
+        'native_source_budgets',
+        'native_source_consistency',
+        'native_source_gap_barriers',
+        'provenance_scope_barriers',
+      ]),
     ]),
     observer: role('expunge_observer', [
       // JobRepository.create binds a job to a world through these two rows; no domain collection is readable.
@@ -164,6 +181,7 @@ export function atlasRoleManifests(
         'gate_claims',
         'gate_attempts',
         'gate_held_runs',
+        'gate_reports',
         'world_faults',
         'campaign_artifact_permits',
         'campaign_artifacts',
@@ -201,10 +219,33 @@ export function atlasRoleManifests(
       control('UPDATE', ['jobs', 'projection_sequences', 'gate_claims', 'gate_attempts']),
     ]),
     approval_issuer: role('expunge_approval_issuer', [
-      control('FIND', ['candidates', 'gate_reports', 'deployments', 'artifacts', 'authority_revisions']),
-      control('INSERT', ['approvals']),
+      control('FIND', [
+        'candidates',
+        'gate_reports',
+        'deployments',
+        'artifacts',
+        'authority_revisions',
+        'authority_touches',
+        'grant_consumptions',
+        'native_source_heads',
+        'native_source_registrations',
+        'native_source_owner_grants',
+        'native_source_previews',
+        'native_source_cleanup_requests',
+        'native_source_job_bindings',
+        'jobs',
+        'artifact_eligibility',
+        'provenance_edges',
+        'native_source_gap_barriers',
+      ]),
+      control('INSERT', [
+        'approvals',
+        'native_source_owner_grants',
+        'native_source_cleanup_requests',
+        'native_source_preview_approvals',
+      ]),
       // Bumping the authorization revision rewrites the authority row and its touch row together.
-      control('UPDATE', ['authority_revisions', 'authority_touches']),
+      control('UPDATE', ['authority_revisions', 'authority_touches', 'native_source_heads', 'jobs']),
     ]),
     promoter: role('expunge_promoter', [
       worldRead,
@@ -222,6 +263,8 @@ export function atlasRoleManifests(
         'authority_revisions',
         'authority_touches',
         'jobs',
+        // promote() looks for an already committed promotion (lost acknowledgment) and rollback() for a hash that was active.
+        'promotions',
       ]),
       // candidates: the promoted state transition. approvals: grant consumption.
       // No UPDATE on approvals: a grant is consumed by inserting a unique grant_consumptions row.
@@ -251,7 +294,21 @@ export function atlasRoleManifests(
         'rollback_refusals',
         'campaign_artifacts',
         'campaign_artifact_rows',
+        // The evidence route's reads: outbox state, evidence rows (each carries its split) and a world's split.
+        'telemetry_outbox',
+        'evidence',
+        'world_splits',
         'stream_offsets',
+        'native_source_receipts',
+        'native_source_readbacks',
+        'native_source_budgets',
+        'native_source_consistency_events',
+        'native_source_heads',
+        'native_source_registrations',
+        'authority_revisions',
+        'native_source_gap_barriers',
+        'artifact_eligibility',
+        'provenance_edges',
       ]),
       control('CHANGE_STREAM', ['projection_events']),
       control('INSERT', ['stream_offsets']),
@@ -272,6 +329,7 @@ export function atlasRoleManifests(
         'telemetry_outbox',
         'lessons',
         'erasure_suppressions',
+        'native_source_heads',
       ]),
       control('UPDATE', [
         // A tombstone replaces a raw row or a lesson; a suppression flips `active`.
@@ -285,6 +343,7 @@ export function atlasRoleManifests(
         'jobs',
         'telemetry_outbox',
         'projection_sequences',
+        'native_source_heads',
       ]),
       control('INSERT', [
         'artifact_eligibility',
@@ -304,17 +363,11 @@ export function atlasRoleManifests(
     ]),
     fixture_builder: role('expunge_fixture_builder', [
       worldRead,
-      action('INSERT', names.world, WORLD_COLLECTIONS),
-      action('UPDATE', names.world, WORLD_COLLECTIONS),
-      action('REMOVE', names.world, [
-        'customers',
-        'accounts',
-        'messages',
-        'events',
-        'notes',
-        'archives',
-        'identity_edges',
-      ]),
+      // Seeds the world's records and registry. The derived edge index is written by the gateway alone (DA-5 DG9): a
+      // fixture builder that could write it could plant edges the discovery would then trust.
+      action('INSERT', names.world, SEEDED_WORLD_COLLECTIONS),
+      action('UPDATE', names.world, SEEDED_WORLD_COLLECTIONS),
+      action('REMOVE', names.world, ['customers', 'accounts', 'messages', 'events', 'notes', 'archives']),
       action('FIND', names.private, PRIVATE_COLLECTIONS),
       action('INSERT', names.private, PRIVATE_COLLECTIONS),
       control('FIND', [
@@ -340,6 +393,24 @@ export function atlasRoleManifests(
       control('UPDATE', ['jobs', 'projection_sequences']),
     ]),
   };
+  // Exact common metadata fence for principals whose existing repositories append/revoke ancestry, plus native use.
+  for (const principal of [
+    'domain_executor',
+    'observer',
+    'proposer',
+    'promoter',
+    'privacy_controller',
+    'grader',
+    'fixture_builder',
+  ] as const) {
+    const manifest = manifests[principal];
+    if (manifest)
+      manifest.actions.push(
+        control('INSERT', ['provenance_scope_barriers']),
+        control('UPDATE', ['provenance_scope_barriers']),
+      );
+  }
+  return manifests;
 }
 export const ROLE_BOUNDARY_NOTES = {
   tenantIsolation:

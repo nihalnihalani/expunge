@@ -25,3 +25,10 @@ export * from './campaign.js';
 export * from './campaign-artifacts.js';
 export * from './privacy-stores.js';
 export * from './world-splits.js';
+export * from './native-source-bson.js';
+export * from './native-source-registry.js';
+export * from './native-source-budgets.js';
+export * from './native-source-adapter.js';
+export * from './native-source-metadata.js';
+// Preserved legacy repository has no provisioned roles/routes until its separate authority packet passes review.
+export * from './effect-approvals.js';

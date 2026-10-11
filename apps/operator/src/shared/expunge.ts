@@ -545,9 +545,7 @@ export interface TrialCompletedPayload {
   candidateId: string;
   pairId: string;
   family: string;
-  split: 'train' | 'protected' | 'validation' | 'final';
-  parentUseful: boolean;
-  candidateUseful: boolean;
+  /** Split and per-arm outcomes stay in authorized report detail, never this worker-readable event. */
   verdict: 'admit' | 'reject' | 'hold' | null;
 }
 export interface ApprovalRequiredPayload {
@@ -637,10 +635,14 @@ export interface CampaignRowPayload {
   manifestHash: string;
   kind: 'hider' | 'meta';
   rowId: string;
-  admitted?: boolean;
   w0ResetProof?: string;
   budgetHash?: string;
   result: 'measured' | 'null' | 'invalid';
+}
+
+/** Reader-authorized campaign artifact detail. Admission is not a projection-event field. */
+export interface CampaignDetailRowView extends CampaignRowPayload {
+  admitted?: boolean;
 }
 
 export interface ProjectionPayloadByKind {
@@ -1050,7 +1052,7 @@ export interface CampaignView {
   plannedRows: number;
   w0ResetProof: string | null;
   budgetHash: string | null;
-  rows: CampaignRowPayload[];
+  rows: CampaignDetailRowView[];
   quarantined: Array<{ rowId: string; reasonCodes: string[] }>;
   noiseControl: { present: boolean; rowId: string | null };
   noDataControl: { present: boolean; rowId: string | null };

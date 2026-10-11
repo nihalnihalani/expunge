@@ -53,9 +53,6 @@ export const PROJECTION_SAMPLES: { [K in keyof ProjectionPayloadByKind]: Project
     candidateId: 'c1',
     pairId: 'p1',
     family: 'composed_holdout',
-    split: 'validation',
-    parentUseful: false,
-    candidateUseful: true,
     verdict: 'admit',
   },
   approval_required: {
@@ -122,7 +119,6 @@ export const PROJECTION_SAMPLES: { [K in keyof ProjectionPayloadByKind]: Project
     manifestHash: H,
     kind: 'meta',
     rowId: 'row-1',
-    admitted: true,
     w0ResetProof: 'reset-proof-1',
     budgetHash: H,
     result: 'measured',

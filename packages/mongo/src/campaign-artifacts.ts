@@ -1,5 +1,11 @@
-import type { Document, ObjectId } from 'mongodb';
-import { contentHash, type JsonValue, type ScopeKey } from '@expunge/contracts';
+import type { ClientSession, Document, ObjectId } from 'mongodb';
+import {
+  canonicalJson,
+  contentHash,
+  environmentSchema,
+  type JsonValue,
+  type ScopeKey,
+} from '@expunge/contracts';
 import { assertCampaignScope } from './campaign.js';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
 import { ProjectionRepository } from './events.js';
@@ -59,8 +65,69 @@ const without = <T extends Document>(row: T & { _id?: unknown }): Omit<T, '_id'>
   return rest as Omit<T, '_id'>;
 };
 function assertIds(campaignId: string, rowId?: string): void {
-  if (!IDENTIFIER.test(campaignId) || (rowId !== undefined && !IDENTIFIER.test(rowId)))
+  if (
+    typeof campaignId !== 'string' ||
+    !IDENTIFIER.test(campaignId) ||
+    (rowId !== undefined && (typeof rowId !== 'string' || !IDENTIFIER.test(rowId)))
+  )
     fail('InvalidCampaignId');
+}
+
+export type CampaignRowIdentity = {
+  storageId: string;
+  eventId: string;
+  logical: ScopeKey & { campaignId: string; rowId: string };
+};
+
+/** Tuple hashing preserves separator-bearing IDs and bounds both durable identities without widening reader limits. */
+export function campaignRowIdentity(scope: ScopeKey, campaignId: string, rowId: string): CampaignRowIdentity {
+  if (typeof rowId !== 'string') fail('InvalidCampaignId');
+  assertIds(campaignId, rowId);
+  if (
+    !environmentSchema.safeParse(scope.env).success ||
+    ![scope.tenantId, scope.scopeId].every(
+      (value) => typeof value === 'string' && value.length > 0 && value.length <= 256,
+    )
+  )
+    fail('InvalidCampaignScope');
+  const logical = { ...scopeFilter(scope), campaignId, rowId };
+  return {
+    storageId: contentHash(logical, 'campaign-row-identity-v2'),
+    eventId: contentHash(logical, 'campaign-row-projection-v2'),
+    logical,
+  };
+}
+
+/** Compatibility is keyed by the complete logical tuple, never by splitting a legacy concatenated ID. */
+export function assertCampaignRowReplay(
+  identity: CampaignRowIdentity,
+  stored: ScopeKey & { _id: string; campaignId: string; rowId: string; payloadDigest: string },
+  expectedDigest: string,
+): void {
+  if (
+    Object.entries(identity.logical).some(([key, value]) => stored[key as keyof typeof stored] !== value) ||
+    (stored._id !== identity.storageId &&
+      stored._id !== `${identity.logical.campaignId}:${identity.logical.rowId}`) ||
+    !HEX64.test(stored.payloadDigest)
+  )
+    fail('CampaignRowIntegrity');
+  if (stored.payloadDigest !== expectedDigest) fail('CampaignRowConflict');
+}
+
+function campaignRowPayloadDigest(row: CampaignRowInput): string {
+  return contentHash(
+    {
+      rowId: row.rowId,
+      kind: row.kind,
+      manifestHash: row.manifestHash,
+      result: row.result,
+      admitted: row.admitted ?? null,
+      w0ResetProof: row.w0ResetProof ?? null,
+      budgetHash: row.budgetHash ?? null,
+      payload: row.payload,
+    },
+    'campaign-row',
+  );
 }
 
 /** The replica set's own clock, so a commit time never comes from the caller's machine. */
@@ -96,74 +163,101 @@ export class CampaignArtifactRepository {
     row: CampaignRowInput,
   ): Promise<{ committed: boolean }> {
     requirePrincipal(this.service, ['grader']);
-    assertIds(campaignId, row.rowId);
-    if (!HEX64.test(row.manifestHash) || (row.budgetHash !== undefined && !HEX64.test(row.budgetHash)))
-      fail('InvalidCampaignRow');
-    await assertCampaignScope(this.service, scope);
-    const payloadDigest = contentHash(
-      {
+    const identity = campaignRowIdentity(scope, campaignId, row.rowId);
+    const boundScope = scopeFilter(identity.logical);
+    // Capture before the first await so the stored tuple, payload digest and projection cannot diverge by mutation.
+    const boundRow = JSON.parse(
+      canonicalJson({
         rowId: row.rowId,
         kind: row.kind,
         manifestHash: row.manifestHash,
         result: row.result,
-        admitted: row.admitted ?? null,
-        w0ResetProof: row.w0ResetProof ?? null,
-        budgetHash: row.budgetHash ?? null,
         payload: row.payload,
-      },
-      'campaign-row',
-    );
+        ...(row.admitted === undefined ? {} : { admitted: row.admitted }),
+        ...(row.w0ResetProof === undefined ? {} : { w0ResetProof: row.w0ResetProof }),
+        ...(row.budgetHash === undefined ? {} : { budgetHash: row.budgetHash }),
+      }),
+    ) as CampaignRowInput;
+    if (
+      !HEX64.test(boundRow.manifestHash) ||
+      (boundRow.budgetHash !== undefined && !HEX64.test(boundRow.budgetHash))
+    )
+      fail('InvalidCampaignRow');
+    const payloadDigest = campaignRowPayloadDigest(boundRow);
+    await assertCampaignScope(this.service, boundScope);
     const committedAt = await serverNow(this.service);
     const projection = new ProjectionRepository(this.service);
-    return this.service.transaction(async (session) => {
-      const _id = `${campaignId}:${row.rowId}`;
-      const existing = await this.rows.findOne({ _id, ...scopeFilter(scope) }, { session });
+    const readExisting = async (session?: ClientSession): Promise<boolean> => {
+      const rows = await this.rows
+        .find(identity.logical, session ? { session } : { readConcern: { level: 'majority' } })
+        .limit(2)
+        .toArray();
+      if (rows.length > 1) fail('CampaignRowIntegrity');
+      const existing = rows[0];
       if (existing) {
-        if (existing.payloadDigest !== payloadDigest) fail('CampaignRowConflict');
-        return { committed: false };
+        assertCampaignRowReplay(identity, existing, payloadDigest);
+        let actualDigest: string;
+        try {
+          actualDigest = campaignRowPayloadDigest(existing);
+        } catch {
+          fail('CampaignRowIntegrity');
+        }
+        if (actualDigest !== existing.payloadDigest) fail('CampaignRowIntegrity');
+        return true;
       }
-      const { rowId, kind, manifestHash, result, payload } = row;
-      await this.rows.insertOne(
-        {
-          _id,
-          ...scopeFilter(scope),
-          campaignId,
-          rowId,
-          kind,
-          manifestHash,
-          result,
-          ...(row.admitted === undefined ? {} : { admitted: row.admitted }),
-          ...(row.w0ResetProof === undefined ? {} : { w0ResetProof: row.w0ResetProof }),
-          ...(row.budgetHash === undefined ? {} : { budgetHash: row.budgetHash }),
-          payload,
-          payloadDigest,
-          committedAt,
-        },
-        { session },
-      );
-      await projection.append(
-        scope,
-        {
-          eventId: `campaign-row:${campaignId}:${rowId}`,
-          jobId: `campaign:${campaignId}`,
-          runId: 'campaign',
-          artifactIds: [],
-          kind: 'campaign_row_committed',
-          payload: {
+      return false;
+    };
+    try {
+      return await this.service.transaction(async (session) => {
+        if (await readExisting(session)) return { committed: false };
+        const { rowId, kind, manifestHash, result, payload } = boundRow;
+        await this.rows.insertOne(
+          {
+            _id: identity.storageId,
+            ...boundScope,
             campaignId,
-            manifestHash,
-            kind,
             rowId,
+            kind,
+            manifestHash,
             result,
-            ...(row.admitted === undefined ? {} : { admitted: row.admitted }),
-            ...(row.w0ResetProof === undefined ? {} : { w0ResetProof: row.w0ResetProof }),
-            ...(row.budgetHash === undefined ? {} : { budgetHash: row.budgetHash }),
+            ...(boundRow.admitted === undefined ? {} : { admitted: boundRow.admitted }),
+            ...(boundRow.w0ResetProof === undefined ? {} : { w0ResetProof: boundRow.w0ResetProof }),
+            ...(boundRow.budgetHash === undefined ? {} : { budgetHash: boundRow.budgetHash }),
+            payload,
+            payloadDigest,
+            committedAt,
           },
-        },
-        session,
-      );
-      return { committed: true };
-    });
+          { session },
+        );
+        await projection.append(
+          boundScope,
+          {
+            eventId: identity.eventId,
+            jobId: `campaign:${campaignId}`,
+            runId: 'campaign',
+            artifactIds: [],
+            kind: 'campaign_row_committed',
+            payload: {
+              campaignId,
+              manifestHash,
+              kind,
+              rowId,
+              result,
+              // `admitted` stays in the committed row (reader-only): the event is readable by the worker's credential.
+              ...(boundRow.w0ResetProof === undefined ? {} : { w0ResetProof: boundRow.w0ResetProof }),
+              ...(boundRow.budgetHash === undefined ? {} : { budgetHash: boundRow.budgetHash }),
+            },
+          },
+          session,
+        );
+        return { committed: true };
+      });
+    } catch (error) {
+      if (!isDuplicate(error)) throw error;
+      // Code 11000 is not universally retried by withTransaction. After its abort, only an exact committed tuple is a replay.
+      if (await readExisting()) return { committed: false };
+      fail('CampaignRowCommitConflict');
+    }
   }
 
   /**
@@ -224,7 +318,7 @@ export class CampaignArtifactRepository {
   }
 
   async readSummary(scope: ScopeKey, campaignId: string): Promise<StoredCampaignSummary | null> {
-    requirePrincipal(this.service, ['grader', 'projection_reader', 'domain_executor', 'setup']);
+    requirePrincipal(this.service, ['grader', 'projection_reader', 'setup']);
     assertIds(campaignId);
     const row = await this.summaries.findOne({ _id: `campaign:${campaignId}`, ...scopeFilter(scope) });
     return row ? (without(row) as StoredCampaignSummary) : null;
@@ -235,7 +329,7 @@ export class CampaignArtifactRepository {
     campaignId: string,
     options: { afterRowId?: string; limit?: number } = {},
   ): Promise<StoredCampaignRow[]> {
-    requirePrincipal(this.service, ['grader', 'projection_reader', 'domain_executor', 'setup']);
+    requirePrincipal(this.service, ['grader', 'projection_reader', 'setup']);
     assertIds(campaignId, options.afterRowId);
     const limit = Math.min(MAX_PAGE, Math.max(1, Math.trunc(options.limit ?? DEFAULT_PAGE)));
     const found = await this.rows

@@ -1,4 +1,5 @@
 import type { Document } from 'mongodb';
+import { ENVIRONMENTS } from '@expunge/contracts';
 
 type Schema = Document;
 const str: Schema = { bsonType: 'string', maxLength: 256 };
@@ -17,14 +18,14 @@ const nullable = (schema: Schema): Schema => ({
   bsonType: [...(Array.isArray(schema.bsonType) ? schema.bsonType : [schema.bsonType]), 'null'],
 });
 const arr = (items: Schema, maxItems = 256): Schema => ({ bsonType: 'array', items, maxItems });
-const en = (values: string[]): Schema => ({ bsonType: 'string', enum: values });
+const en = (values: readonly string[]): Schema => ({ bsonType: 'string', enum: [...values] });
 const object = (properties: Record<string, Schema>, required = Object.keys(properties)): Schema => ({
   bsonType: 'object',
   required,
   additionalProperties: false,
   properties,
 });
-const ENV = en(['dev', 'evaluation', 'demo']);
+const ENV = en(ENVIRONMENTS);
 const scope = { tenantId: str, env: ENV, scopeId: str };
 type IndexEntry = { collection: string; key: Document; options?: Document };
 const identity = { tenantId: 1, env: 1, scopeId: 1 } as const;
