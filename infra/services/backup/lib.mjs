@@ -24,6 +24,13 @@ export function sha256File(path) {
   });
 }
 
+/** The backup and restore principals must never be the setup principal (B-4): refuses an identical URI value. */
+export function refuseSetupPrincipal(uri, env = process.env) {
+  const setup = env.MONGODB_SETUP_URI?.trim();
+  if (setup && uri === setup)
+    throw new Error('SetupPrincipalRefused: use a dedicated backup/restore principal, not MONGODB_SETUP_URI');
+}
+
 /** Reads a URI from the environment variable `name`; throws naming the VARIABLE, never the value. */
 export function uriFromEnv(name, env = process.env) {
   const value = env[name]?.trim();
