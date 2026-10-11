@@ -81,7 +81,8 @@ export type SubjectTokenEntry = {
 };
 export interface SubjectTokenStore {
   put(scope: ScopeKey, entry: SubjectTokenEntry): Promise<'created' | 'exists'>;
-  list(scope: ScopeKey): Promise<SubjectTokenEntry[]>;
+  /** At most `limit` entries (the repository caps it at 5000). */
+  list(scope: ScopeKey, limit?: number): Promise<SubjectTokenEntry[]>;
   tokensFor(scope: ScopeKey, subjectHandle: string, provider: string): Promise<string[]>;
 }
 

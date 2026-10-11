@@ -80,3 +80,11 @@ Fakes are labeled in the `describe` names. The live Raindrop deletion test skips
 
 Immutable archive is not a privacy exemption. Log deletion may remove learning evidence, so provenance policy is gated
 before a lesson is retained. No promise of instant vendor deletion and no unverified Intelligence purge.
+
+## Leak-guard export
+
+`exportGuardFile` / `export-guard-cli.ts` write the evidence process's leak guard (registered subject handles plus an optional
+salted private-id set) with scope, provider organization, count and digest, atomically (exclusive 0600 temp file, fsync, rename; a
+symlink or looser pre-existing file at the target is replaced, not followed). A guard that may be incomplete (5000 entries or more
+in one read) is refused, as is an empty one. **The file contains subject literals in plaintext** and must be mounted read-only
+into the observer only. Not done: a Mongo generation row so the reader can detect a stale export.
