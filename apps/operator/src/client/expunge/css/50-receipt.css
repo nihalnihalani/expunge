@@ -1,0 +1,54 @@
+.ex-root .ex-receipt-verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ex-space-3);
+  margin: 0 0 var(--ex-space-3);
+}
+
+.ex-root .ex-candidate {
+  display: grid;
+  gap: var(--ex-space-4);
+  padding: var(--ex-space-5);
+  border: 1px solid var(--ex-rule);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-patches {
+  display: grid;
+  gap: var(--ex-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ex-root .ex-diff {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--ex-space-3);
+}
+.ex-root .ex-diff figure {
+  margin: 0;
+  min-width: 0;
+}
+.ex-root .ex-diff figcaption {
+  font-size: var(--ex-text-sm);
+  color: var(--ex-ink2);
+}
+.ex-root .ex-diff pre {
+  margin: var(--ex-space-2) 0 0;
+  padding: var(--ex-space-3);
+  border: 1px solid var(--ex-rule);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-sunken);
+  font-family: var(--ex-font-data);
+  font-size: var(--ex-text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ex-root .ex-h4 {
+  margin: var(--ex-space-3) 0 0;
+  font-size: var(--ex-text-base, 1rem);
+  font-weight: 600;
+  line-height: 1.3;
+}

@@ -146,7 +146,7 @@ describe('workbench frame', () => {
     expect(html).not.toContain('ex-seal');
   });
   it('registers only the tabs whose views exist', () => {
-    expect(availableTabs()).toEqual(['workbench']);
+    expect(availableTabs()).toEqual(['workbench', 'candidate', 'receipt']);
   });
   it('decides the connection banner from transport state and freshness', () => {
     const live = baseSnapshot('job-1');

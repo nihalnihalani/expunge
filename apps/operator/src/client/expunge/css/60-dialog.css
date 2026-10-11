@@ -1,0 +1,28 @@
+.ex-root .ex-dialog {
+  box-sizing: border-box;
+  width: min(720px, calc(100vw - 2 * var(--ex-space-5)));
+  max-height: calc(100dvh - 2 * var(--ex-space-5));
+  overflow: auto;
+  padding: var(--ex-space-6);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+  color: var(--ex-ink);
+}
+.ex-root .ex-dialog::backdrop {
+  background: var(--ex-scrim);
+}
+.ex-root .ex-dialog .ex-h2:focus-visible {
+  outline: 2px solid var(--ex-ink);
+  outline-offset: 2px;
+}
+.ex-root .ex-dialog-actions {
+  margin-top: var(--ex-space-5);
+  flex-wrap: wrap;
+}
+.ex-root .ex-dialog .ex-h3 {
+  margin-top: var(--ex-space-5);
+}
+.ex-root .ex-dialog .ex-dl {
+  margin-top: var(--ex-space-4);
+}

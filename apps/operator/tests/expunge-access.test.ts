@@ -113,6 +113,10 @@ it('DA-7 K1: unauthenticated loopback reads readiness and status only, not job d
   const status = await instance.request('/api/expunge/status');
   expect(status.status).toBe(200);
   expect(await status.json()).toMatchObject({ ownerAuth: 'missing' });
+  // DA-7 RD1: the uncached probe needs the owner token.
+  expect(
+    (await instance.request('/api/expunge/readiness?fresh=1')).status,
+  ).toBe(401);
   const readiness = await instance.request('/api/expunge/readiness');
   expect(readiness.status).toBe(200);
   const body = await readiness.json();
