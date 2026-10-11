@@ -1,0 +1,10 @@
+--- a/apps/operator/tests/expunge-workbench.test.tsx	2026-10-11 21:39:51
++++ b/apps/operator/tests/expunge-workbench.test.tsx	2026-10-11 21:39:51
+@@ -148,6 +148,7 @@
+   it('registers only the tabs whose views exist', () => {
+     expect(availableTabs()).toEqual([
+       'workbench',
++      'evidence',
+       'candidate',
+       'evaluation',
+       'receipt',
