@@ -1,0 +1,128 @@
+{
+ "slice": "s1",
+ "failures": [],
+ "okCount": 108,
+ "results": {
+  "scans": {
+   "1440-light": {
+    "theme": "light",
+    "hOverflow": false,
+    "rootWidth": 1172,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   },
+   "1024-light": {
+    "theme": "light",
+    "hOverflow": false,
+    "rootWidth": 756,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   },
+   "768-light": {
+    "theme": "light",
+    "hOverflow": false,
+    "rootWidth": 500,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   },
+   "390-light": {
+    "theme": "light",
+    "hOverflow": false,
+    "rootWidth": 390,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   },
+   "1440-dark": {
+    "theme": "dark",
+    "hOverflow": false,
+    "rootWidth": 1172,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   },
+   "1024-dark": {
+    "theme": "dark",
+    "hOverflow": false,
+    "rootWidth": 756,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   },
+   "768-dark": {
+    "theme": "dark",
+    "hOverflow": false,
+    "rootWidth": 500,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   },
+   "390-dark": {
+    "theme": "dark",
+    "hOverflow": false,
+    "rootWidth": 390,
+    "textNodes": 89,
+    "contrastFails": [],
+    "smallText": [],
+    "smallTargets": [],
+    "unnamed": [],
+    "h1": 1,
+    "main": 1,
+    "title": "Setup and readiness · Expunge",
+    "liveRegions": 2
+   }
+  },
+  "keyboardStops": [
+   "Readiness checks",
+   "Re-check",
+   "Actions that change stat",
+   "Authorized worlds",
+   "Copy full eligibility po"
+  ]
+ }
+}

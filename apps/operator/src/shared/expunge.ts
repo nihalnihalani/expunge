@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Sanitized read projection shapes for the Expunge workflow (owned by ui-ux-improver).
  * Standalone: the operator has its own lock and cannot import @expunge/contracts.
@@ -457,14 +459,16 @@ export interface ExternalErasureUpdatedPayload {
   subjectCount: number;
   snapshotHash: string;
 }
-export type JobFailureCode =
-  | 'budget_exhausted'
-  | 'lease_lost'
-  | 'policy_denied'
-  | 'verification_failed'
-  | 'provider_error'
-  | 'world_conflict'
-  | 'internal_error';
+export const JOB_FAILURE_CODES = [
+  'budget_exhausted',
+  'lease_lost',
+  'policy_denied',
+  'verification_failed',
+  'provider_error',
+  'world_conflict',
+  'internal_error',
+] as const;
+export type JobFailureCode = (typeof JOB_FAILURE_CODES)[number];
 export interface JobFailedPayload {
   code: JobFailureCode;
   retryable: boolean;
@@ -945,3 +949,15 @@ export interface ExpungeFoundationStatus {
   authority: 'mongodb';
   telemetry: 'disabled' | 'enabled';
 }
+
+// ---- Review tool: registered through the client hook and the projection agent allowlist ----
+export const expungeReviewSchema = z
+  .object({ proposalId: z.string().regex(/^[A-Za-z0-9_.:-]{1,128}$/) })
+  .strict();
+export type ExpungeReviewArgs = z.infer<typeof expungeReviewSchema>;
+export const expungeReviewTool = {
+  name: 'review_expunge_proposal',
+  description:
+    'Open the stored human review for an Expunge harness proposal. Pass only the proposal ID. The decision is recorded by the approval issuer; this tool never carries executable arguments.',
+  parameters: z.toJSONSchema(expungeReviewSchema),
+};

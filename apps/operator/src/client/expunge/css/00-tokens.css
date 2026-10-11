@@ -1,0 +1,84 @@
+/* Expunge visual system: tokens. See DESIGN.md.
+   Rules: tokens are authored in rgb() so the shell's dark-theme plugin never
+   rewrites them; dark values are explicit and verified (DESIGN.md section 4.3).
+   No hex, white or black literals anywhere in this directory. */
+.ex-root {
+  --ex-canvas: rgb(248 247 244); /* #F8F7F4 */
+  --ex-surface: rgb(255 255 255); /* #FFFFFF */
+  --ex-raised: rgb(251 250 248); /* #FBFAF8 */
+  --ex-sunken: rgb(240 238 233); /* #F0EEE9 */
+  --ex-narrative: rgb(243 241 236); /* #F3F1EC */
+  --ex-ink: rgb(29 31 36); /* #1D1F24 */
+  --ex-ink2: rgb(70 73 85); /* #464955 */
+  --ex-ink3: rgb(92 95 107); /* #5C5F6B */
+  --ex-rule: rgb(226 223 214); /* #E2DFD6 */
+  --ex-rule-strong: rgb(140 135 123); /* #8C877B */
+  --ex-seal: rgb(43 68 184); /* #2B44B8 */
+  --ex-seal-text: rgb(43 68 184); /* #2B44B8 */
+  --ex-seal-ink: rgb(255 255 255); /* #FFFFFF */
+  --ex-seal-subtle: rgb(233 237 251); /* #E9EDFB */
+  --ex-success: rgb(20 101 58); /* #14653A */
+  --ex-success-bg: rgb(229 243 234); /* #E5F3EA */
+  --ex-warning: rgb(127 74 0); /* #7F4A00 */
+  --ex-warning-bg: rgb(251 239 217); /* #FBEFD9 */
+  --ex-danger: rgb(174 42 34); /* #AE2A22 */
+  --ex-danger-bg: rgb(251 232 230); /* #FBE8E6 */
+  --ex-neutral: rgb(70 73 85); /* #464955 */
+  --ex-neutral-bg: rgb(236 234 228); /* #ECEAE4 */
+  --ex-scrim: rgb(29 31 36 / 0.48);
+  --ex-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ex-font-display:
+    'Iowan Old Style', Charter, 'Palatino Linotype', Palatino, Georgia, serif;
+  --ex-font-data:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --ex-text-xs: 0.8572rem; /* 12px on the shell's 14px root; 0.857rem rounds to 11.998px */
+  --ex-text-sm: 0.929rem;
+  --ex-text-md: 1rem;
+  --ex-text-lg: 1.143rem;
+  --ex-text-xl: 1.429rem;
+  --ex-text-2xl: 2rem;
+  --ex-text-3xl: 2.857rem;
+  --ex-space-1: 2px;
+  --ex-space-2: 4px;
+  --ex-space-3: 8px;
+  --ex-space-4: 12px;
+  --ex-space-5: 16px;
+  --ex-space-6: 24px;
+  --ex-space-7: 32px;
+  --ex-space-8: 48px;
+  --ex-space-9: 64px;
+  --ex-radius-1: 3px;
+  --ex-radius-2: 6px;
+  --ex-radius-3: 12px;
+  --ex-dur-1: 90ms;
+  --ex-dur-2: 160ms;
+  --ex-dur-3: 280ms;
+  --ex-dur-seal: 420ms;
+  --ex-ease: cubic-bezier(0.2, 0, 0, 1);
+  --ex-header-h: 56px;
+}
+:root[data-theme='dark'] .ex-root {
+  --ex-canvas: rgb(27 27 27); /* #1B1B1B */
+  --ex-surface: rgb(36 36 36); /* #242424 */
+  --ex-raised: rgb(32 32 32); /* #202020 */
+  --ex-sunken: rgb(21 21 21); /* #151515 */
+  --ex-narrative: rgb(32 32 32); /* #202020 */
+  --ex-ink: rgb(236 235 232); /* #ECEBE8 */
+  --ex-ink2: rgb(189 188 183); /* #BDBCB7 */
+  --ex-ink3: rgb(163 162 157); /* #A3A29D */
+  --ex-rule: rgb(53 53 47); /* #35352F */
+  --ex-rule-strong: rgb(124 122 116); /* #7C7A74 */
+  --ex-seal: rgb(143 162 255); /* #8FA2FF */
+  --ex-seal-text: rgb(169 184 255); /* #A9B8FF */
+  --ex-seal-ink: rgb(16 20 43); /* #10142B */
+  --ex-seal-subtle: rgb(31 37 71); /* #1F2547 */
+  --ex-success: rgb(111 211 154); /* #6FD39A */
+  --ex-success-bg: rgb(20 41 29); /* #14291D */
+  --ex-warning: rgb(240 185 100); /* #F0B964 */
+  --ex-warning-bg: rgb(46 36 18); /* #2E2412 */
+  --ex-danger: rgb(255 152 144); /* #FF9890 */
+  --ex-danger-bg: rgb(52 25 26); /* #34191A */
+  --ex-neutral: rgb(189 188 183); /* #BDBCB7 */
+  --ex-neutral-bg: rgb(44 44 42); /* #2C2C2A */
+  --ex-scrim: rgb(0 0 0 / 0.64);
+}

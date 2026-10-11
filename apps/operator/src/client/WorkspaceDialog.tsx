@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { TelemetryNotice } from './expunge/TelemetryNotice';
 import { X } from 'lucide-react';
 import type { Dot, Memory, State, WorkspaceState } from '../shared/types';
 import { ConnectionsSection } from './ConnectionsSection';
@@ -422,16 +423,7 @@ export function WorkspaceDialog({
                   : 'needs VOICE_API_KEY and VOICE_MODEL'}
                 .
               </p>
-              <p>
-                Setup and usage metadata is collected by default.{' '}
-                <a
-                  href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP-TELEMETRY.md"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Tracking and opt-out details
-                </a>
-              </p>
+              <TelemetryNotice />
               <a
                 href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP.md"
                 target="_blank"

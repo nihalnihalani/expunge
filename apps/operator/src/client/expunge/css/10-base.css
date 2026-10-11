@@ -1,0 +1,580 @@
+/* Expunge base: layout, type, controls, chips, banners, tables.
+   Every selector is scoped under .ex-root (DESIGN.md R1). Colors come only from
+   var(--ex-*) tokens (R2, R4). Dark mode is the :root[data-theme='dark'] token
+   block; there is no prefers-color-scheme query (R3). */
+.ex-root {
+  container-type: inline-size;
+  container-name: ex;
+  box-sizing: border-box;
+  min-height: 100%;
+  background: var(--ex-canvas);
+  color: var(--ex-ink);
+  font-family: var(--ex-font-ui);
+  font-size: var(--ex-text-md);
+  line-height: 1.5;
+  scroll-padding-top: calc(var(--ex-header-h) + var(--ex-space-3));
+  scroll-padding-bottom: var(--ex-space-6);
+  overflow-wrap: break-word;
+}
+.ex-root *,
+.ex-root *::before,
+.ex-root *::after {
+  box-sizing: border-box;
+}
+.ex-root:focus {
+  outline: none;
+}
+.ex-root .ex-shell {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: var(--ex-space-6);
+}
+.ex-root .ex-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ex-space-3) var(--ex-space-6);
+  padding-bottom: var(--ex-space-4);
+  border-bottom: 1px solid var(--ex-rule);
+}
+.ex-root .ex-brand {
+  margin: 0;
+  font-family: var(--ex-font-display);
+  font-size: var(--ex-text-xl);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.ex-root .ex-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ex-root .ex-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--ex-space-4);
+  border-radius: var(--ex-radius-2);
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-sm);
+  font-weight: 500;
+  text-decoration: none;
+}
+.ex-root .ex-nav a:hover {
+  background: var(--ex-sunken);
+  color: var(--ex-ink);
+}
+.ex-root .ex-nav a[aria-current='page'] {
+  background: var(--ex-sunken);
+  color: var(--ex-ink);
+  box-shadow: inset 0 -2px 0 var(--ex-ink);
+}
+.ex-root .ex-page {
+  padding-top: var(--ex-space-6);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ex-space-6);
+  max-width: 78rem;
+}
+.ex-root .ex-eyebrow {
+  margin: 0;
+  font-size: var(--ex-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ex-ink3);
+}
+.ex-root .ex-title {
+  margin: var(--ex-space-2) 0 var(--ex-space-3);
+  font-family: var(--ex-font-display);
+  font-size: var(--ex-text-2xl);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.ex-root .ex-lede {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--ex-ink2);
+  line-height: 1.55;
+}
+.ex-root .ex-h2 {
+  margin: 0 0 var(--ex-space-3);
+  font-family: var(--ex-font-display);
+  font-size: var(--ex-text-xl);
+  font-weight: 500;
+  line-height: 1.25;
+}
+.ex-root .ex-h3 {
+  margin: 0 0 var(--ex-space-2);
+  font-size: var(--ex-text-lg);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ex-root .ex-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ex-space-4);
+  padding-top: var(--ex-space-5);
+  border-top: 1px solid var(--ex-rule);
+}
+.ex-root .ex-muted {
+  color: var(--ex-ink3);
+}
+.ex-root .ex-note {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-data {
+  font-family: var(--ex-font-data);
+  font-size: var(--ex-text-sm);
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+.ex-root .ex-num {
+  font-variant-numeric: tabular-nums;
+}
+.ex-root .ex-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.ex-root a.ex-link,
+.ex-root .ex-prose a {
+  color: var(--ex-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ex-root
+  :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ex-ink);
+  outline-offset: 2px;
+}
+
+/* Buttons */
+.ex-root .ex-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ex-space-3);
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0 var(--ex-space-5);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+  color: var(--ex-ink);
+  font: inherit;
+  font-size: var(--ex-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.ex-root .ex-btn:hover:not(:disabled) {
+  background: var(--ex-sunken);
+}
+.ex-root .ex-btn:disabled,
+.ex-root .ex-btn[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: var(--ex-ink3);
+  border-style: dashed;
+}
+.ex-root .ex-btn--primary {
+  background: var(--ex-ink);
+  border-color: var(--ex-ink);
+  color: var(--ex-canvas);
+}
+.ex-root .ex-btn--primary:hover:not(:disabled) {
+  background: var(--ex-ink2);
+  border-color: var(--ex-ink2);
+}
+.ex-root .ex-btn--primary:disabled {
+  background: var(--ex-sunken);
+  border-color: var(--ex-rule-strong);
+  color: var(--ex-ink3);
+}
+.ex-root .ex-btn--quiet {
+  border-color: transparent;
+  background: transparent;
+}
+.ex-root .ex-btn--danger {
+  border-color: var(--ex-danger);
+  color: var(--ex-danger);
+}
+.ex-root .ex-iconbtn {
+  min-width: 32px;
+  padding: 0;
+}
+
+/* Chips: icon + word + border treatment; never color alone (DESIGN.md 4.2) */
+.ex-root .ex-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ex-space-2);
+  padding: 1px var(--ex-space-3);
+  border: 1px solid var(--ex-ink3);
+  border-radius: var(--ex-radius-1);
+  background: var(--ex-neutral-bg);
+  color: var(--ex-neutral);
+  font-size: var(--ex-text-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.ex-root .ex-chip svg {
+  flex-shrink: 0;
+}
+.ex-root .ex-chip--ok,
+.ex-root .ex-chip--complete {
+  border-color: var(--ex-success);
+  background: var(--ex-success-bg);
+  color: var(--ex-success);
+}
+.ex-root .ex-chip--warn {
+  border-color: var(--ex-warning);
+  border-top-style: double;
+  border-top-width: 3px;
+  background: var(--ex-warning-bg);
+  color: var(--ex-warning);
+}
+.ex-root .ex-chip--danger {
+  border-color: var(--ex-danger);
+  background: var(--ex-danger-bg);
+  color: var(--ex-danger);
+}
+.ex-root .ex-chip--fail {
+  border-width: 2px;
+  border-color: var(--ex-danger);
+  background: var(--ex-danger-bg);
+  color: var(--ex-danger);
+}
+.ex-root .ex-chip--rejected {
+  border-color: var(--ex-danger);
+  background: transparent;
+  color: var(--ex-danger);
+}
+.ex-root .ex-chip--dashed {
+  border-style: dashed;
+}
+.ex-root .ex-chip--dotted {
+  border-style: dotted;
+}
+.ex-root .ex-chip--strike .ex-chip-label {
+  text-decoration: line-through;
+}
+.ex-root .ex-chip--running {
+  border-left-width: 3px;
+}
+
+/* The one authority badge. Only CommittedSeal renders these classes. */
+.ex-root .ex-seal {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3);
+  padding: var(--ex-space-2) var(--ex-space-4);
+  border: 1px solid var(--ex-seal);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-seal-subtle);
+  color: var(--ex-seal-text);
+  font-size: var(--ex-text-xs);
+  font-weight: 600;
+}
+.ex-root .ex-seal-word {
+  color: var(--ex-seal-text);
+}
+.ex-root .ex-seal-id {
+  font-family: var(--ex-font-data);
+  color: var(--ex-ink);
+  font-weight: 500;
+}
+
+/* Client-side acknowledgement that is not authority */
+.ex-root .ex-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ex-space-3);
+  padding: var(--ex-space-2) var(--ex-space-4);
+  border: 1px dashed var(--ex-ink3);
+  border-radius: var(--ex-radius-2);
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-sm);
+}
+
+/* Model narrative: visibly not committed status */
+.ex-root .ex-narrative {
+  position: relative;
+  margin: 0;
+  display: grid;
+  gap: var(--ex-space-3);
+  max-width: 68ch;
+  padding: var(--ex-space-4) var(--ex-space-5) var(--ex-space-4)
+    var(--ex-space-6);
+  border: 1px dashed var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-narrative);
+}
+.ex-root .ex-narrative::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 10px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--ex-rule-strong) 0 1px,
+    transparent 1px 6px
+  );
+}
+.ex-root .ex-narrative-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ex-space-3);
+  margin: 0;
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ex-root .ex-narrative-text {
+  margin: 0;
+  font-family: var(--ex-font-display);
+  font-style: italic;
+  line-height: 1.55;
+  color: var(--ex-ink);
+  white-space: pre-wrap;
+}
+
+/* Banners and states */
+.ex-root .ex-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ex-space-3) var(--ex-space-4);
+  padding: var(--ex-space-3) var(--ex-space-5);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-raised);
+  color: var(--ex-ink);
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-banner--warn {
+  border-color: var(--ex-warning);
+  background: var(--ex-warning-bg);
+}
+.ex-root .ex-banner--danger {
+  border-color: var(--ex-danger);
+  background: var(--ex-danger-bg);
+}
+.ex-root .ex-banner--info {
+  border-style: dashed;
+}
+.ex-root .ex-banner strong {
+  font-weight: 600;
+}
+.ex-root .ex-state {
+  display: grid;
+  justify-items: start;
+  gap: var(--ex-space-3);
+  padding: var(--ex-space-6);
+  border: 1px dashed var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-state-title {
+  margin: 0;
+  font-weight: 600;
+}
+.ex-root .ex-state p {
+  margin: 0;
+  max-width: 64ch;
+  color: var(--ex-ink2);
+}
+.ex-root .ex-skeleton {
+  display: grid;
+  gap: var(--ex-space-3);
+}
+.ex-root .ex-skeleton-row {
+  height: 18px;
+  border-radius: var(--ex-radius-1);
+  background: var(--ex-sunken);
+}
+.ex-root .ex-skeleton-row:nth-child(2) {
+  width: 82%;
+}
+.ex-root .ex-skeleton-row:nth-child(3) {
+  width: 64%;
+}
+
+/* Tables */
+.ex-root .ex-tablewrap:focus-visible {
+  outline: 2px solid var(--ex-ink);
+  outline-offset: 2px;
+}
+.ex-root .ex-tablewrap {
+  /* Positioned so visually hidden (absolute) text inside cells is clipped with the table
+     instead of widening the page. */
+  position: relative;
+  overflow-x: auto;
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-table {
+  width: 100%;
+  min-width: 36rem;
+  border-collapse: collapse;
+  font-size: var(--ex-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ex-root .ex-table caption {
+  padding: var(--ex-space-3) var(--ex-space-4);
+  text-align: left;
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-xs);
+}
+.ex-root .ex-table th,
+.ex-root .ex-table td {
+  padding: var(--ex-space-3) var(--ex-space-4);
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--ex-rule);
+}
+.ex-root .ex-table thead th {
+  border-top: 0;
+  background: var(--ex-sunken);
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ex-root .ex-table tbody th {
+  font-weight: 600;
+}
+.ex-root .ex-table tbody th .ex-note {
+  font-weight: 400;
+}
+.ex-root .ex-table td.ex-right,
+.ex-root .ex-table th.ex-right {
+  text-align: right;
+}
+
+/* Definition lists */
+.ex-root .ex-dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--ex-space-3) var(--ex-space-5);
+  margin: 0;
+}
+.ex-root .ex-dl dt {
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-dl dd {
+  margin: 0;
+}
+
+/* Identifiers */
+.ex-root .ex-hash {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ex-space-2);
+}
+.ex-root .ex-hash code {
+  font-family: var(--ex-font-data);
+  font-size: var(--ex-text-sm);
+  font-variant-numeric: slashed-zero;
+}
+.ex-root .ex-code {
+  padding: 0 var(--ex-space-2);
+  border: 1px solid var(--ex-rule);
+  border-radius: var(--ex-radius-1);
+  background: var(--ex-sunken);
+  font-family: var(--ex-font-data);
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.ex-root .ex-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3);
+  align-items: center;
+}
+.ex-root .ex-spin {
+  animation: ex-spin 1.2s linear infinite;
+}
+@keyframes ex-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@container ex (max-width: 700px) {
+  .ex-root .ex-shell {
+    padding: var(--ex-space-5);
+  }
+  .ex-root .ex-table tbody th {
+    position: sticky;
+    left: 0;
+    min-width: 9rem;
+    background: var(--ex-surface);
+    box-shadow: 1px 0 0 var(--ex-rule);
+  }
+  .ex-root .ex-dl {
+    grid-template-columns: 1fr;
+    gap: var(--ex-space-2);
+  }
+  .ex-root .ex-dl dd {
+    margin-bottom: var(--ex-space-3);
+  }
+}
+@media (pointer: coarse) {
+  .ex-root .ex-btn,
+  .ex-root .ex-nav a {
+    min-height: 44px;
+  }
+  .ex-root .ex-table th,
+  .ex-root .ex-table td {
+    padding-block: var(--ex-space-4);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ex-root *,
+  .ex-root *::before,
+  .ex-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .ex-root .ex-spin {
+    animation: none;
+  }
+}
+@media (forced-colors: active) {
+  .ex-root .ex-chip,
+  .ex-root .ex-seal,
+  .ex-root .ex-pending,
+  .ex-root .ex-banner,
+  .ex-root .ex-state,
+  .ex-root .ex-narrative {
+    border: 1px solid CanvasText;
+  }
+  .ex-root .ex-narrative::before {
+    display: none;
+  }
+}
