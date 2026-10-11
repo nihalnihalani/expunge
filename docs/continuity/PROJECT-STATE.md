@@ -1,6 +1,6 @@
 # Expunge project state (sanitized, version-controlled)
 
-Updated: 2026-10-11 16:30 IST (11:00 UTC) by team-lead. This file holds no credentials. Checkpoint packs live in the ignored `.expunge/checkpoints/` directory; the local briefing is the ignored `HANDOFF.md`.
+Updated: 2026-10-11 18:22 IST (12:52 UTC) by team-lead. This file holds no credentials. Checkpoint packs live in the ignored `.expunge/checkpoints/` directory; the local briefing is the ignored `HANDOFF.md`.
 
 ## Objective
 
@@ -16,7 +16,7 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 
 | Item | State |
 |---|---|
-| Git | branch `main`; commits so far: fe12b51 baseline (470 files), 506b73e ledger, e165d48 mongo A2-R finish, 082d2e1 ledger, d119446 review DA-4, 7cbb983 ledger; remote `origin` = https://github.com/nihalnihalani/expunge (private); every commit is pushed immediately (human instruction); per-lane commit packets with verifier evidence |
+| Git | branch `main`; HEAD ba41d7b = origin/main, 30 commits (baseline fe12b51; per-lane packets PKT-2 to PKT-18 each followed by a COMMIT-LEDGER row commit); remote `origin` = https://github.com/nihalnihalani/expunge (private); every commit is pushed immediately (human instruction); workspace-adding packets get a lock regenerated from the staged tree; every packet passes the HEAD-green gate (npm ci + typecheck on a scratch export of the staged index) |
 | Root `.env` | MISSING. All Atlas, model-provider, Raindrop and CopilotKit Intelligence live checks are BLOCKED until it exists. Required variable names are listed in `.env.example`. |
 | `apps/operator/.env` | MISSING (operator loads root `.env` through `apps/operator/scripts/run-from-root.mjs`) |
 | Node / npm | v25.2.1 / 11.6.2 (root engines `>=24`) |
@@ -29,11 +29,11 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 |---|---|---|
 | P0 audit | done | see Baseline checks |
 | P0 tooling / continuity skeleton | done | this file, OWNERSHIP.md, TASKS.json; checkpoint tooling 35/35 |
-| Wave A repair (A2-R mongo, A3-R fixtures/grader) | A3-R done; A2-R nearly done (docs/MONGO.md, lint, K8 remaining) | VERIFICATION.md; commit fe12b51 |
-| Wave B (gateway, worker/OpenMuse, operator UX) | B2-1 done, B2-2 in progress; B3 server half done; B1 starting | commit fe12b51 |
-| Wave C (Raindrop, compiler/evolver, admission/promotion) | C2 vocabulary foundation only; C1 and C3 not started | |
-| Wave D (Hider, meta, privacy) | not started | |
-| Wave E (reliability, benchmark, deployment) | not started | |
+| Wave A repair (A2-R mongo, A3-R fixtures/grader) | done | commits fe12b51, e165d48, ae59942 |
+| Wave B (gateway, worker/OpenMuse, operator UX) | B2 done (191cbb4); B1 governance half done (c663bfd), domain gateway in progress; B3 S1 under verification (PKT-10), S2 in progress | commits 191cbb4, c663bfd; VERIFICATION.md |
+| Wave C (Raindrop, compiler/evolver, admission/promotion) | C2 done (4eb6d5d, cd821d6; DA-5a fixes PKT-19 in verification); C1a verified and approved (PKT-14), C1c fixes and C1b integration next; C3 in progress | checkpoints 0f466519, cf40f999, 86e41ce5 |
+| Wave D (Hider, meta, privacy) | briefed (docs/continuity/briefs/D1, D2, D3) | |
+| Wave E (reliability, benchmark, deployment) | briefed (E1, E2, E3); restore drill passed | VERIFICATION.md verifier-2 section |
 
 ## Decisions
 
@@ -43,6 +43,8 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 4. The field-path wildcard grammar is frozen in OWNERSHIP.md item 2 and moves into `@expunge/contracts`.
 5. Baseline commit CS-1 is deferred until the Wave A repairs and B2-1 land, then staged as one full snapshot with verifier evidence on that exact tree (committing a root manifest whose workspaces are excluded would be incoherent).
 6. `research/` (prepared research, 7.2 MB, 153 files) is excluded from every commit pending a human decision: two notes contain third-party email addresses and 22 files contain the author's home-directory paths. Publishing it is the owner's call.
+9. Lead decisions for C1c (2026-10-11 12:58 UTC): raindrop-ai 1.0.1 accepted with its 126-package transitive tree and 38 advisories, rationale and production options in PRODUCTION-READINESS.md; optional `delivery` labels on EvidenceReference and EvidenceReadyPayload; `selectWrongIncident` and `privateIdHash` ('expunge-private-id:v1', NFKC) live in packages/contracts as pure functions shared by observer, evolution and grader; free text without a subject-literal list is reduced to hash and length (fail closed) instead of refusing to trace; poisoned remote events are quarantined as structure-only rows, never refused inside the cursor transaction; runtime-raindrop holds a one-time additive edit grant on packages/contracts for these fields.
+8. A commit packet that adds a workspace never carries the working-tree package-lock.json: the steward stages the packet, exports the index to a scratch directory, regenerates the lock there with `npm install --package-lock-only --ignore-scripts`, diffs it structurally against HEAD, proves `npm ci --ignore-scripts`, stages the regenerated lock and restores the working-tree lock byte for byte (first used for PKT-8).
 7. Native Agent Teams are unavailable in the Desktop app; the roster runs as named subagents (adapter recorded in OWNERSHIP.md). Lead model is claude-fable-5-1, not the requested claude-opus-5-5; this is reported, not hidden.
 
 ## Blocked acceptance items (need human input)
@@ -54,5 +56,8 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 
 ## Next actions
 
-1. Spawn the roster and start A2-R, A3-R, B2-1, V-1, DA-1, CS-1 (see TASKS.json).
-2. First commit packet: baseline foundation plus tooling and continuity files.
+1. Land PKT-9 (evolution) and PKT-10 (operator S1); unfreeze owners.
+2. B1 domain gateway packet (mongodb-authority), then DA-5 gateway review by reading.
+3. C1 Raindrop packet (runtime-raindrop) with the offline-replayable outbox; live sender BLOCKED on root .env.
+4. C3 gate and deployment (rsi-evolution); DA-5a governance and evolution review (devils-advocate).
+5. B3 S2 to S8 operator slices; V-3 probes and the Claude-to-Codex handoff drill.

@@ -51,3 +51,29 @@ Append-only. Each entry: UTC time, checkpoint ID (from `.expunge/checkpoints/<ts
 - Approved and in the steward's queue: PKT-4 runtime B2-2 (checkpoint 20261011T110731Z-bf35d38f: 155 passed / 12 skipped, 166 with replica set; K1 to K4 closed). Under verification: PKT-5 compiler C2-1 (owner: 204 passed / 2 skipped; live parity 74 passed, 3,600 predicate evaluations).
 - Lessons: packet text must be derived from the diff, not from the owner's path list (the steward caught four unchanged files I described as modified); package-lock.json changes belong to the lane that added a workspace, never to a lane that only edited an exports map.
 - Live checks still BLOCKED (no root .env). Node floor still needs the human (nvm install 24.13.1).
+
+## 2026-10-11T11:10Z to 11:24Z per-lane commits continued
+
+- 191cbb4 worker B2-2 (checkpoint bf35d38f; 155 passed / 12 skipped, 166 with replica set; K1 to K4 closed).
+- 4eb6d5d compiler C2-1 (checkpoint 0f466519; 204 passed / 2 skipped; live parity 74/74).
+- ae59942 mongo B1-0 (checkpoint 67b789d4; live lane 306 passed / 0 skipped; WorldKey brand; K6 closed).
+- f70d81f lead docs (checkpoint 948d66c0).
+- In the steward's queue: PKT-8 governance B1-1 (checkpoint e6f7526f; 18/18 live) under the new lock-regeneration rule (lock derived from the staged tree, npm ci proven in a scratch export, working-tree lock restored); PKT-9 evolution C2-2 under verification (owner: 298 passed / 2 skipped; live parity 135/135; 61-code rejection catalog; three-arm control run: trace-informed candidate fixes 2 recorded harmful completions, score-only and wrong-incident fix 0).
+- Lessons: a workspace manifest whose entry file does not exist yet is committed with its code, not before; the committed lock must reference only committed workspaces.
+
+## 2026-10-11T11:26Z to 11:40Z
+
+- c663bfd governance B1-1 (checkpoint e6f7526f; first lock regenerated from the staged tree: 2 entries added, npm ci exit 0 in the scratch export).
+- cd821d6 evolution C2-2 (checkpoint cf40f999; 298 passed / 2 skipped; live parity 135/135; 61-code rejection catalog; lock 2 entries added, no new third-party).
+- Defect: HEAD did not typecheck on its own (packages/mongo/src/index.ts exported './edges.js', a file that only ever existed untracked during PKT-6). Hotfix PKT-11 approved as a one-line commit with a new HEAD-green gate (npm ci + typecheck on a scratch export of the staged tree, before and after). Lesson: the working-tree matrix proves the working tree, not the commit.
+- In flight: PKT-10 operator S1 (verifier), PKT-12 small mongo packet (campaign_keys, completeIncomplete), C1a observability+observer (82 tests offline; Mongo-backed tests next), C3 gate/deployment, DA-5a governance+evolution review by reading.
+
+## 2026-10-11T11:40Z to 12:30Z
+
+- 5e229c9 hotfix PKT-11 (HEAD-green gate before exit 2, after exit 0).
+- f17fd61 operator S1 PKT-10 (checkpoint d9f6feba; 390/390, build 0, browser 108/0; 16 screenshots).
+- 7fe7762 DA-5a review PKT-13 (governance G1 to G7, evolution E1 to E4; fixes assigned before the domain packet).
+- 88a75a3 mongo PKT-12 (checkpoint 9b77b25b; live 329 passed / 0 skipped; completeIncomplete, campaign_keys). HEAD f9ee239 = origin/main, 29 commits.
+- HEAD proof c45be9b by verifier-2: npm ci 0, typecheck 0, default vitest 537 passed / 0 failed / 254 skipped (recorded in COMMIT-LEDGER HEAD-proof history).
+- verifier-2 added (append-only VERIFICATION.md section; replica set 27218). Wave D and E briefs written (D1, D2, D3, E1, E2, E3).
+- In verification: PKT-14 C1a (observability + observer, 33 files). Queued: PKT-18 DA-6 review. Coming: PKT-15 mongo hardening, PKT-16 domain gateway (DA-5 reading started at the nine-tool export point), PKT-17 operator S2 (54 paths), C1c DA-6 fixes, C2-3 evolution fixes, C3 gate.
