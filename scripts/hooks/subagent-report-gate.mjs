@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SubagentStop quality gate for Expunge named teammates.
+// SubagentStop and TaskCompleted quality gate for Expunge named teammates.
 //
 // Reads the hook payload on stdin. For general-purpose teammates it requires the
 // final message to carry a structured evidence footer so that "done" always comes
@@ -20,6 +20,25 @@ const REQUIRED = [
   { key: 'STATUS', pattern: /STATUS\s*:\s*(COMPLETE|BLOCKED|PARTIAL)/i },
 ];
 
+// TaskCompleted carries no message field: read the last assistant text from the transcript (JSONL).
+function lastAssistantText(path) {
+  if (typeof path !== 'string' || path === '') return '';
+  try {
+    const lines = readFileSync(path, 'utf8').trimEnd().split('\n');
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const row = JSON.parse(lines[i]);
+      const content = row?.message?.role === 'assistant' ? row.message.content : undefined;
+      const text = Array.isArray(content)
+        ? content.filter((c) => c?.type === 'text').map((c) => c.text).join('\n')
+        : typeof content === 'string' ? content : '';
+      if (text.trim() !== '') return text;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
 function main() {
   let payload;
   try {
@@ -30,7 +49,7 @@ function main() {
   if (payload.stop_hook_active) return 0;
   const agentType = String(payload.agent_type ?? '');
   if (EXEMPT_AGENT_TYPES.has(agentType)) return 0;
-  const message = String(payload.last_assistant_message ?? '');
+  const message = String(payload.last_assistant_message ?? lastAssistantText(payload.transcript_path));
   // Short conversational turns (questions back to the lead) are allowed to stop.
   if (message.length < 400 && /\?\s*$/.test(message.trim())) return 0;
   const missing = REQUIRED.filter((r) => !r.pattern.test(message)).map((r) => r.key);
