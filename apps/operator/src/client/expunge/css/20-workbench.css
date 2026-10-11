@@ -1,0 +1,224 @@
+/* Jobs list, job frame, phase stepper, limits, coverage, event feed. Scoped under .ex-root. */
+.ex-root .ex-crumbs {
+  display: flex;
+  gap: var(--ex-space-3);
+  align-items: baseline;
+  font-size: var(--ex-text-sm);
+  color: var(--ex-ink2);
+}
+.ex-root .ex-jobmeta {
+  padding: var(--ex-space-4) 0;
+  border-top: 1px solid var(--ex-rule);
+  border-bottom: 1px solid var(--ex-rule);
+}
+.ex-root .ex-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--ex-rule);
+}
+.ex-root .ex-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--ex-space-5);
+  color: var(--ex-ink2);
+  font-size: var(--ex-text-sm);
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+.ex-root .ex-tabs a:hover {
+  color: var(--ex-ink);
+  background: var(--ex-sunken);
+}
+.ex-root .ex-tabs a[aria-current='page'] {
+  color: var(--ex-ink);
+  border-bottom-color: var(--ex-ink);
+}
+.ex-root .ex-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3);
+}
+.ex-root .ex-filter[aria-pressed='true'] {
+  background: var(--ex-ink);
+  border-color: var(--ex-ink);
+  color: var(--ex-canvas);
+}
+.ex-root .ex-steps {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--ex-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ex-root .ex-step {
+  display: grid;
+  gap: var(--ex-space-1);
+  padding: var(--ex-space-3) var(--ex-space-4);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-step--pending {
+  border-style: dashed;
+  color: var(--ex-ink2);
+}
+.ex-root .ex-step--active {
+  border-width: 2px;
+  border-color: var(--ex-ink);
+}
+.ex-root .ex-step--failed {
+  border-color: var(--ex-danger);
+  color: var(--ex-danger);
+}
+.ex-root .ex-step--skipped {
+  border-style: dotted;
+}
+.ex-root .ex-step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 22px;
+  block-size: 22px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.ex-root .ex-step--committed .ex-step-mark {
+  background: var(--ex-ink);
+  border-color: var(--ex-ink);
+  color: var(--ex-canvas);
+}
+.ex-root .ex-step-name {
+  font-weight: 600;
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-step-state {
+  font-size: var(--ex-text-xs);
+  color: var(--ex-ink2);
+}
+.ex-root .ex-step--failed .ex-step-state {
+  color: var(--ex-danger);
+}
+.ex-root .ex-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--ex-space-4) var(--ex-space-6);
+  margin: 0 0 var(--ex-space-4);
+  padding: 0;
+  list-style: none;
+}
+.ex-root .ex-limit {
+  display: grid;
+  gap: var(--ex-space-2);
+}
+.ex-root .ex-limit-label {
+  font-size: var(--ex-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ex-ink2);
+}
+.ex-root .ex-limit-bar {
+  display: block;
+  block-size: 6px;
+  border-radius: var(--ex-radius-1);
+  background: var(--ex-sunken);
+  border: 1px solid var(--ex-rule);
+  overflow: hidden;
+}
+.ex-root .ex-limit-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--ex-ink2);
+}
+.ex-root .ex-limit--reached .ex-limit-fill {
+  background: var(--ex-warning);
+}
+.ex-root .ex-limit--reached .ex-limit-value {
+  color: var(--ex-warning);
+  font-weight: 600;
+}
+.ex-root .ex-coverage {
+  display: grid;
+  gap: var(--ex-space-3);
+}
+.ex-root .ex-coverage-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3);
+  align-items: center;
+}
+.ex-root .ex-statelist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3) var(--ex-space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-feed {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-feed-row {
+  display: grid;
+  grid-template-columns: 4rem 11rem minmax(0, 1fr);
+  gap: var(--ex-space-4);
+  padding: var(--ex-space-3) var(--ex-space-4);
+  border-top: 1px solid var(--ex-rule);
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-feed-row:first-child {
+  border-top: 0;
+}
+.ex-root .ex-feed-seq {
+  color: var(--ex-ink2);
+}
+.ex-root .ex-feed-kind {
+  font-weight: 600;
+}
+
+@container ex (max-width: 1099px) {
+  .ex-root .ex-steps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@container ex (max-width: 699px) {
+  .ex-root .ex-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ex-root .ex-feed-row {
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+  }
+  .ex-root .ex-feed-kind {
+    grid-column: 2;
+  }
+  .ex-root .ex-feed-text {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Standalone links are real pointer targets (WCAG 2.5.8): at least 24 px high. Links inside a
+   sentence keep the inline exception and are not given this treatment. */
+.ex-root a.ex-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+/* Identifiers in tables do not break at hyphens; the table scrolls instead. */
+.ex-root .ex-table .ex-data {
+  white-space: nowrap;
+}

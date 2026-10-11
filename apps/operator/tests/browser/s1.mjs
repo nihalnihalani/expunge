@@ -15,6 +15,7 @@ export async function run(browser, cfg) {
   await control(cfg, 'mode', { mode: 'ok' });
 
   // Default view, deep link, titles, landmarks, focus management, skip link (1440 light).
+  // A configured domain opens Expunge by default, at a deep-linkable address.
   {
     const { page, context } = await newPage(browser, cfg, {
       width: 1440,
@@ -27,6 +28,16 @@ export async function run(browser, cfg) {
       page.url().endsWith('#/expunge'),
       'configured domain opens Expunge by default and the address is deep-linkable',
     );
+    await context.close();
+  }
+  {
+    const { page, context } = await newPage(browser, cfg, {
+      width: 1440,
+      height: 900,
+      scheme: 'light',
+    });
+    await open(page, cfg, '#/expunge/setup');
+    await page.waitForSelector('.ex-root h1', { timeout: 15000 });
     check(
       (await page.title()) === 'Setup and readiness · Expunge',
       'document.title is per-view',
@@ -119,7 +130,10 @@ export async function run(browser, cfg) {
     // Reload keeps the address and the view.
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.ex-root h1');
-    check(page.url().endsWith('#/expunge'), 'reload keeps the Expunge address');
+    check(
+      page.url().endsWith('#/expunge/setup'),
+      'reload keeps the Expunge address',
+    );
     await page.goto(`${cfg.base}/#/expunge/setup`, {
       waitUntil: 'domcontentloaded',
     });
