@@ -467,6 +467,13 @@ describeRbac('real authenticated local replica-set RBAC (not Atlas provisioning)
     // The operator Evaluation view reads gate reports; it cannot write them.
     await allowed('projection_reader', 'gate_reports', ['find']);
     await denied('projection_reader', 'gate_reports', ['insert', 'update', 'remove']);
+    // The approval issuer's descriptor render reads eligibility and ancestry; it can write neither.
+    for (const name of ['artifact_eligibility', 'provenance_edges']) {
+      await allowed('approval_issuer', name, ['find']);
+      await denied('approval_issuer', name, ['insert', 'update', 'remove']);
+    }
+    // The domain service derives the readiness evidence status from the outbox, read-only.
+    await allowed('domain_executor', 'telemetry_outbox', ['find']);
     // Per-fence model attestations: the worker inserts, the gate reads, nobody changes one.
     await allowed('domain_executor', 'run_attestations', ['find', 'insert']);
     await denied('domain_executor', 'run_attestations', ['update', 'remove']);

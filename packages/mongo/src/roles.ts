@@ -68,6 +68,8 @@ export function atlasRoleManifests(
         'decisions',
         'wake_commands',
         'run_attestations',
+        // The service's readiness derives the evidence status from the committed outbox, read-only.
+        'telemetry_outbox',
         // The operator-facing service runs as this principal and serves committed projections: events, the per-job
         // sequence counters and the deployment history (promotions) are read-only here.
         'projection_events',
@@ -226,7 +228,16 @@ export function atlasRoleManifests(
       control('UPDATE', ['jobs', 'projection_sequences', 'gate_claims', 'gate_attempts']),
     ]),
     approval_issuer: role('expunge_approval_issuer', [
-      control('FIND', ['candidates', 'gate_reports', 'deployments', 'artifacts', 'authority_revisions']),
+      control('FIND', [
+        'candidates',
+        'gate_reports',
+        'deployments',
+        'artifacts',
+        'authority_revisions',
+        // renderDescriptor runs as the issuer and asks ProvenanceRepository.tainted, which reads eligibility and ancestry.
+        'artifact_eligibility',
+        'provenance_edges',
+      ]),
       control('INSERT', ['approvals']),
       // Bumping the authorization revision rewrites the authority row and its touch row together.
       control('UPDATE', ['authority_revisions', 'authority_touches']),

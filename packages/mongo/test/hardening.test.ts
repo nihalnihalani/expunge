@@ -349,6 +349,16 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
     expect(holders('INSERT', 'candidates')).toEqual(['proposer']);
     expect(holders('UPDATE', 'candidates')).toEqual(['promoter']);
   });
+  it('lets the approval issuer read eligibility and provenance (renderDescriptor taint check) and write neither', () => {
+    for (const collection of ['artifact_eligibility', 'provenance_edges']) {
+      expect(holders('FIND', collection), collection).toContain('approval_issuer');
+      for (const verb of ['INSERT', 'UPDATE', 'REMOVE'])
+        expect(holders(verb, collection), `${verb} ${collection}`).not.toContain('approval_issuer');
+    }
+  });
+  it('lets the worker principal read the telemetry outbox (readiness evidence status) and keeps the writers as they were', () => {
+    expect(holders('FIND', 'telemetry_outbox')).toContain('domain_executor');
+  });
   it('lets the grader read the world revision counter and write none of it', () => {
     expect(holders('FIND', 'world_revisions')).toContain('grader');
     expect(holders('UPDATE', 'world_revisions')).not.toContain('grader');
