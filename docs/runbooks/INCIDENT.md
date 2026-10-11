@@ -34,8 +34,8 @@ rebuilt by the startup sweep from committed state. A job pinned to a harness tha
 dead-letters. **There is no requeue operation**: `OutboxRepository` exposes enqueue, claim, advance and retry only, and a
 `dead_letter` row is terminal. What you can do: read the rows (`telemetry_outbox` with `lastErrorCode`) with a read principal,
 fix the cause (key, project id, endpoint), and re-run the affected episode if the evidence is needed. A requeue tool needs a new
-repository method and an owner decision (mongodb-authority). The evidence process is also BLOCKED by design until the
-export-suppression and leak-guard sources are wired, so today event intents are held, not sent.
+repository method and an owner decision (mongodb-authority). The evidence process is BLOCKED (exit 3) until the guard file, observer URI and Raindrop keys are supplied (DEPLOY.md section 8); a
+suppression source that cannot be read HOLDS event intents rather than sending them.
 
 ## Observer cursor (PARTIAL)
 
@@ -43,7 +43,7 @@ Cursors (`observer_cursors`) advance only in the same transaction as the evidenc
 (`StaleObserverCursor`). There is no reset command. Moving the window is a new query identity (`observerVersion` and the window
 fields hash into the row id); reusing the same project and version with a different identity throws
 `ObserverQueryIdentityChanged`. So "reset" means starting a new `observerVersion`, which is a code/config change in the process
-that builds the window. `packages/observer/src/main.ts` passes no window today, so no observer scan runs in the packaged process.
+that builds the window. The observer scan runs only when `EXPUNGE_OBSERVER_WINDOW_START`/`_END` are set; the version is `EXPUNGE_OBSERVER_VERSION`, so a new window is a new version in configuration.
 
 ## Database unreachable or credentials rejected
 
