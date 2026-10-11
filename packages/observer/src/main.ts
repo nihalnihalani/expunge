@@ -7,9 +7,10 @@ const log: EvidenceLog = (entry) => console.log(JSON.stringify({ at: new Date().
  * The evidence process entry. It prints the readiness lines (names only) and exits 3 when BLOCKED, like the worker's
  * `--readiness`; when READY it runs the dispatcher and observer loops until SIGINT/SIGTERM.
  *
- * Today NO real export-suppression source and NO leak-guard source exist for this process (they come from the privacy
- * controller's `erasure_suppressions` read and subject map, PKT-62), so it is always BLOCKED here: event intents are not
- * sent and the observer does not run. That is the intended fail-closed state, not a missing feature to paper over.
+ * The export-suppression source exists (`createMongoExportSuppression`, the `erasure_suppressions` read) but no leak-guard
+ * source does (the subject map the privacy controller owns), and this entry point wires neither, so it is always BLOCKED:
+ * event intents are not sent and the observer does not run. That is the intended fail-closed state, not a missing
+ * feature to paper over. A missing suppression source is BLOCKED by readiness, never replaced by a stub.
  */
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const started = createEvidenceProcess(env, {}, { log });
