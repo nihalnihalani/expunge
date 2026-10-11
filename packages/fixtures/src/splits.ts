@@ -183,7 +183,8 @@ export function sealPlanForGate(plan: readonly SealedSplitEntry[]): GatePlanView
  * Re-derives the commitment of a view from the entries it holds and the published rows it carries, and refuses it
  * unless every part agrees: no final-split entry in full, the commitment hash and builder hash are genuine, every held
  * entry matches its published row exactly (spec hash, seed commitment, salted structural hash), no published row is
- * left without an entry (except final-split rows), fixture ids and structural signatures are unique across splits.
+ * left without an entry (except final-split rows), fixture ids are unique. It does NOT claim structural disjointness between splits: the plan reuses structures across
+ * splits by design (the published structural hashes are seed-salted, so they could not show overlap anyway).
  * Returns the commitment hash. Throws a stable code, never a message that echoes content.
  */
 export function verifyGatePlanView(view: GatePlanView, expectedSplitHash?: string): string {
@@ -204,7 +205,6 @@ export function verifyGatePlanView(view: GatePlanView, expectedSplitHash?: strin
   for (const row of commitment.entries) counts[row.split]++;
   if (SPLIT_IDS.some((id) => counts[id] !== commitment.counts[id])) fail('GatePlanViewCountsMismatch');
   const held = new Set<string>();
-  const structures = new Set<string>();
   for (const entry of view.entries) {
     if (!GATE_SPLITS.includes(entry.split as string)) fail('GatePlanViewFinalSplitEntry');
     const row = published.get(entry.fixtureId);
@@ -221,12 +221,9 @@ export function verifyGatePlanView(view: GatePlanView, expectedSplitHash?: strin
       entry.structuralHash !== structuralSignature(entry.spec)
     )
       fail('GatePlanViewEntryForged');
-    if (structures.has(row!.structuralHash)) fail('GatePlanViewStructureOverlap');
-    structures.add(row!.structuralHash);
   }
   for (const row of commitment.entries) {
     if (row.split !== 'test' && !held.has(row.fixtureId)) fail('GatePlanViewEntryMissing');
-    if (row.split === 'test' && structures.has(row.structuralHash)) fail('GatePlanViewStructureOverlap');
   }
   return splitHash;
 }
