@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { carrierIsComplete, pickCarrierHeaders, type CarrierHeaders } from '@expunge/observability';
 import { z } from 'zod';
 import type { Readiness } from './readiness.js';
 
@@ -64,11 +65,24 @@ export function authenticateWake(authorization: string | undefined, expectedToke
 export interface WakeTarget {
   /** True when a wake would be queued now. Checked BEFORE a command id is recorded, so a full queue never burns one. */
   canAccept(): boolean;
-  /** Queues the job for the dispatcher. Returns false when the bounded queue is full or the worker is stopping. */
-  wake(command: WakeCommand): boolean;
+  /**
+   * Queues the job for the dispatcher. Returns false when the bounded queue is full or the worker is stopping. `carrier`
+   * is the trace context of the AUTHENTICATED dispatching service, present only when complete; it links telemetry and
+   * never carries authority.
+   */
+  wake(command: WakeCommand, carrier?: CarrierHeaders | null): boolean;
 }
 
 const MAX_BODY_BYTES = 1024;
+/** A trace context is a few hundred bytes; anything larger is not a carrier. */
+const MAX_CARRIER_VALUE_LENGTH = 2048;
+
+/** The carrier of an already-authenticated request, or null when absent, incomplete or oversized. */
+export function carrierOf(headers: IncomingMessage['headers']): CarrierHeaders | null {
+  const picked = pickCarrierHeaders(headers);
+  if (!picked || !carrierIsComplete(picked)) return null;
+  return Object.values(picked).every((value) => value.length <= MAX_CARRIER_VALUE_LENGTH) ? picked : null;
+}
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -107,6 +121,7 @@ export function createWakeServer(options: {
           lines: readiness.lines,
           checks: readiness.checks,
           reachability: readiness.reachability,
+          notes: readiness.notes ?? [],
         });
       }
       if (req.method !== 'POST' || path !== '/internal/wake') return send(res, 404, { error: 'NotFound' });
@@ -130,7 +145,7 @@ export function createWakeServer(options: {
       if (!options.target.canAccept()) return send(res, 429, { error: 'Busy' });
       const decision = await options.store.accept(command.data);
       if (decision === 'duplicate') return send(res, 200, { status: 'duplicate' });
-      if (!options.target.wake(command.data)) {
+      if (!options.target.wake(command.data, carrierOf(req.headers))) {
         // A race between canAccept and wake. The id may stay recorded (durable stores are insert-only), which is safe:
         // the job is still queued and the recovery poll will pick it up.
         await options.store.release(command.data);

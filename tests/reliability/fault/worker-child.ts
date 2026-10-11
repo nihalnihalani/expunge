@@ -18,8 +18,10 @@ import { FakeChatModel, fakeText, fakeToolCalls } from '@expunge/runtime/testing
 import { defineTool } from '@expunge/vendor-openmuse';
 import {
   Dispatcher,
+  FencedProjectionSink,
   MongoCompletionReceiptReader,
   MongoJobResolver,
+  MongoTerminalSweep,
   asArtifactReader,
   asDispatchJobs,
   workerConfigFromEnv,
@@ -80,6 +82,7 @@ async function main() {
   const jobsRepository = new JobRepository(service);
   const effects = new EffectRepository(service);
   const projection = new ProjectionRepository(service);
+  const fenced = new FencedProjectionSink(service, jobsRepository, projection);
   const workerConfig = workerConfigFromEnv({
     EXPUNGE_WORKER_ID: c.workerId,
     EXPUNGE_WORKER_LEASE_MS: String(c.leaseMs),
@@ -146,14 +149,24 @@ async function main() {
     models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: fake.adapter }),
     receipts: new MongoCompletionReceiptReader(service),
     config: workerConfig,
+    // The product's fenced sink (an append commits only while this worker still owns the job), wrapped so the same
+    // named points surround every append.
     projection: {
       append: async (key, event) => {
         point('before-projection');
-        const result = await projection.append(key, event);
+        const result = await fenced.append(key, event);
         point('after-projection');
         return result;
       },
+      appendFenced: async (key, event, holder) => {
+        point('before-projection');
+        const result = await fenced.appendFenced(key, event, holder);
+        point('after-projection');
+        return result;
+      },
+      hasTerminal: (key, jobId) => fenced.hasTerminal(key, jobId),
     },
+    terminalSweep: new MongoTerminalSweep(service),
     onResult: (result) => {
       if (c.mode !== 'poll') return;
       emit({
@@ -167,6 +180,8 @@ async function main() {
   });
 
   emit({ event: 'ready', pid: process.pid, workerId: c.workerId });
+  // What the product worker does on start: repair terminal projections that a crash left behind.
+  emit({ event: 'repaired', count: await dispatcher.repairTerminalProjections() });
   if (c.mode === 'run') {
     const result = await dispatcher.runJob(c.jobId);
     emit({

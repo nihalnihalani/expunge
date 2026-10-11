@@ -47,6 +47,7 @@ This package is an **attributed port** of helper code from OpenMuse, adapted to 
 | M12 | `reportStepLimit` takes an optional `onLimit` callback and `TanStackAgentOptions.onStepLimit` forwards it. The callback fires, out of band, exactly when the step limit ended the run, just before the note is emitted. | A host must not infer the ending by matching text: a model can emit the note's exact words (devils-advocate DA-3 R3). |
 | M13 | `onModelCall` observes each `adapter.chatStream` call through a Proxy and reports the provider-reported usage of that call. | Per-call token/cost metering for `ResourceLimits.totalTokens` / `maxCostMicrousd`; the run-end aggregate is too late to stop a run. |
 | M14 | `TanStackAgent.identity` exposes the `name` and `model` of the adapter that actually served the run. | Stored run evidence must show which provider/model produced it (devils-advocate DA-3 K2). |
+| M15 | `TanStackAgentOptions.middleware` passes host-supplied TanStack chat middleware to `chat()`. Nothing else about the loop changes, and client input never reaches it. | Observability (C1): the OpenTelemetry GenAI middleware emits one real model span per provider call through the Raindrop SDK's tracer provider. |
 
 Version adaptation facts (verified against installed declarations/source):
 

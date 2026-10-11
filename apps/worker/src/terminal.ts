@@ -68,6 +68,8 @@ export function decideTerminal(input: {
 export function terminalCheckpoint(stats: RunStats, action: TerminalAction): JsonValue {
   return {
     v: 1,
+    // The job's cumulative meter stays at the checkpoint root, where `readMeterCarry` reads it on any later session.
+    ...(stats.meterCarry ? { meter: stats.meterCarry as unknown as JsonValue } : {}),
     terminal: {
       endedBy: stats.endedBy,
       ...(stats.errorCode ? { errorCode: stats.errorCode } : {}),

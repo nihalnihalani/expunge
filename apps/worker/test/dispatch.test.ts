@@ -12,7 +12,16 @@ import {
   makeJob,
   waitFor,
 } from '../../../packages/runtime/test/fakes.js';
-import { Dispatcher, workerConfigFromEnv, type JobRunResult, type LogEntry } from '../src/index.js';
+import {
+  Dispatcher,
+  terminalEventFor,
+  workerConfigFromEnv,
+  type JobRunResult,
+  type LogEntry,
+  type ProjectionSink,
+  type TerminalSweep,
+} from '../src/index.js';
+import { ProtocolError } from '@expunge/mongo';
 import { MultiJobStore } from './fakes.js';
 
 const SMALL = {
@@ -64,6 +73,11 @@ function rig(options: {
   tools?: (ctx: { store: MultiJobStore; receipts: FakeReceipts }) => ToolDefinition[];
   env?: Record<string, string>;
   jobIds?: string[];
+  projection?: (
+    store: MultiJobStore,
+    projected: Array<{ key: unknown; event: Record<string, any> }>,
+  ) => ProjectionSink;
+  terminalSweep?: TerminalSweep;
 }) {
   const bundle = options.bundle ?? makeBundle();
   const store = new MultiJobStore();
@@ -92,7 +106,10 @@ function rig(options: {
     models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: fake.adapter }),
     receipts,
     config: workerConfigFromEnv({ ...SMALL, ...options.env }),
-    projection: { append: async (key: unknown, event: any) => void projected.push({ key, event }) },
+    projection:
+      options.projection?.(store, projected) ??
+      ({ append: async (key: unknown, event: any) => void projected.push({ key, event }) } as ProjectionSink),
+    ...(options.terminalSweep ? { terminalSweep: options.terminalSweep } : {}),
     log: (entry) => logs.push(entry),
     onResult: (result) => results.push(result),
   });
@@ -614,5 +631,223 @@ describe('B2-2: recovery poll, graceful release, scope binding and projection', 
       adapterInjected: true,
     });
     expect(last?.terminal?.usage).toMatchObject({ inputTokens: 4, outputTokens: 2, unpricedCalls: 1 });
+  });
+});
+
+describe('DA-5 DG4 worker half (FAKE store, FAKE model): the job meter survives lease takeover and is not reset', () => {
+  const PRIOR = {
+    v: 1,
+    modelCalls: 3,
+    inputTokens: 100,
+    outputTokens: 40,
+    costMicrousd: 0,
+    unpricedCalls: 3,
+    wallTimeMs: 500,
+  };
+  type Cp = { meter?: Record<string, number>; terminal?: unknown };
+  const usage = { promptTokens: 4, completionTokens: 2, totalTokens: 6 };
+
+  it('a crashed worker left a checkpoint with a meter and an expired lease: the takeover seeds from it, every later checkpoint keeps it, and the terminal checkpoint holds the sum', async () => {
+    const r = rig({
+      script: [
+        { parts: [{ kind: 'tool_call', name: 'echo', args: { v: 1 } }] as never, usage },
+        { parts: [{ kind: 'text', text: 'x' }], usage },
+      ],
+    });
+    const stored = r.store.jobs.get('job-1')!;
+    stored.status = 'running';
+    stored.lease = { ownerId: 'dead-worker', fence: 7, until: new Date(0), heartbeatAt: new Date(0) };
+    stored.checkpoint = { v: 1, phase: 2, meter: PRIOR };
+    await r.dispatcher.runJob('job-1');
+    expect(stored.lease.fence).toBe(8);
+    const checkpoints = r.store.checkpoints.get('job-1') as Cp[];
+    expect(checkpoints.length).toBeGreaterThan(1);
+    // No snapshot from the new session ever lacks the carried meter or reports less than the prior session had.
+    for (const cp of checkpoints) {
+      expect(cp.meter).toBeDefined();
+      expect(cp.meter!.modelCalls).toBeGreaterThanOrEqual(PRIOR.modelCalls);
+      expect(cp.meter!.inputTokens).toBeGreaterThanOrEqual(PRIOR.inputTokens);
+      expect(cp.meter!.wallTimeMs).toBeGreaterThanOrEqual(PRIOR.wallTimeMs);
+    }
+    const last = checkpoints.at(-1)!;
+    expect(last.terminal).toBeDefined();
+    expect(last.meter).toMatchObject({ modelCalls: 5, inputTokens: 108, outputTokens: 44 });
+  });
+
+  it('a graceful stop writes the meter before the lease is released, and the next worker continues from it', async () => {
+    const r = rig({
+      script: [{ parts: [{ kind: 'tool_call', name: 'echo', args: { v: 1 } }] as never, usage }, fakeHang()],
+    });
+    r.dispatcher.wake({ jobId: 'job-1', commandId: 'cmd-job-1-xx' });
+    await waitFor(() => r.store.named('checkpoint').length > 0 && r.fake.calls.length === 2);
+    await r.dispatcher.stop();
+    const handedBack = r.store.jobs.get('job-1')!;
+    expect(handedBack.status).toBe('queued');
+    const written = handedBack.checkpoint as Cp;
+    expect(written.meter).toMatchObject({ modelCalls: 1, inputTokens: 4 });
+    const releaseAt = r.store.calls.findIndex((c) => c.method === 'release');
+    const lastCheckpointAt = r.store.calls.map((c) => c.method).lastIndexOf('checkpoint');
+    expect(lastCheckpointAt).toBeLessThan(releaseAt);
+  });
+});
+
+/** FAKE projection sink mirroring FencedProjectionSink's contract over the FAKE job store (not MongoDB). */
+const fakeFencedSink = (
+  store: MultiJobStore,
+  projected: Array<{ key: unknown; event: Record<string, any> }>,
+): ProjectionSink => ({
+  append: async (key, event) => void projected.push({ key, event }),
+  appendFenced: async (key, event, holder) => {
+    const job = store.jobs.get(holder.lease.jobId)!;
+    if (job.lease.ownerId !== holder.lease.ownerId || job.lease.fence !== holder.lease.fence)
+      throw new ProtocolError('StaleFence');
+    projected.push({ key, event });
+  },
+  hasTerminal: async (_key, jobId) =>
+    projected.some(
+      ({ event }) =>
+        event.jobId === jobId &&
+        (event.kind === 'job_failed' ||
+          (event.kind === 'job_status_changed' &&
+            ['succeeded', 'failed', 'cancelled'].includes(event.payload.to))),
+    ),
+});
+
+describe('V-3 (a) FAKE store and sink: an unfenced late event from a resumed zombie worker is rejected by the fence', () => {
+  it('after another worker took the job and finished it, the zombie appends nothing to the stream', async () => {
+    const r = rig({
+      projection: fakeFencedSink,
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('done')],
+      tools: ({ store }) => [
+        defineTool({
+          name: 'echo',
+          description: 'e',
+          parameters: z.object({ v: z.number() }),
+          execute: async () => {
+            // While this (frozen, now resumed) worker holds fence 1, worker-b claims with fence 2 and finishes the job.
+            const job = store.jobs.get('job-1')!;
+            job.lease = { ownerId: 'worker-b', fence: 2, until: new Date(0), heartbeatAt: new Date() };
+            job.status = 'failed';
+            job.checkpoint = {
+              v: 1,
+              terminal: { decision: { status: 'failed', reason: 'NoCompletionReceipt' } },
+            };
+            return { ok: true };
+          },
+        }),
+      ],
+    });
+    const result = await r.dispatcher.runJob('job-1');
+    expect(result.outcome).toBe('failed'); // what this zombie observed
+    expect(r.projected.map((p) => p.event.kind)).toEqual(['job_started']); // nothing after the takeover
+    expect(r.logs.some((l) => l.message === 'projection refused: lease no longer held')).toBe(true);
+  });
+
+  it('the legitimate holder still appends its terminal event under the same fence', async () => {
+    const r = rig({ projection: fakeFencedSink, script: [fakeText('no receipt')] });
+    await r.dispatcher.runJob('job-1');
+    expect(r.projected.map((p) => p.event.kind)).toEqual(['job_started', 'job_failed']);
+    expect(r.projected.at(-1)?.event.eventId).toBe('job-1:failed:1');
+  });
+});
+
+describe('V-3 (b) FAKE store and sink: a terminal projection lost on a crash is repaired from committed state', () => {
+  const finished = (status: 'failed' | 'succeeded' | 'cancelled', reason = 'NoCompletionReceipt') => {
+    const r = rig({
+      projection: fakeFencedSink,
+      script: [fakeText('x')],
+      terminalSweep: { listRecentTerminal: async () => [...r.store.jobs.values()] },
+    });
+    const job = r.store.jobs.get('job-1')!;
+    job.status = status;
+    job.attempt = 1;
+    job.lease = { ownerId: 'worker-a', fence: 1, until: new Date(0), heartbeatAt: new Date(0) };
+    job.checkpoint = { v: 1, terminal: { decision: { status, reason } } };
+    return r;
+  };
+
+  it('a wake on the terminal job emits the missing job_failed once, with the original failure code', async () => {
+    const r = finished('failed');
+    expect((await r.dispatcher.runJob('job-1')).outcome).toBe('terminal');
+    expect(r.projected).toHaveLength(1);
+    expect(r.projected[0]?.event).toMatchObject({
+      kind: 'job_failed',
+      eventId: 'job-1:failed:1',
+      payload: { code: 'verification_failed', message: 'NoCompletionReceipt' },
+    });
+    await r.dispatcher.runJob('job-1'); // already repaired: nothing more
+    expect(r.projected).toHaveLength(1);
+  });
+
+  it('the startup sweep repairs succeeded, cancelled and failed jobs and is idempotent', async () => {
+    for (const status of ['succeeded', 'cancelled', 'failed'] as const) {
+      const r = finished(status);
+      const config = workerConfigFromEnv({
+        ...SMALL,
+        EXPUNGE_TENANT_ID: 'tenant-1',
+        EXPUNGE_ENV: 'evaluation',
+        EXPUNGE_SCOPE_ID: 'scope-1',
+      });
+      expect(config.scope).toBeDefined();
+      const sweeper = new Dispatcher({
+        jobs: r.store,
+        resolver: r.store,
+        artifacts: new FakeArtifactReader(r.bundle),
+        tools: new FakeToolProvider(() => []),
+        models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: r.fake.adapter }),
+        receipts: r.receipts,
+        config,
+        projection: fakeFencedSink(r.store, r.projected),
+        terminalSweep: { listRecentTerminal: async () => [...r.store.jobs.values()] },
+      });
+      expect(await sweeper.repairTerminalProjections()).toBe(1);
+      expect(await sweeper.repairTerminalProjections()).toBe(0);
+      expect(r.projected).toHaveLength(1);
+      expect(r.projected[0]?.event.kind).toBe(status === 'failed' ? 'job_failed' : 'job_status_changed');
+    }
+  });
+
+  it('PKT33-C: a failure with no recorded reason is repaired as reason_unrecorded, never as an invented internal_error reason', () => {
+    const job = makeJob(makeBundle(), { status: 'failed', attempt: 1, checkpoint: { v: 1 } });
+    expect(terminalEventFor(job)).toMatchObject({
+      kind: 'job_failed',
+      payload: { message: 'reason_unrecorded' },
+    });
+  });
+
+  it('PKT33-C: the prior status in a repaired status event comes from the committed row: a job that was never claimed was queued', () => {
+    const bundle = makeBundle();
+    const claimed = terminalEventFor(makeJob(bundle, { status: 'cancelled', attempt: 1 }));
+    const never = terminalEventFor(makeJob(bundle, { status: 'cancelled', attempt: 0 }));
+    expect(claimed?.payload).toMatchObject({ from: 'running', to: 'cancelled' });
+    expect(never?.payload).toMatchObject({ from: 'queued', to: 'cancelled' });
+  });
+
+  it('PKT33-C: for a succeeded job the repaired event is identical to the one the live run projected', async () => {
+    const r = rig({
+      projection: fakeFencedSink,
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 } }]), fakeText('done')],
+      tools: ({ receipts, store }) => [
+        defineTool({
+          name: 'echo',
+          description: 'e',
+          parameters: z.object({ v: z.number() }),
+          execute: async () => {
+            receipts.byJob.set('job-1', receiptFor(store.jobs.get('job-1')!));
+            return { ok: true };
+          },
+        }),
+      ],
+    });
+    expect((await r.dispatcher.runJob('job-1')).outcome).toBe('succeeded');
+    const live = r.projected.find((p) => p.event.kind === 'job_status_changed')!.event;
+    expect(terminalEventFor(r.store.jobs.get('job-1')!)).toEqual(live);
+  });
+
+  it('a rebuilt event is identical to the one the live run projected, so a duplicate append is a no-op', async () => {
+    const r = rig({ projection: fakeFencedSink, script: [fakeText('no receipt')] });
+    await r.dispatcher.runJob('job-1');
+    const original = r.projected.find((p) => p.event.kind === 'job_failed')!.event;
+    expect(terminalEventFor(r.store.jobs.get('job-1')!)).toEqual(original);
   });
 });

@@ -1,5 +1,5 @@
 import { EventType, type BaseEvent } from '@ag-ui/core';
-import { chat, maxIterations, toolDefinition } from '@tanstack/ai';
+import { chat, maxIterations, toolDefinition, type ChatMiddleware } from '@tanstack/ai';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -333,5 +333,34 @@ describe('copied helpers', () => {
     ]);
     const under = await collect(reportStepLimit(mk([start, result, finish]), 2, 'NOTE'));
     expect(types(under)).not.toContain(EventType.TEXT_MESSAGE_CHUNK);
+  });
+});
+
+describe('M15: host-supplied chat middleware', () => {
+  it('is handed to the real chat loop and observes the run without changing its events', async () => {
+    const seen: string[] = [];
+    const middleware: ChatMiddleware = {
+      name: 'recording',
+      onStart: () => void seen.push('start'),
+      onFinish: (_ctx, info) => void seen.push(`finish:${info.content}`),
+    };
+    const withMiddleware = await collect(
+      make(new FakeChatModel([fakeText('hello', 2)]), { middleware: [middleware] }).run(runInput()),
+    );
+    const without = await collect(make(new FakeChatModel([fakeText('hello', 2)])).run(runInput()));
+    expect(seen).toEqual(['start', 'finish:hello']);
+    expect(types(withMiddleware)).toEqual(types(without));
+  });
+
+  it('defaults to no middleware and never takes it from client input', async () => {
+    const seen: string[] = [];
+    const middleware: ChatMiddleware = { name: 'recording', onStart: () => void seen.push('start') };
+    // A client smuggling a `middleware` field through forwardedProps must have no effect.
+    await collect(
+      make(new FakeChatModel([fakeText('x', 1)])).run(
+        runInput({ forwardedProps: { middleware: [middleware] } }),
+      ),
+    );
+    expect(seen).toEqual([]);
   });
 });

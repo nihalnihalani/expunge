@@ -19,6 +19,7 @@ export type RuntimeErrorCode =
   | 'ModelUnavailable'
   | 'ToolsUnavailable'
   | 'ModelRunFailed'
+  | 'CheckpointInvalid'
   | 'Aborted';
 
 export class RuntimeError extends Error {

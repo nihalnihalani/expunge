@@ -10,13 +10,15 @@ import {
   type WakeCommandStore,
   type WakeTarget,
 } from './wake.js';
-import { createMongoWiring } from './wiring.js';
+import { createMongoWiring, createTelemetryWiring } from './wiring.js';
 
+export * from './committed.js';
 export * from './config.js';
 export * from './dispatch.js';
 export * from './domain-tools.js';
 export * from './readiness.js';
 export * from './receipts.js';
+export * from './telemetry.js';
 export * from './terminal.js';
 export * from './wake.js';
 export * from './wiring.js';
@@ -39,14 +41,18 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
   const tools = loadDomainTools();
   const readiness = checkReadiness(env, { domainToolsAvailable: tools.available });
   for (const line of readiness.lines) console.log(line);
+  for (const note of readiness.notes ?? []) console.log(`NOTE: ${note}`);
 
   let dispatcher: Dispatcher | undefined;
   let wakeStore: WakeCommandStore = new InMemoryWakeCommandStore();
   let closeMongo: (() => Promise<void>) | undefined;
+  let closeTelemetry: (() => Promise<void>) | undefined;
   if (readiness.status === 'READY') {
     const wiring = createMongoWiring(env);
     closeMongo = () => wiring.service.close();
     wakeStore = wiring.wakeStore;
+    const telemetry = createTelemetryWiring(env, wiring.service, logEntry);
+    if (telemetry.enabled) closeTelemetry = telemetry.close;
     dispatcher = new Dispatcher({
       jobs: wiring.jobs,
       resolver: wiring.resolver,
@@ -57,9 +63,13 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
       config,
       env,
       projection: wiring.projection,
+      terminalSweep: wiring.terminalSweep,
+      committed: wiring.committed,
+      ...(telemetry.enabled ? { telemetry: telemetry.telemetry } : {}),
       log: logEntry,
     });
     dispatcher.startPolling();
+    void dispatcher.repairTerminalProjections(); // a crash can leave a finished job without its terminal event
   }
   const target: WakeTarget = {
     canAccept: () => dispatcher?.canAccept() ?? false,
@@ -82,6 +92,7 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
     async close() {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await dispatcher?.stop();
+      await closeTelemetry?.(); // drains buffered Raindrop events after the last job has finished
       await closeMongo?.();
     },
   };
@@ -92,6 +103,7 @@ async function main(): Promise<void> {
     // Readiness only: no network, no database, no secret values printed.
     const readiness = checkReadiness(process.env, { domainToolsAvailable: loadDomainTools().available });
     for (const line of readiness.lines) console.log(line);
+    for (const note of readiness.notes ?? []) console.log(`NOTE: ${note}`);
     console.log(
       JSON.stringify({
         status: readiness.status,

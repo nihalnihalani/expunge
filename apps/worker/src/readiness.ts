@@ -1,5 +1,6 @@
 import { PRINCIPAL_URI_VARIABLES } from '@expunge/mongo';
 import { providerReadiness } from '@expunge/runtime';
+import { raindropWriteConfigFromEnv } from '@expunge/observability';
 
 export type Blocker = {
   code:
@@ -23,6 +24,11 @@ export type Readiness = {
    */
   checks: Record<'provider' | 'database' | 'wakeToken' | 'scope' | 'domainTools', 'configured' | 'blocked'>;
   reachability: 'not_checked';
+  /**
+   * Non-blocking observations, e.g. "telemetry disabled". They never change `status` or `lines`: Raindrop is
+   * observation, not a precondition of running a job.
+   */
+  notes?: string[];
 };
 
 export const MIN_WAKE_TOKEN_LENGTH = 32;
@@ -76,5 +82,16 @@ export function checkReadiness(
       domainTools: blocked(['domain tools']),
     },
     reachability: 'not_checked',
+    notes: readinessNotes(env),
   };
+}
+
+/** Names of missing variables only, never values. */
+export function readinessNotes(env: Readonly<Record<string, string | undefined>>): string[] {
+  const telemetry = raindropWriteConfigFromEnv(env);
+  return telemetry.ok
+    ? ['telemetry: Raindrop episodes enabled (configuration present; delivery is not checked here).']
+    : [
+        `telemetry: disabled (${telemetry.missing.join(', ')} not set); jobs run without Raindrop episodes and without telemetry outbox rows.`,
+      ];
 }
