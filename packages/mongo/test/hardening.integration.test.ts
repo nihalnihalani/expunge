@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { Double, Long, ObjectId, type Document } from 'mongodb';
+import { Binary, Double, Long, ObjectId, type Document } from 'mongodb';
 import type { ActionIntent, DomainAddress, FieldDescriptor } from '@expunge/contracts';
 import {
   ArtifactRepository,
@@ -130,6 +130,51 @@ describeLive('hardening regressions (real replica set)', () => {
       expect(await jobDoc(id)).toMatchObject({ status: 'succeeded', outputRefs: [receipt.receiptId] });
       // The same receipt can be replayed after the fact without a lease.
       expect(await effects.complete(actor, { ...lease, fence: 0 }, receipt)).toEqual(receipt);
+    });
+
+    it('commits an honest incomplete receipt through completeIncomplete and fails the job with it as output', async () => {
+      const id = await createJob(env.service);
+      await insertRegistry(env.service);
+      const lease = await claim(id);
+      const receipt = completionReceipt(id, { domainStatus: 'incomplete', operationalResiduals: 2 });
+      // The complete path refuses it, the incomplete path accepts it, and neither can launder the other's verdict.
+      await expect(effects.complete(actor, lease, receipt)).rejects.toThrow('IncompleteReceipt');
+      await expect(
+        effects.completeIncomplete(actor, lease, completionReceipt(id, { receiptId: 'fake-complete' })),
+      ).rejects.toThrow('ReceiptNotIncomplete');
+      await expect(
+        effects.completeIncomplete(
+          actor,
+          lease,
+          completionReceipt(id, { receiptId: 'zero-residuals', domainStatus: 'incomplete' }),
+        ),
+      ).rejects.toThrow('ReceiptNotIncomplete');
+      expect((await jobDoc(id)).status).toBe('running');
+      expect(await effects.completeIncomplete(actor, lease, receipt)).toEqual(receipt);
+      expect(await jobDoc(id)).toMatchObject({ status: 'failed', outputRefs: [receipt.receiptId] });
+      // The stored row replays without a lease, and a different payload under the same id is a conflict.
+      expect(await effects.completeIncomplete(actor, { ...lease, fence: 0 }, receipt)).toEqual(receipt);
+      await expect(
+        effects.completeIncomplete(actor, lease, { ...receipt, operationalResiduals: 3 }),
+      ).rejects.toThrow('ReceiptIdConflict');
+    });
+
+    it('holds an incomplete receipt to the same registry coverage as a complete one', async () => {
+      const id = await createJob(env.service);
+      await insertRegistry(env.service);
+      const lease = await claim(id);
+      await expect(
+        effects.completeIncomplete(
+          actor,
+          lease,
+          completionReceipt(id, {
+            domainStatus: 'incomplete',
+            operationalResiduals: 1,
+            inspectedCollectionIds: [],
+          }),
+        ),
+      ).rejects.toThrow('IncompleteReceipt');
+      expect((await jobDoc(id)).status).toBe('running');
     });
 
     it('lets a failed or cancelled end state through without a receipt', async () => {
@@ -659,6 +704,42 @@ describeLive('hardening regressions (real replica set)', () => {
       ).rejects.toThrow('PrincipalBoundary');
     });
   });
+  describe('campaign keys: strict, exactly 32 bytes, insert-only by role', () => {
+    const keys = () => env.service.privateDb!.collection<Document>('campaign_keys');
+    const row = (key: Buffer, overrides: Document = {}) => ({
+      _id: 'campaign-1' as never,
+      keyId: 'k1',
+      key: new Binary(key),
+      createdAt: new Date(),
+      ...overrides,
+    });
+    it('accepts a 32-byte key and rejects other lengths, extra fields and oversized ids', async () => {
+      await keys().insertOne(row(Buffer.alloc(32, 7)));
+      for (const bad of [
+        row(Buffer.alloc(31, 1), { _id: 'c-short' }),
+        row(Buffer.alloc(33, 1), { _id: 'c-long' }),
+        row(Buffer.alloc(32, 1), { _id: 'c-extra', note: 'x' }),
+        row(Buffer.alloc(32, 1), { _id: 'c'.repeat(129) }),
+        row(Buffer.alloc(32, 1), { _id: 'c-key', keyId: 'k'.repeat(65) }),
+        { _id: 'c-nokey', keyId: 'k', createdAt: new Date() },
+        row(Buffer.alloc(32, 1), { _id: 'c-string', key: 'not binary' }),
+      ])
+        await expect(keys().insertOne(bad as never), String(bad._id).slice(0, 12)).rejects.toMatchObject({
+          code: 121,
+        });
+      expect(await keys().countDocuments()).toBe(1);
+    });
+    it('is reachable through the fixture builder and grader only', async () => {
+      const builder = await env.as('fixture_builder');
+      await builder
+        .privateDb!.collection<Document>('campaign_keys')
+        .insertOne(row(Buffer.alloc(32, 9), { _id: 'campaign-2' }));
+      const grader = await env.as('grader');
+      expect(await grader.privateDb!.collection('campaign_keys').countDocuments()).toBe(1);
+      expect((await env.as('domain_executor')).privateDb).toBeUndefined();
+    });
+  });
+
   describe('guardrail appliesTo is accepted by the strict database validator', () => {
     const rule = {
       ruleId: 'r',

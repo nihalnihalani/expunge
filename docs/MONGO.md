@@ -21,7 +21,7 @@ flowchart LR
     E[projection_events projection_sequences stream_offsets wake_commands telemetry_outbox]
   end
   subgraph X[expunge_private]
-    S[fixture_specs oracle_manifests expected_poststates preservation_hashes heldout_assignments grader_results]
+    S[fixture_specs oracle_manifests expected_poststates preservation_hashes heldout_assignments grader_results campaign_keys]
   end
   EX[domain_executor] -->|update records, advance counter, insert decisions, touch fence| D & WR & J & A
   FB[fixture_builder] -->|registry and bindings| R & WB
@@ -62,6 +62,13 @@ Administration API; driver `createRole` is used only by the local RBAC test.
   `JobRepository.create` requires an existing world under the actor's scope, at its scope revision, outside maintenance.
 - **Scope paths.** Registered paths live under `data.*` (plus the read-only record key `_id`). `*` compiles to a filtered
   positional update or element `$pull`, never to a whole-array write.
+- **Incomplete receipts.** `EffectRepository.complete` commits only a `complete_in_registered_scope` receipt with zero
+  residuals and finishes the job `succeeded`. `completeIncomplete` commits an `incomplete` receipt (at least one residual)
+  under the same job binding, registry coverage, authority fence and world checks, and finishes the job `failed` with that
+  receipt as its output, so a run that claims success without having cleaned the data leaves a truthful committed record.
+  Neither method accepts the other's verdict.
+- **Campaign keys.** `expunge_private.campaign_keys` holds one 32-byte key per campaign for the fixture builder and grader
+  (strict validator, insert-only; fixture builder inserts, fixture builder and grader read, nobody updates or removes).
 - **Provenance.** Revocation is a bounded, resumable closure persisted in `provenance_closures`. `permitted` re-derives
   ancestry on every read and denies anything under an unresolved closure.
 - **Projection events.** Sequences are per job and contiguous from 1: the counter increment and the event insert share one

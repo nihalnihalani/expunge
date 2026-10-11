@@ -242,10 +242,39 @@ export class EffectRepository {
       throw error;
     }
   }
+  /** Commits a complete operational receipt and finishes the job as `succeeded`, in one transaction. */
   async complete(
     actor: ActorContext,
     lease: LeaseBinding,
     receipt: CompletionReceipt,
+    validate?: (session: ClientSession) => Promise<void>,
+  ): Promise<CompletionReceipt> {
+    if (receipt.domainStatus !== 'complete_in_registered_scope' || receipt.operationalResiduals !== 0)
+      fail('IncompleteReceipt');
+    return this.commitReceipt(actor, lease, receipt, 'succeeded', validate);
+  }
+
+  /**
+   * Commits an honest operational receipt for a run whose verification found residuals, and finishes the job as
+   * `failed` with that receipt as its output. The receipt covers the registry exactly like a complete one; only its
+   * verdict differs. This is how a narrative-mode run's claim of success meets the actual verification result.
+   */
+  async completeIncomplete(
+    actor: ActorContext,
+    lease: LeaseBinding,
+    receipt: CompletionReceipt,
+    validate?: (session: ClientSession) => Promise<void>,
+  ): Promise<CompletionReceipt> {
+    if (receipt.domainStatus !== 'incomplete' || receipt.operationalResiduals < 1)
+      fail('ReceiptNotIncomplete');
+    return this.commitReceipt(actor, lease, receipt, 'failed', validate);
+  }
+
+  private async commitReceipt(
+    actor: ActorContext,
+    lease: LeaseBinding,
+    receipt: CompletionReceipt,
+    finalStatus: 'succeeded' | 'failed',
     validate?: (session: ClientSession) => Promise<void>,
   ): Promise<CompletionReceipt> {
     requirePrincipal(this.service, ['domain_executor', 'setup']);
@@ -278,8 +307,6 @@ export class EffectRepository {
         receipt.scopeRevision !== job.binding.scopeRevision
       )
         fail('ReceiptBindingMismatch');
-      if (receipt.domainStatus !== 'complete_in_registered_scope' || receipt.operationalResiduals !== 0)
-        fail('IncompleteReceipt');
       // Coverage is checked against the registry stored for the bound revision, not against the receipt's claim.
       const registry = await new ScopeRepository(this.service).read(
         actor,
@@ -294,7 +321,7 @@ export class EffectRepository {
       await this.service.control
         .collection<import('mongodb').Document & { _id: string }>('completion_receipts')
         .insertOne({ _id: receipt.receiptId, ...receipt, actor, createdAt: new Date() }, { session });
-      await this.jobs.finish(actor, lease, 'succeeded', [receipt.receiptId], session);
+      await this.jobs.finish(actor, lease, finalStatus, [receipt.receiptId], session);
       return receipt;
     });
   }
