@@ -20,9 +20,21 @@ A failure in either is contained and logged by class name; durable state carries
 - `READY (configured)`: everything present, endpoints not overridden. Configured is not delivered.
 - `READY (LOCAL FAKE)`: `RAINDROP_INGEST_URL` or `RAINDROP_QUERY_URL` is overridden, so it talks to a stand-in, not Raindrop.
 
-**Fail closed.** Until the privacy controller's `erasure_suppressions` read (PKT-62) and a leak-guard source exist, the process is
-BLOCKED (`evidenceMain` prints the lines and exits 3); a suppression source that cannot be read HOLDS `event` intents (not sent,
-not dead-lettered), exactly like a suppressed id.
+**Sources wired by `main.ts` (`src/sources.ts`).**
+
+- *Export suppression*: `ErasureSuppressionRepository.activeUserKeys` through the process's own `observer` principal (FIND on
+  `erasure_suppressions`). A source that cannot be read HOLDS `event` intents (not sent, not dead-lettered), like a suppressed id.
+- *Leak guard*: a file exported by the privacy controller (`node --import tsx packages/privacy/src/export-guard-cli.ts`), named by
+  `EXPUNGE_LEAK_GUARD_FILE`. It carries scope, provider organization, count and digest; the process refuses a file that is
+  group/other accessible, for another scope or organization (`RAINDROP_ORGANIZATION_ID`), truncated or edited, or has a malformed
+  `privateIds` block. **The file holds subject literals in plaintext on this process's filesystem**: mode 0600, mounted read-only,
+  never logged or committed. It is read once at start and its digest does NOT prove it is the current subject set: a Mongo
+  generation row to compare against is a recorded follow-up, so restart the process after any subject registration.
+- *Observer window*: `EXPUNGE_OBSERVER_WINDOW_START`/`_END` (UTC ISO, both or neither), `EXPUNGE_OBSERVER_VERSION` (default `v1`),
+  optional `EXPUNGE_OBSERVER_EVENT_NAME`; without a window only the outbox dispatcher runs.
+
+**Fail closed.** Anything missing or invalid leaves the process BLOCKED (`evidenceMain` prints the names and exits 3). Local replica
+set plus FAKE Raindrop evidence only; live delivery is BLOCKED without Raindrop keys and the observer URI.
 
 **Honest limits.** Everything Raindrop-shaped in the tests is a labeled FAKE server (`packages/observability/test/fake-raindrop.ts`):
 it proves our protocol handling, not that bytes reached Raindrop; live delivery is BLOCKED without the root `.env`. The observer
