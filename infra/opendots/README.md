@@ -90,7 +90,7 @@ route is 403 at the proxy and 404 at the broker.
 Start it with `--profile broker`, `EXPUNGE_BROKER_ARTIFACTS_DIR` (read-only), `EXPUNGE_BROKER_TICKETS_DIR` (read-only to the
 broker, written by the trusted side) and `EXPUNGE_BROKER_SPOOL_DIR` (writable by the broker's `node` user). On macOS with colima
 the directories must be under your home (the VM does not share `/tmp`). Prove it live with `node infra/opendots/verify-broker.mjs
-<env-file> <artifact-sha256>`; unit/proxy chain: `node --test infra/opendots/candidate-broker.test.mjs`. What this does NOT do:
+<env-file> <artifact-sha256>`; unit/proxy chain: `node --test infra/opendots/candidate-broker.test.mjs`. The broker is container-only: run as a macOS host process it inherits `__CF_USER_TEXT_ENCODING`, which the environment allowlist correctly refuses, so it will not start there. What this does NOT do:
 authenticate which candidate process holds the proxy access token (every process in the candidate that has it can call the two
 routes, but only with a ticket it was handed), authorize by anything but the proxy's fixed candidate id, trust the ticket
 directory beyond its mount (its integrity is the trust root, as for the artifact directory), or protect against a Docker or
