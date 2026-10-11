@@ -1,6 +1,7 @@
 import type { ActorContext, Job, ScopeKey } from '@expunge/contracts';
 import {
   ArtifactRepository,
+  AttestationRepository,
   JobRepository,
   OutboxRepository,
   ProjectionRepository,
@@ -182,6 +183,7 @@ export type MongoWiring = {
   receipts: MongoCompletionReceiptReader;
   committed: MongoCommittedReader;
   models: EnvModelResolver;
+  attestations: AttestationRepository;
 };
 
 /** The worker's ONLY database identity is the domain_executor principal; there is no fallback to another URI. */
@@ -199,6 +201,7 @@ export function createMongoWiring(env: NodeJS.ProcessEnv): MongoWiring {
     receipts: new MongoCompletionReceiptReader(service),
     committed: new MongoCommittedReader(service),
     models: new EnvModelResolver(env),
+    attestations: new AttestationRepository(service),
   };
 }
 
