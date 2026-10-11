@@ -4,6 +4,7 @@ import { WORKER_TOOL_IDS } from '@expunge/baselines';
 import {
   COMPILER_HASH,
   VOCABULARY_HASH,
+  buildEvidenceCatalog,
   compileHarness,
   type CompileResult,
   type RejectionCode,
@@ -11,6 +12,7 @@ import {
 import {
   EVIDENCE_REFERENCE,
   SCOPED_RULE,
+  evidenceBundle,
   TEST_FLOOR,
   childOf,
   compileChild,
@@ -579,6 +581,9 @@ describe('rejections: edits and evidence', () => {
             permittedUse: 'gate_only' as const,
             origin: 'verifier_feedback' as const,
             split: 'train' as const,
+            evidenceId: 'evb_fixture',
+            jobId: 'job_fixture',
+            runId: 'run_fixture',
           },
         ],
       ]),
@@ -592,6 +597,9 @@ describe('rejections: edits and evidence', () => {
             permittedUse: 'training' as const,
             origin: 'verifier_feedback' as const,
             split: 'validation' as const,
+            evidenceId: 'evb_fixture',
+            jobId: 'job_fixture',
+            runId: 'run_fixture',
           },
         ],
       ]),
@@ -1092,6 +1100,38 @@ describe('rejections: plugins', () => {
       'plugin_abi_mismatch',
     );
     rejected(compileChild(parent, [edit]), 'plugin_unverifiable');
+  });
+});
+
+describe('the evidence catalog binds every identifier to its job and run', () => {
+  it('maps the bundle ID and each source identifier to the binding the bundle was recorded under', () => {
+    const bundle = evidenceBundle();
+    const other = evidenceBundle({
+      evidenceId: 'evb_train_002',
+      binding: { ...bundle.binding, jobId: 'job_2', runId: 'run_2' },
+      sources: [
+        {
+          ...bundle.sources[0]!,
+          externalEventId: 'evt_02',
+          externalTraceId: 'trace_02',
+          externalSignalIds: ['sig_02'],
+          localSourceIds: ['src_local_02'],
+        },
+      ],
+    });
+    const catalog = buildEvidenceCatalog([bundle, other]);
+    for (const id of ['evb_train_001', 'evt_01', 'trace_01', 'sig_miss_nested', 'src_local_01'])
+      expect(catalog.get(id), id).toMatchObject({
+        evidenceId: 'evb_train_001',
+        jobId: 'job_1',
+        runId: 'run_1',
+      });
+    for (const id of ['evb_train_002', 'evt_02', 'trace_02', 'sig_02', 'src_local_02'])
+      expect(catalog.get(id), id).toMatchObject({
+        evidenceId: 'evb_train_002',
+        jobId: 'job_2',
+        runId: 'run_2',
+      });
   });
 });
 

@@ -25,11 +25,37 @@ import type { EvidencePacket } from './evidence.js';
 import { proposalSchema, toTypedPatch, type EvolverModel } from './model.js';
 import { replayCandidate, type ReplayReport } from './replay.js';
 
+export function evidenceLevelOf(replay: ReplayReport | undefined): EvidenceLevel {
+  if (!replay) return 'no_replay_signal';
+  if (replay.heldOutFixes.length > 0 && replay.regressions.length === 0) return 'out_of_sample_fix';
+  return replay.inSampleFixes.length > 0 ? 'in_sample_only' : 'no_replay_signal';
+}
+/**
+ * A compiled proposal good enough to stop the search on: it fixed recorded harm out of sample, regressed nothing, and
+ * where it edited guardrails at least one flip is attributable to the evidence it cites.
+ */
+export function isGoodCandidate(record: ProposalRecord): boolean {
+  const replay = record.replay;
+  return (
+    record.status === 'compiled' &&
+    replay !== undefined &&
+    evidenceLevelOf(replay) === 'out_of_sample_fix' &&
+    (!replay.attribution.applicable || replay.attribution.attributedFlips > 0)
+  );
+}
+
 /** What the proposer may write: a candidate without the gate's verdict (`computedClass`, lifecycle `state`). */
 export type CandidateProposal = Omit<Candidate, 'computedClass' | 'state'>;
 
 export type ProposalStatus =
   'abstained' | 'schema_rejected' | 'citation_rejected' | 'compile_rejected' | 'replay_rejected' | 'compiled';
+
+/**
+ * What the replay shows, at most. Only `out_of_sample_fix` is a fix: it repaired recorded harm on runs other than the
+ * incident the proposal was mined from. `in_sample_only` repaired the incident's own rows and `no_replay_signal` has
+ * nothing to show (no ledger, or edits replay cannot see); both are merely a "candidate for gate".
+ */
+export type EvidenceLevel = 'out_of_sample_fix' | 'in_sample_only' | 'no_replay_signal';
 
 export interface ProposalRecord {
   proposalId: string;
@@ -52,6 +78,8 @@ export interface ProposalRecord {
   artifact?: CompiledArtifact;
   rejection?: Rejection;
   replay?: ReplayReport;
+  /** Set whenever a replay ran. Absent for proposals that never reached one. */
+  evidenceLevel?: EvidenceLevel;
 }
 
 export interface ProposeInput {
@@ -211,12 +239,23 @@ export function compileAndReplay(
     parentHash: contentHash(parent),
     childHash: artifact.bundleHash,
     corpus: input.corpus,
+    scope: { incidentRuns: packet.incidentRuns, evidence: input.catalog, candidateCitations: [...cited] },
   });
-  if (replay.regressions.length)
-    return record(base, 'replay_rejected', ['replay_regression'], { ...common, replay });
+  const evidenceLevel = evidenceLevelOf(replay);
+  const withReplay = { ...common, replay, evidenceLevel };
+  if (replay.regressions.length) return record(base, 'replay_rejected', ['replay_regression'], withReplay);
   // Permitting more than the record did is an authority expansion; a candidate not classified as one is inconsistent.
   if (replay.knownAuthorityFlips.length && artifact.mutationClass !== 'authority_expansion') {
-    return record(base, 'replay_rejected', ['authority_flip_without_expansion_class'], { ...common, replay });
+    return record(base, 'replay_rejected', ['authority_flip_without_expansion_class'], withReplay);
   }
-  return record(base, 'compiled', [], { ...common, replay });
+  // A trace-informed candidate was mined from an incident, so a guardrail edit must change a decision on that
+  // incident's own evidence. Control arms are reported with their attribution counts instead of rejected, so the
+  // wrong-incident comparison stays meaningful.
+  if (
+    packet.arm === 'trace_informed' &&
+    replay.attribution.applicable &&
+    replay.attribution.attributedFlips === 0
+  )
+    return record(base, 'replay_rejected', ['no_attributed_effect'], withReplay);
+  return record(base, 'compiled', [], withReplay);
 }
