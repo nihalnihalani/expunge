@@ -46,6 +46,15 @@ Tools: `infra/services/backup/backup-mongo.mjs`, `restore-mongo.mjs`, `restore-d
      `reapply-cli.ts attest --cursor <file> world-effects-reconciled=<ref>` (world-record deletions reconciled against the owner
      source) and `derived-artifacts-retracted=<ref>` (lessons and eligibility retracted by the retraction runner). Re-run `apply`
      afterwards; it verifies the database state again.
+  **Ledger integrity and handling.** `export` needs `EXPUNGE_LEDGER_MAC_KEY` (a privacy-controller secret, at least 32 characters;
+  the variable NAME only is documented, the value is never printed or stored in the file) and signs the ledger with HMAC-SHA256;
+  `apply` refuses a ledger whose MAC, header or retention fails (`LedgerMacInvalid`, `LedgerHeaderMismatch`, `LedgerExpired`).
+  The header carries per-collection counts and latest timestamps, so a truncated ledger is visible, and export itself refuses when
+  the collections' counts differ from what it read (`LedgerChangedDuringExport`). Retention is stated in the header
+  (`--retention-days`, default 30): keep the ledger at least as long as the backups it pairs with and delete it at expiry (no
+  pruning job exists). Encryption: set `EXPUNGE_LEDGER_ENC_KEY` (64 hex characters) for built-in AES-256-GCM; without it the file is
+  plaintext JSON mode 0600 and the destination must be an encrypted volume or bucket, which the tool does not check. The MAC detects
+  edits by anyone without the key; it does not hide contents.
   **Out of service until verified.** If ANY cleanup or erasure completed after the backup, the restored system must stay out of
   service until a verified re-application exists. The runner is a partial tool: exit 0 means only that the replayed jobs,
   suppressions and tombstones are present. The two attestations are free text in an unauthenticated cursor file, **ATTESTED, NOT
