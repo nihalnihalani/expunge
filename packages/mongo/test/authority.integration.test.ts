@@ -247,6 +247,60 @@ describeLive('D8 live authorization, D13 world split, K6 world binding (real rep
     });
   });
 
+  describe('decision ledger rows carry the tool and the inputs the gateway used', () => {
+    it('records toolId and bounded inputs with a digest, lists them in time order, and stays idempotent', async () => {
+      const id = await createJob(env.service);
+      const repository = new DecisionRepository(executor);
+      const identity = (stepId: string, ordinal = 0) => ({
+        jobId: id,
+        runId: `run-${id}`,
+        harnessHash: HASH,
+        stepId,
+        batchOrdinal: ordinal,
+        argsDigest: HASH,
+      });
+      const decision = { result: 'allow' as const, ruleIds: [], authorizationRevision: 1 };
+      const inputs = { facts: { plan_target_count: 3 }, bindings: { preview_plan: 'valid' }, prior: {} };
+      const first = await repository.record(actor, identity('step-a'), decision, {
+        toolId: 'apply_cleanup_batch',
+        inputs,
+      });
+      expect(first).toMatchObject({ toolId: 'apply_cleanup_batch', inputs });
+      expect(first.inputsDigest).toMatch(/^[a-f0-9]{64}$/);
+      await repository.record(actor, identity('step-a'), decision, { toolId: 'apply_cleanup_batch', inputs });
+      await repository.record(actor, identity('step-b'), { ...decision, result: 'deny', ruleIds: ['r1'] });
+      const listed = await repository.list(actor, id);
+      expect(listed.map((row) => row.stepId)).toEqual(['step-a', 'step-b']);
+      expect(listed[1]).not.toHaveProperty('inputs');
+      await expect(repository.list(actor, id, 0)).rejects.toThrow('InvalidDecisionWindow');
+    });
+
+    it('refuses oversized inputs, non-canonical inputs and a bad tool id', async () => {
+      const id = await createJob(env.service);
+      const repository = new DecisionRepository(executor);
+      const base = {
+        jobId: id,
+        runId: `run-${id}`,
+        harnessHash: HASH,
+        stepId: 's',
+        batchOrdinal: 0,
+        argsDigest: HASH,
+      };
+      const decision = { result: 'allow' as const, ruleIds: [], authorizationRevision: 1 };
+      const huge = { facts: { blob: 'x'.repeat(40_000) }, bindings: {}, prior: {} };
+      await expect(repository.record(actor, base, decision, { inputs: huge })).rejects.toThrow(
+        'DecisionInputsTooLarge',
+      );
+      await expect(
+        repository.record(actor, base, decision, {
+          inputs: { facts: { when: new Date() as never }, bindings: {}, prior: {} },
+        }),
+      ).rejects.toThrow();
+      await expect(repository.record(actor, base, decision, { toolId: '' })).rejects.toThrow('InvalidToolId');
+      expect(await control('decisions').countDocuments()).toBe(0);
+    });
+  });
+
   describe('D13: the world counter and its trusted binding are separate rows with separate writers', () => {
     it('creates a world as two rows and reads them as one logical revision', async () => {
       await worlds.create(scope, 'w1', 3);

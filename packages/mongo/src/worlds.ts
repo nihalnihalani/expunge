@@ -1,6 +1,7 @@
 import type { ClientSession, Document } from 'mongodb';
 import type { ScopeKey, WorldRevision, WorldScopeBinding } from '@expunge/contracts';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
+import { worldKeyFromStoredBinding, type WorldKey } from './worldkey.js';
 
 type WorldCounter = ScopeKey & {
   _id: string;
@@ -122,6 +123,15 @@ export class WorldRepository {
     if (world.maintenanceMode) fail('WorldInMaintenance');
     if (world.scopeRevision !== scopeRevision) fail('StaleWorldBinding');
     return world;
+  }
+
+  /**
+   * A WorldKey for a world that exists under `scope`, taken from the stored binding row (not from a caller's
+   * claim about its scope revision). Throws `UnknownWorld` for a world that is missing or belongs to another scope.
+   */
+  async bind(scope: ScopeKey, worldId: string, session?: ClientSession): Promise<WorldKey> {
+    const world = await this.read(scope, worldId, session);
+    return worldKeyFromStoredBinding(scope, { worldId, scopeRevision: world.scopeRevision });
   }
 
   /** Conditionally advances the counter from `expectedRevision`. A zero match means someone else wrote first. */

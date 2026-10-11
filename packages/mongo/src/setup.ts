@@ -55,6 +55,11 @@ export const CONTROL_COLLECTIONS = [
   'authority_touches',
   'decisions',
   'wake_commands',
+  'job_subjects',
+  'domain_steps',
+  'preview_plans',
+  'verification_sweeps',
+  'diagnostics',
 ] as const;
 export const PRIVATE_COLLECTIONS = [
   'fixture_specs',
@@ -118,6 +123,15 @@ export const CONTROL_INDEXES: IndexEntry[] = [
   { collection: 'authority_revisions', key: { ...identity }, options: { unique: true } },
   { collection: 'authority_touches', key: { ...identity }, options: { unique: true } },
   { collection: 'decisions', key: { ...identity, jobId: 1, stepId: 1, batchOrdinal: 1 } },
+  { collection: 'job_subjects', key: { ...identity, jobId: 1 }, options: { unique: true } },
+  {
+    collection: 'domain_steps',
+    key: { ...identity, jobId: 1, kind: 1, ordinal: 1 },
+    options: { unique: true },
+  },
+  { collection: 'preview_plans', key: { ...identity, jobId: 1, createdAt: 1 } },
+  { collection: 'verification_sweeps', key: { ...identity, jobId: 1, createdAt: 1 } },
+  { collection: 'diagnostics', key: { ...identity, jobId: 1, createdAt: 1 } },
   // TTL is housekeeping for deduplication ids only; it never decides whether a command is allowed.
   { collection: 'wake_commands', key: { acceptedAt: 1 }, options: { expireAfterSeconds: 7 * 24 * 3600 } },
   { collection: 'wake_commands', key: { jobId: 1, acceptedAt: 1 } },
@@ -148,8 +162,9 @@ export const WORLD_INDEXES: IndexEntry[] = [
   { collection: 'world_scope_bindings', key: { ...identity, worldId: 1 }, options: { unique: true } },
   { collection: 'world_revisions', key: { ...identity, worldId: 1 }, options: { unique: true } },
   { collection: 'identity_edges', key: { edgeKey: 1 }, options: { unique: true } },
-  { collection: 'identity_edges', key: { tenantId: 1, env: 1, worldId: 1, scopeRevision: 1, fromNode: 1 } },
-  { collection: 'identity_edges', key: { tenantId: 1, env: 1, worldId: 1, scopeRevision: 1, toNode: 1 } },
+  // Edges are versioned by the world revision they were derived at; traversal reads one revision only.
+  { collection: 'identity_edges', key: { ...identity, worldId: 1, worldRevision: 1, fromNode: 1 } },
+  { collection: 'identity_edges', key: { ...identity, worldId: 1, worldRevision: 1, toNode: 1 } },
 ];
 /**
  * Indexes replaced by a redesign. Dropping them keeps setup idempotent across versions: the legacy unique

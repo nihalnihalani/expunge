@@ -67,14 +67,17 @@ Administration API; driver `createRole` is used only by the local RBAC test.
 - **Projection events.** Sequences are per job and contiguous from 1: the counter increment and the event insert share one
   transaction, so an aborted transaction gives its number back. Payloads are validated against strict per-kind schemas.
 
-## Job status: what the database enforces and what the application enforces
-Six principals (executor, observer, grader, promoter, privacy_controller, fixture_builder) hold UPDATE on `jobs`, and
-collection-level RBAC cannot split fields or values. **Application-enforced** (in `JobRepository`/`EffectRepository`): which
-principal may work which job kind (`JOB_KIND_PRINCIPALS`), lease and fence conditions on every write, a cleanup job
-reaching `succeeded` only with a committed, job-bound completion receipt, and terminal cancellation. **Database-enforced:**
-the strict BSON schema, and a query validator that rejects `succeeded` with empty `outputRefs`. A raw writer that sets
-`succeeded` plus fabricated `outputRefs` is not stopped by the database (asserted as a known limitation in
-`rbac.integration.test.ts`).
+## Residuals that collection-level RBAC cannot close (application-enforced, with the test that covers each)
+Atlas privileges are per collection and per verb, never per field or value. Three grants are therefore broader than the rule
+they serve, and the rule lives in code:
+| Grant | Application rule | Test |
+|---|---|---|
+| `domain_executor` UPDATE on `world_revisions` | The counter only moves by a conditional `findOneAndUpdate` at the revision the intent was planned at; scope revision and maintenance live in `world_scope_bindings`, which the executor cannot write. A hand-written counter edit cannot widen scope. | `authority.integration.test.ts` (world split, rebinding conflicts with an in-flight effect); `rbac.integration.test.ts` (executor denied on the binding row) |
+| `proposer` INSERT on `candidates` | A candidate row is a note: `promote` never reads it for authorization. The validator rejects a `computedClass`; a forged `state` is inert. | `hardening.integration.test.ts` (L11), `promotion.integration.test.ts` ("does not read the candidate row at all") |
+| six principals UPDATE on `jobs` (executor, observer, grader, promoter, privacy_controller, fixture_builder) | `JOB_KIND_PRINCIPALS` limits claim/renew/checkpoint/yield/finish to the worker principal of the kind; every lease write is conditional on owner, fence and a live lease; a cleanup job reaches `succeeded` only with a committed, job-bound completion receipt; cancellation is terminal. The database adds the strict BSON schema and a query validator rejecting `succeeded` with empty `outputRefs`. A raw writer that sets `succeeded` plus fabricated `outputRefs` is not stopped by the database. | `hardening.integration.test.ts` (L1, L3), `rbac.integration.test.ts` ("job status" asserts both the guard and the known limitation) |
+
+World access never takes a world id from a caller: `ScopeRepository` methods require a `WorldKey`, which only
+`worldKeyOf(job)` (the stored run binding) or `WorldRepository.bind` (the stored world row under a trusted scope) can issue.
 
 ## Test lanes
 | Lane | Needs | Command |

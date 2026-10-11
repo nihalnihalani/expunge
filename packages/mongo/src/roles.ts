@@ -2,6 +2,13 @@ import { WORLD_COLLECTIONS, PRIVATE_COLLECTIONS } from './setup.js';
 import type { Principal } from './client.js';
 export type AtlasAction = { action: string; resources: Array<{ db: string; collection: string }> };
 export type AtlasRoleManifest = { roleName: string; actions: AtlasAction[]; inheritedRoles: never[] };
+const DOMAIN_STEP_COLLECTIONS = [
+  'job_subjects',
+  'domain_steps',
+  'preview_plans',
+  'verification_sweeps',
+  'diagnostics',
+] as const;
 const JOB_BINDING_WORLD_ROWS = ['world_revisions', 'world_scope_bindings'] as const;
 const EXECUTOR_WORLD_WRITES = [
   'customers',
@@ -54,6 +61,7 @@ export function atlasRoleManifests(
         'authority_touches',
         'decisions',
         'wake_commands',
+        ...DOMAIN_STEP_COLLECTIONS,
       ]),
       control('INSERT', [
         'jobs',
@@ -69,6 +77,8 @@ export function atlasRoleManifests(
         'decisions',
         // Wake-command deduplication ids, insert-only.
         'wake_commands',
+        // The gateway's insert-only step log: subject, resolution, discovery, plans, sweeps, diagnostics.
+        ...DOMAIN_STEP_COLLECTIONS,
       ]),
       // authority_touches: the fence counter only. The authoritative authority_revisions row is not writable here.
       control('UPDATE', ['jobs', 'runs', 'projection_sequences', 'authority_touches']),

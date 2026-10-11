@@ -244,6 +244,22 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
     expect(holders('INSERT', 'candidates')).toEqual(['proposer']);
     expect(holders('UPDATE', 'candidates')).toEqual(['promoter']);
   });
+  it('keeps the gateway step log insert-only and with the worker alone', () => {
+    for (const collection of [
+      'job_subjects',
+      'domain_steps',
+      'preview_plans',
+      'verification_sweeps',
+      'diagnostics',
+    ]) {
+      expect(holders('INSERT', collection), collection).toEqual(['domain_executor']);
+      expect(holders('UPDATE', collection), collection).toEqual([]);
+      expect(holders('REMOVE', collection), collection).toEqual([]);
+      expect(holders('FIND', collection), collection).toEqual(['domain_executor']);
+    }
+    // Subject literals live in job_subjects; the projection reader must never see them.
+    expect(can('projection_reader', 'FIND', 'job_subjects')).toBe(false);
+  });
   it('never grants bypassDocumentValidation, collMod or role administration', () => {
     const forbidden = [
       'BYPASS_DOCUMENT_VALIDATION',
