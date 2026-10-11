@@ -1,7 +1,8 @@
 import { openPageLink } from './page-navigation';
 import { SpaceNav } from './SpaceNav';
 import { SpaceWorkspace } from './SpaceWorkspace';
-import { ExpungeFoundation } from './expunge/ExpungeFoundation';
+import { ExpungeWorkbench } from './expunge';
+import { TelemetryNotice } from './expunge/TelemetryNotice';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { CopilotKitProvider } from '@copilotkit/react-core/v2';
 import {
@@ -68,6 +69,8 @@ export function App() {
     'chat' | 'tasks' | 'memories' | 'space' | 'expunge'
   >('chat');
   const dirtyPage = useRef(false);
+  // Set once the user chooses a view, so the configured-domain default never overrides a choice.
+  const navigated = useRef(false);
   const [spaceId, setSpaceId] = useState('');
   const [pageId, setPageId] = useState<string>();
   const setDirtyPage = useCallback((value: boolean) => {
@@ -77,13 +80,33 @@ export function App() {
     if (dirtyPage.current && !window.confirm('Leave your unsaved page draft?'))
       return;
     dirtyPage.current = false;
-    if (next !== 'space')
+    navigated.current = true;
+    if (next !== 'space' && next !== 'expunge')
       history.replaceState(null, '', location.pathname + location.search);
     rawSetView(next);
   };
   useEffect(() => {
     let acceptedHash = location.hash;
     const navigate = () => {
+      if (/^#\/expunge(\/|$)/.test(location.hash)) {
+        if (dirtyPage.current && location.hash === acceptedHash) return;
+        if (
+          dirtyPage.current &&
+          !window.confirm('Leave your unsaved page draft?')
+        ) {
+          history.replaceState(null, '', acceptedHash || location.pathname);
+          return;
+        }
+        acceptedHash = location.hash;
+        dirtyPage.current = false;
+        navigated.current = true;
+        rawSetView('expunge');
+        setMobile(false);
+        return;
+      }
+      // Back from an Expunge address to the bare page leaves the Expunge view.
+      if (!location.hash)
+        rawSetView((current) => (current === 'expunge' ? 'chat' : current));
       const match = location.hash.match(
         /^#\/spaces\/([^/]+)(?:\/pages\/([^/]+))?$/,
       );
@@ -107,6 +130,39 @@ export function App() {
     window.addEventListener('hashchange', navigate);
     return () => window.removeEventListener('hashchange', navigate);
   }, []);
+  // Expunge is the product's main workflow: when the domain service is configured and the
+  // user has not chosen anything yet, open it (and keep the address deep-linkable).
+  useEffect(() => {
+    let active = true;
+    void api<{ domain: 'configured' | 'unconfigured' }>('/expunge/status')
+      .then((status) => {
+        if (!active || status.domain !== 'configured') return;
+        if (navigated.current || location.hash) return;
+        history.replaceState(
+          null,
+          '',
+          `${location.pathname}${location.search}#/expunge`,
+        );
+        rawSetView('expunge');
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+  // The Expunge workbench sets its own, more specific title while it is mounted.
+  useEffect(() => {
+    if (view === 'expunge') return;
+    const label =
+      view === 'tasks'
+        ? 'Activity'
+        : view === 'space'
+          ? 'Pages'
+          : view === 'memories'
+            ? 'Memories'
+            : 'Chat';
+    document.title = `${label} \u00b7 Expunge`;
+  }, [view]);
   const openPage = (space: string, page?: string) => {
     openPageLink(`#/spaces/${space}${page ? `/pages/${page}` : ''}`);
   };
@@ -253,9 +309,10 @@ export function App() {
     return (
       <main className="unlock">
         <Mascot />
-        <h1>Your own little corner.</h1>
+        <h1>Unlock Expunge</h1>
         <p>
-          Enter the owner access token configured on this template’s server.
+          Enter the owner access token configured on this server. Expunge runs
+          on the OpenDots operator shell.
         </p>
         <form
           onSubmit={async (e) => {
@@ -282,7 +339,7 @@ export function App() {
             onChange={(e) => setAuth(e.target.value)}
             required
           />
-          <button className="primary">Unlock OpenDots</button>
+          <button className="primary">Unlock Expunge</button>
         </form>
         {error && (
           <p className="chat-error" role="alert">
@@ -307,6 +364,19 @@ export function App() {
     );
   const content = (
     <div className={`app template-app ${navCollapsed ? 'nav-collapsed' : ''}`}>
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={(event) => {
+          // The shell routes on the URL hash, so move focus instead of navigating.
+          event.preventDefault();
+          const main = document.querySelector('main');
+          main?.setAttribute('tabindex', '-1');
+          main?.focus();
+        }}
+      >
+        Skip to main content
+      </a>
       <nav className="icon-rail" aria-label="Workspace navigation">
         <button
           className="rail-brand"
@@ -384,6 +454,23 @@ export function App() {
             <i />
           </span>
           OpenDots<span className="wordmark-dot">•</span>
+        </button>
+        <button
+          className={`nav-item ${view === 'expunge' ? 'active' : ''}`}
+          aria-current={view === 'expunge' ? 'page' : undefined}
+          onClick={() => {
+            setView('expunge');
+            if (!/^#\/expunge(\/|$)/.test(location.hash))
+              history.pushState(
+                null,
+                '',
+                `${location.pathname}${location.search}#/expunge`,
+              );
+            setMobile(false);
+          }}
+        >
+          <Database size={17} />
+          <span>Expunge</span>
         </button>
         <button
           className="new-chat nav-item"
@@ -475,16 +562,6 @@ export function App() {
         )}
         <div className="sidebar-bottom">
           <button
-            className={`nav-item ${view === 'expunge' ? 'active' : ''}`}
-            onClick={() => {
-              setView('expunge');
-              setMobile(false);
-            }}
-          >
-            <Database size={17} />
-            <span>Expunge</span>
-          </button>
-          <button
             className={`nav-item ${view === 'tasks' ? 'active' : ''}`}
             onClick={() => {
               setView('tasks');
@@ -543,7 +620,9 @@ export function App() {
             <span>
               {view === 'space'
                 ? workspace.spaces.find((space) => space.id === spaceId)?.name
-                : 'Dots'}
+                : view === 'expunge'
+                  ? 'Expunge'
+                  : 'Dots'}
             </span>
             <span>/</span>
             <strong>
@@ -554,7 +633,7 @@ export function App() {
                   : view === 'space'
                     ? 'Pages'
                     : view === 'expunge'
-                      ? 'Expunge'
+                      ? 'Cleanup workflow'
                       : 'Memories'}
             </strong>
           </div>
@@ -604,7 +683,7 @@ export function App() {
           </div>
         )}
         {view === 'expunge' ? (
-          <ExpungeFoundation />
+          <ExpungeWorkbench />
         ) : view === 'space' ? (
           <SpaceWorkspace
             key={spaceId}
@@ -631,7 +710,11 @@ export function App() {
             }}
           />
         ) : view === 'chat' ? (
-          <div className={`chat-workspace ${pane ? 'split' : ''}`}>
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className={`chat-workspace ${pane ? 'split' : ''}`}
+          >
             <div className="chat-column">
               {thread && configured ? (
                 <Chat
@@ -682,16 +765,7 @@ export function App() {
                           Settings to start chatting. Your Spaces and Dot
                           preferences are ready to use.
                         </p>
-                        <p>
-                          Setup and usage metadata is collected by default.{' '}
-                          <a
-                            href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP-TELEMETRY.md"
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Tracking and opt-out details
-                          </a>
-                        </p>
+                        <TelemetryNotice />
                         <a
                           href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP.md"
                           target="_blank"
@@ -782,7 +856,7 @@ export function App() {
                 onClose={() => setPane(false)}
               />
             )}
-          </div>
+          </main>
         ) : (
           <main className="main-content">
             <div className="page-heading">

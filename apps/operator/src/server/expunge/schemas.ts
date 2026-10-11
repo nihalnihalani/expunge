@@ -4,6 +4,7 @@ import {
   CANDIDATE_STATES,
   EFFECT_KINDS,
   EXTERNAL_ERASURE_STATUSES,
+  JOB_FAILURE_CODES,
   JOB_KINDS,
   JOB_PHASES,
   JOB_STATUSES,
@@ -52,11 +53,9 @@ export class ProjectionRejected extends Error {
 }
 
 const text = (max: number) => z.string().max(max);
-const id = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[A-Za-z0-9_.:-]+$/);
+// Same bounds as packages/contracts/src/projection.ts so a payload the backend may write is never
+// refused here; path parameters are validated separately and more strictly (routes.ts).
+const id = z.string().min(1).max(256);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const iso = z.iso.datetime();
 const int = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -280,7 +279,7 @@ const payloadSchemas = {
     phase,
     toolId: z.enum(TOOL_IDS),
     decision: z.enum(POLICY_RESULTS),
-    ruleIds: idList(20),
+    ruleIds: idList(64),
     summary: text(200),
     targetCount: int.optional(),
   }),
@@ -296,14 +295,14 @@ const payloadSchemas = {
   }),
   evidence_ready: z.object({
     evidenceId: id,
-    provider: text(64),
-    externalEventId: text(128).optional(),
-    externalTraceId: text(128).optional(),
-    externalSignalIds: z.array(text(128)).max(50),
+    provider: id,
+    externalEventId: id.optional(),
+    externalTraceId: id.optional(),
+    externalSignalIds: idList(256),
     origin: z.enum(SOURCE_ORIGINS),
     outboxState: z.enum(OUTBOX_STATES),
     truncated: z.boolean(),
-    missing: z.array(text(64)).max(20),
+    missing: idList(64),
     contentHash: hash,
     permittedUse: z.enum(['training', 'gate_only', 'display_only', 'revoked']),
   }),
@@ -314,15 +313,15 @@ const payloadSchemas = {
     childHash: hash,
     claimedClass: z.enum(MUTATION_CLASSES),
     computedClass: z.enum(MUTATION_CLASSES),
-    surfaces: z.array(text(32)).max(8),
-    hypothesis: text(500),
+    surfaces: idList(16),
+    hypothesis: text(1000),
     state: z.enum(CANDIDATE_STATES),
   }),
   trial_completed: z.object({
     reportId: id.nullable(),
     candidateId: id,
     pairId: id,
-    family: text(64),
+    family: id,
     split: z.enum(['train', 'protected', 'validation', 'final']),
     parentUseful: z.boolean(),
     candidateUseful: z.boolean(),
@@ -360,18 +359,10 @@ const payloadSchemas = {
     snapshotHash: hash,
   }),
   job_failed: z.object({
-    code: z.enum([
-      'budget_exhausted',
-      'lease_lost',
-      'policy_denied',
-      'verification_failed',
-      'provider_error',
-      'world_conflict',
-      'internal_error',
-    ]),
+    code: z.enum(JOB_FAILURE_CODES),
     retryable: z.boolean(),
     phase: phase.nullable(),
-    message: text(300),
+    message: text(500),
   }),
   job_status_changed: z.object({
     from: z.enum(JOB_STATUSES),
@@ -412,7 +403,7 @@ const payloadSchemas = {
     kind: z.enum(['hider', 'meta']),
     rowId: id,
     admitted: z.boolean().optional(),
-    w0ResetProof: text(128).optional(),
+    w0ResetProof: text(256).optional(),
     budgetHash: hash.optional(),
     result: z.enum(['measured', 'null', 'invalid']),
   }),

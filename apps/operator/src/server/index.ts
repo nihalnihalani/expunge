@@ -11,6 +11,7 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { expungeDomainFromEnv } from './expunge/domain-service.js';
 import { describeExpungeConfig } from './expunge/config.js';
+import { ensureExpungeDot } from './expunge/expunge-dot.js';
 import {
   intelligenceApiKeyFromEnv,
   intelligenceWsUrlFromEnv,
@@ -60,7 +61,9 @@ const config: PlatformConfig = {
   runtimeUrl: `http://${host === '::1' ? '[::1]' : '127.0.0.1'}:${port}/api/copilotkit`,
   ownerToken,
 };
-const platform = new Platform(store, workspace, config);
+const expungeDomain = expungeDomainFromEnv(process.env);
+if (expungeDomain) ensureExpungeDot(workspace);
+const platform = new Platform(store, workspace, config, expungeDomain);
 const researchConfig = {
   mode: 'live' as const,
   apiKey: config.apiKey,
@@ -97,7 +100,7 @@ const app = createApp({
   ownerToken,
   origin: resolveAppOrigins(process.env.APP_ORIGIN, process.env.NODE_ENV),
   platform,
-  expungeDomain: expungeDomainFromEnv(process.env),
+  expungeDomain,
   expungeConfig: describeExpungeConfig(process.env),
 });
 app.use('*', async (c, next) => {

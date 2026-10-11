@@ -25,6 +25,9 @@ import {
 import { validateRuntimeScope } from './runtime-scope.js';
 import { learningSelector } from './learning.js';
 import { SetupTelemetry } from './setup-telemetry.js';
+import { ExpungeProjectionAgent } from './expunge/projection-agent.js';
+import { isExpungeDot } from './expunge/expunge-dot.js';
+import type { ExpungeDomainService } from './expunge/domain-service.js';
 export class Platform {
   private channelStartupFailed = false;
   readonly setupTelemetry: SetupTelemetry;
@@ -37,6 +40,7 @@ export class Platform {
     readonly store: Store,
     readonly workspace: WorkspaceStore,
     readonly config: PlatformConfig,
+    readonly expungeDomain?: ExpungeDomainService,
   ) {
     this.setupTelemetry = new SetupTelemetry(store);
     this.computers = new ComputerService(
@@ -95,14 +99,16 @@ export class Platform {
             .dots()
             .map((dot) => [
               dot.id,
-              new DotAgent(
-                store,
-                workspace,
-                config,
-                dot.id,
-                false,
-                this.setupTelemetry,
-              ),
+              expungeDomain && isExpungeDot(dot)
+                ? new ExpungeProjectionAgent(expungeDomain, dot.id)
+                : new DotAgent(
+                    store,
+                    workspace,
+                    config,
+                    dot.id,
+                    false,
+                    this.setupTelemetry,
+                  ),
             ]),
         ),
       channels,
