@@ -18,13 +18,14 @@ This build runs in the Claude desktop app, where native Agent Teams (shared Task
 | verifier | Sonnet 5.5 | `scripts/continuity/`, `tests/reliability/`, `tests/evaluation/` (harness only), `VERIFICATION.md` |
 | devils-advocate | Opus 5.5 | `docs/review/` (findings only; never product code) |
 | verifier-2 | Sonnet 5.5 (added 2026-10-11 11:45 UTC when packet checks queued behind one verifier) | append-only section `## verifier-2 packet checks` at the end of `VERIFICATION.md`; its own replica set on 127.0.0.1:27218; no product code, no Git |
+| gateway-controls | Sonnet 5.5 (added 2026-10-11 12:20Z real UTC for DA-5 DG3, DG4, DG6) | `packages/domain/src/controls.ts` (body of `createGatewayControls`), `packages/domain/src/workflow.ts`, `packages/domain/src/budget.ts`, `packages/domain/test/controls.integration.test.ts`, optional `packages/domain/test/controls-helpers.ts`; under mongodb-authority's direction; own replica set on 127.0.0.1:27418; no Git |
 | commit-steward | Haiku 5.5 | Git index and commits only; `COMMIT-LEDGER.md` |
 
 Unlisted upstream files under `apps/operator/` (OpenDots at pin `625452e06cde74cb25b0ce319e2c1be0488f5a5f`) are frozen; changes to `platform.ts`, `dot-agent.ts`, `app.ts`, `index.ts` require a proposal to team-lead and are then owned by ui-ux-improver for that change.
 
 ## Frozen interfaces (change only by team-lead decision recorded in PROJECT-STATE.md)
 
-1. `docs/expunge/CONTRACTS.md` names and shapes, implemented in `packages/contracts/src/index.ts`. Additive exports are allowed by mongodb-authority during Wave A; removals or semantic changes need lead approval.
+1. `docs/expunge/CONTRACTS.md` names and shapes, implemented in `packages/contracts/src/index.ts`. Additive exports are allowed by mongodb-authority during Wave A; removals or semantic changes need lead approval. Recorded additive decisions: C1c `delivery`, `withheld`, `privateIdHash`, `selectWrongIncident` (runtime-raindrop, one-time grant); PKT-16b `ReferenceDeclaration.owner?: 'from' | 'to' | 'none'` and `FieldDescriptor.identity?: boolean` (mongodb-authority edits contracts and validators, rsi-evolution emits them from the generator).
 2. **Field path grammar** (shared by fixtures, mongo scope compile, discovery): path segments are strings matching `/^[A-Za-z][A-Za-z0-9_]{0,31}$/` or the literal `*`; first segment is never `*`; at most one `*`; length 1..16. `*` means "every element of the array at this position". Read compilation expands `*` to a MongoDB dotted path without the wildcard (matching any element). Write compilation uses positional/filtered array updates and never deletes an array wholesale when the path has a `*`. This grammar lives in `@expunge/contracts` as `isFieldPath`/`parseFieldPath`; both fixtures and mongo import it.
 3. **ScopeKey hashing**: `scopeIdentity` and world/scope hashes select exactly `{tenantId, env, scopeId}`; extra `ActorContext` keys never enter a hash; implicit default binding and the explicit equivalent binding produce identical `worldId` and identical `scopeId`.
 4. **Principals**: `PRINCIPALS` in `packages/mongo/src/client.ts`; env variable names `MONGODB_<PRINCIPAL>_URI`.

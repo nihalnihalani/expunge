@@ -14,7 +14,7 @@ The setup principal is used only by `npm run setup:mongo` from an operator machi
 
 ## Expunge service binding
 
-`EXPUNGE_TENANT_ID`, `EXPUNGE_ENV` (`dev` | `evaluation` | `demo`), `EXPUNGE_SCOPE_ID`, `EXPUNGE_AUTH_SECRET`, `EXPUNGE_INTERNAL_SECRET`, `EXPUNGE_INTERNAL_TOKEN` (operator to domain read-projection principal only), `EXPUNGE_WAKE_TOKEN` (operator to worker wake commands only; a wake carries just `{jobId, commandId}`), `EXPUNGE_JOB_WRITE_TOKEN` (submit and cancel jobs, operator previews), `EXPUNGE_APPROVAL_TOKEN` (review decisions to the approval issuer), `EXPUNGE_ALLOW_TELEMETRY` (operator telemetry is off by default in Expunge builds; set `1` to allow the upstream CopilotKit telemetry), `EXPUNGE_DOMAIN_URL`, `EXPUNGE_OWNER_EMAIL`, `EXPUNGE_ALLOWED_ORIGINS`.
+`EXPUNGE_TENANT_ID`, `EXPUNGE_ENV` (`dev` | `evaluation` | `demo`), `EXPUNGE_SCOPE_ID`, `EXPUNGE_AUTH_SECRET`, `EXPUNGE_INTERNAL_SECRET`, `EXPUNGE_INTERNAL_TOKEN` (operator to domain read-projection principal only), `EXPUNGE_WAKE_TOKEN` (operator to worker wake commands only; a wake carries just `{jobId, commandId}`), `EXPUNGE_JOB_WRITE_TOKEN` (submit and cancel jobs, operator previews), `EXPUNGE_APPROVAL_TOKEN` (review decisions to the approval issuer), `EXPUNGE_ALLOW_TELEMETRY` (operator telemetry is off by default when launched through `apps/operator/scripts/run-from-root.mjs`; the operator package's own `npm run dev` and `npm start` still send upstream CopilotKit telemetry until the S3 packet moves the default into the server bootstrap, DA-7 T1; set `1` to allow it), `EXPUNGE_DOMAIN_URL`, `EXPUNGE_OWNER_EMAIL`, `EXPUNGE_ALLOWED_ORIGINS`.
 
 ## Model provider (frozen per scientific arm)
 

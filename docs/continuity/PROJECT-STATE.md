@@ -1,6 +1,6 @@
 # Expunge project state (sanitized, version-controlled)
 
-Updated: 2026-10-11 18:22 IST (12:52 UTC) by team-lead. This file holds no credentials. Checkpoint packs live in the ignored `.expunge/checkpoints/` directory; the local briefing is the ignored `HANDOFF.md`.
+Updated: 2026-10-11 12:12Z (real UTC) by team-lead. Clock erratum: lead-written times labelled UTC between 11:30 and 13:46 in these documents ran about 95 minutes ahead of real UTC (checked against `date -u` at 12:11Z); checkpoint ids and git commit dates carry the true times. Later entries use real UTC.
 
 ## Objective
 
@@ -16,7 +16,7 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 
 | Item | State |
 |---|---|
-| Git | branch `main`; HEAD ba41d7b = origin/main, 30 commits (baseline fe12b51; per-lane packets PKT-2 to PKT-18 each followed by a COMMIT-LEDGER row commit); remote `origin` = https://github.com/nihalnihalani/expunge (private); every commit is pushed immediately (human instruction); workspace-adding packets get a lock regenerated from the staged tree; every packet passes the HEAD-green gate (npm ci + typecheck on a scratch export of the staged index) |
+| Git | branch `main`; HEAD e2e1db1 = origin/main, 42 commits (baseline fe12b51; per-lane packets PKT-2 to PKT-18 each followed by a COMMIT-LEDGER row commit); remote `origin` = https://github.com/nihalnihalani/expunge (private); every commit is pushed immediately (human instruction); workspace-adding packets get a lock regenerated from the staged tree; every packet passes the HEAD-green gate (npm ci + typecheck on a scratch export of the staged index) |
 | Root `.env` | MISSING. All Atlas, model-provider, Raindrop and CopilotKit Intelligence live checks are BLOCKED until it exists. Required variable names are listed in `.env.example`. |
 | `apps/operator/.env` | MISSING (operator loads root `.env` through `apps/operator/scripts/run-from-root.mjs`) |
 | Node / npm | v25.2.1 / 11.6.2 (root engines `>=24`) |
@@ -43,6 +43,7 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 4. The field-path wildcard grammar is frozen in OWNERSHIP.md item 2 and moves into `@expunge/contracts`.
 5. Baseline commit CS-1 is deferred until the Wave A repairs and B2-1 land, then staged as one full snapshot with verifier evidence on that exact tree (committing a root manifest whose workspaces are excluded would be incoherent).
 6. `research/` (prepared research, 7.2 MB, 153 files) is excluded from every commit pending a human decision: two notes contain third-party email addresses and 22 files contain the author's home-directory paths. Publishing it is the owner's call.
+10. DA-5 on the domain gateway (2026-10-11, real UTC about 11:55Z): DG1, DG2, DG3, DG4, DG5, DG6, DG7, DG8 and DG11 are must-fix before the domain packet is accepted (runtime workflow enforcement, ownership-scoped discovery, identity only from identity-role fields, per-job budgets, lease-fenced control rows, inputs digest verified on replay, typed references as residuals, closure truncation never silent, error-name alignment); DG9, DG10, DG12 may follow as PKT-16b. A second implementer under mongodb-authority's direction was offered to split the work by file.
 9. Lead decisions for C1c (2026-10-11 12:58 UTC): raindrop-ai 1.0.1 accepted with its 126-package transitive tree and 38 advisories, rationale and production options in PRODUCTION-READINESS.md; optional `delivery` labels on EvidenceReference and EvidenceReadyPayload; `selectWrongIncident` and `privateIdHash` ('expunge-private-id:v1', NFKC) live in packages/contracts as pure functions shared by observer, evolution and grader; free text without a subject-literal list is reduced to hash and length (fail closed) instead of refusing to trace; poisoned remote events are quarantined as structure-only rows, never refused inside the cursor transaction; runtime-raindrop holds a one-time additive edit grant on packages/contracts for these fields.
 8. A commit packet that adds a workspace never carries the working-tree package-lock.json: the steward stages the packet, exports the index to a scratch directory, regenerates the lock there with `npm install --package-lock-only --ignore-scripts`, diffs it structurally against HEAD, proves `npm ci --ignore-scripts`, stages the regenerated lock and restores the working-tree lock byte for byte (first used for PKT-8).
 7. Native Agent Teams are unavailable in the Desktop app; the roster runs as named subagents (adapter recorded in OWNERSHIP.md). Lead model is claude-fable-5-1, not the requested claude-opus-5-5; this is reported, not hidden.

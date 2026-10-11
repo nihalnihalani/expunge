@@ -21,6 +21,23 @@ Protocol source: `docs/expunge/ACCEPTANCE.md` "Scientific protocol" and spec sec
 | Model provider and model ID per arm | from `EXPUNGE_MODEL_PROVIDER` / `EXPUNGE_MODEL_ID` | TBD (not frozen until credentials exist) |
 | Sampling parameters | default sampling for the worker; structured output for the improver | TBD |
 
+
+## Provisional commitments (NOT frozen; recorded 2026-10-11 12:15Z real UTC)
+
+Measured by rsi-evolution on the working tree with the C3 packets overlaid (PKT-23 to PKT-25, under verification). Every value is bound to the bytes of `packages/contracts`, which still has uncommitted additive edits from packet C1c, so every hash below will change and must be recomputed by a verifier from the committed tree at freeze time. They are listed so the freeze has a known starting point, not as evidence.
+
+| Artifact | Provisional hash (working tree) |
+|---|---|
+| Fixture generator | cc14f03fc3876653bc5127370ac5dc350a08a1cd105f3c02a4ea986e46e216d0 |
+| Evaluator | a635114926c20c925d7190c0c2421707c91ae54ec4e40e2fe9485b79ac52f213 |
+| Reference solver | c6ab13ff0fd0ada6727704c5239d9093941017b0acf2f247b2a4479b2ba0f49b |
+| Second (indexed) reference solver | f83aa008bcff332d01cae46c2fb755c4d5106de14cba1205abaf6631b16b9725 |
+| Compiler | 5a16cb5067a97c87aa381c754e560472feadb1fe78d497d8d2716597c37b8174 |
+| Vocabulary | eb43509a836eb428991227692bffd612503e678e727bc82cc2378072070946f4 |
+| Split builder | 7eb34124fb5f14fde7036f49a398d4e667b15acee42dacce1444f9339c9172c9 |
+
+No real campaign master seed has been minted; the split commitments in tests come from a test master seed. The gate report format persists `admittedUnder { compilerHash, parentCompilerHash, childCompilerHash }` inside its digest, and admission refuses `compiler_hash_mismatch` and `bundle_compiler_mismatch`, so a compiler change after the freeze is visible rather than silent.
+
 ## Conditions and counts (planned, from ACCEPTANCE.md)
 
 | Item | Value |

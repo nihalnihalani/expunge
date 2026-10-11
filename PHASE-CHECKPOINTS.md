@@ -77,3 +77,18 @@ Append-only. Each entry: UTC time, checkpoint ID (from `.expunge/checkpoints/<ts
 - HEAD proof c45be9b by verifier-2: npm ci 0, typecheck 0, default vitest 537 passed / 0 failed / 254 skipped (recorded in COMMIT-LEDGER HEAD-proof history).
 - verifier-2 added (append-only VERIFICATION.md section; replica set 27218). Wave D and E briefs written (D1, D2, D3, E1, E2, E3).
 - In verification: PKT-14 C1a (observability + observer, 33 files). Queued: PKT-18 DA-6 review. Coming: PKT-15 mongo hardening, PKT-16 domain gateway (DA-5 reading started at the nine-tool export point), PKT-17 operator S2 (54 paths), C1c DA-6 fixes, C2-3 evolution fixes, C3 gate.
+
+## 2026-10-11T12:30Z to 13:35Z
+
+- ba41d7b C1a observability + observer (checkpoint 86e41ce5; lock +132 entries of which 126 third-party via raindrop-ai; audit 7 -> 38 accepted with rationale; verifier measured that OTEL_PROPAGATORS=jaeger switches propagation at this commit, closed by C1c).
+- 7c74461 lead docs (checkpoint 8c9431de; Wave D/E briefs, HEAD-green gate, verifier-2, dependency assessment).
+- 83980b9 evolution C2-3 (checkpoint 80a59605; out-of-sample selection, attributed standing; parity 136/136; tampered-catalog control exit 1).
+- 96f7b89 mongo PKT-15 (checkpoint 5bf111d3; versions enforced, PartialEffect, writeField session, worldKey from stored jobs; export 335/335, whole repo 826/0/72 with replica set; one surviving mutation recorded as a test gap).
+- HEAD proofs: e4f6b51 620/272 skipped; d9b42b2 638/278 skipped; audit 38 at both.
+- Restore drill (verifier-2): 887/887 hashes in a scratch clone; npm ci + typecheck 0 in the restored tree; findings for the restore tool (no briefing copy, LATEST lag).
+- DA-5 on the domain gateway: DG3 workflow graph unenforced at runtime (demonstrated), DG1 over-selection cascade, DG2 content strings as identity; nine must-fix items before PKT-16.
+- In flight: PKT-17 operator S2 (verifier), PKT-21 C1c (verifier-2), PKT-22 DA-5 docs (steward); C1b held; D3 privacy started; C3 and fixtures/grader packets pending; second domain implementer offered.
+
+## Clock erratum (recorded 2026-10-11 12:12Z real UTC)
+
+- Clock erratum: lead-written times labelled UTC between 11:30 and 13:46 in these documents ran about 95 minutes ahead of real UTC (checked against `date -u` at 12:11Z); checkpoint ids and git commit dates carry the true times. Later entries use real UTC.
