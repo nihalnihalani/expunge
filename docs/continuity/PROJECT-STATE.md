@@ -52,6 +52,8 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 13. Bounded overlap (GC-a): calls that overlap within one lease are judged from the same settled position. A node may repeat without a self edge, bounded by visits reserved at begin, toolCalls and the tool's own guards. A call_in_flight serialization was rejected because one abandoned tool would wedge the run.
 14. Evaluation runs never use the setup principal. The grader creates candidate- or parent-pinned cleanup jobs only on campaign worlds; fixture_builder seeds and resets.
 
+15. Runtime attestation (DA-8 D8-2/D8-3, 15:43Z): the worker computes runtimeHash() in-process from its loaded runtime, vendored OpenMuse and contracts bytes and writes it to the job checkpoint at claim. The gate compares that value against the stored campaign freeze. This is accepted as trusted-infrastructure attestation: the worker is a separate identity that no candidate or caller can supply or alter. It is disclosed as a self-measurement of the worker build, not an external measurement such as a TPM or signed image digest. Candidate- and port-supplied attestations are never admitted.
+
 ## Blocked acceptance items (need human input)
 
 - Root `.env` with the principal URIs, provider key(s), CopilotKit Intelligence key and Raindrop keys. Names only in `.env.example`.

@@ -271,6 +271,84 @@ The owner, mongodb-authority, is actively building, so these findings are for th
     - a grant for plan P1 does not authorize P2 (`PolicyDenied`, `gateway:prerequisite_approval_grant`);
     - a revoke after approval gives `AuthorityRevoked` and cancels the job.
 
+## PKT-16 re-read, part 1: GC-1 gateway controls (2026-10-11, about 13:40Z, claude-opus-5-5)
+
+**Pin (sha256, first 8 hex, matched the lead's list).** `src/controls.ts` ff3ec9b8, `src/workflow.ts` 2a4ae9c9, `src/budget.ts` eb2819ac, `test/controls.integration.test.ts` a0b61bf4, `test/controls-helpers.ts` 22335b55. I also read `store.ts` (fenced insert), `context.ts`, `runtime/src/session.ts` (tool wrapper) and the TanStack executor (`tool-calls.js`), all unpinned. I did not run the suite: it resets the database on gateway-controls' own replica set (27418), which is in use. The owner reports 25 passed there; the verifier reproduces.
+
+| Item | Disposition | Basis |
+|---|---|---|
+| DG3 workflow enforced | CLOSED in controls | `admitTransition` from the latest durable workflow row, with visit limits; denied, refused and failed calls do not move the run (controls.ts:134-157,160-180; tests at 45-205). The wiring of the violations into DENY is in gateway.ts, which is re-read in part 2. |
+| DG4 cumulative budgets | CLOSED for tool calls, scanned and changed documents | All three are counted from the job's rows and committed receipts, and survive a takeover (budget.ts:57-152; tests at 238,254,297,462,528). Tokens and cost are the runtime meter's carry through the job checkpoint (runtime-raindrop), outside GC-1. |
+| DG5 lease fencing on `domain_steps` | CLOSED for writes, with residual GC-a | `rt.store = env.store.fenced(jobs.fence)` (context.ts:52). Every insert runs in a transaction with `findOneAndUpdate(liveJobFilter, $inc commitSeq)` (store.ts:134-145, jobs.ts:297-305). Test at 209. |
+| DG6 replay and inputs digest | CLOSED for call rows, with residual GC-b | `inputsDigest` and `logicalKey` are on every call row. A replay with another digest is denied. A committed effect replays for free. An admitted call that never ended resumes under its own number. Tests at 344-415. |
+| A-1 `batches_remaining` | Controls side CLOSED; runtime proof NOT PRESENT | Test 137 walks the real expert bundle through a four-batch plan, with outcomes scripted by the test. Two things are not in GC-1: deriving the outcome from committed batches (gateway.ts `outcomeOf`), and the lead's BLOCKING runtime test, in which each baseline completes a four-batch mixed_eligibility world and a partial_retry world through the real gateway. Both are checked in part 2. |
+| Finished-job test (line 549) | CLOSED for `succeeded`; gap | After completion, writing tools fail with `LostLease` in their own fenced writes, apply on batch 0 returns the saved receipt, and the effect and call counts are unchanged. *Gap:* `jobFinished` also covers `failed` and `cancelled`. There, controls admit with no row, so a remaining uncommitted batch is stopped only by the effect transaction's fence. *NT-F:* cancel mid-plan (batch 0 committed, 2 batches); apply on batch 1 gives `LostLease`, with no effect or receipt row. |
+
+**GC-a (LOW-MEDIUM, LIKELY): the control check is not atomic with its row.**
+- `begin` reads the call count, per-tool count, position, scanned and changed totals outside any transaction, then appends the call row in a separate fenced transaction (controls.ts:96-156). `end` reads `position()` and appends a workflow row computed from it (controls.ts:168-179).
+- The fence serializes lease holders, but not two calls of the same holder.
+- TanStack executes a turn's tool calls one after another (`tool-calls.js:489` loop with `yield*`). However, the runtime's bounded phase can give up on a slow tool while its execution keeps running (`session.ts` `executions` and `abandonedTools`; see the earlier rt-tool-outlives repro). The model then issues the next call while the first is still inside the gateway.
+- Two overlapping `begin`s both see `totalCalls = limit - 1` and both pass. Two overlapping `end`s each write visits computed from the same `before`, so one increment is lost. That is a workflow-visit undercount.
+- *Fix:* do the control reads and the row insert inside the same fenced transaction. The `$inc commitSeq` on the job row already makes concurrent fenced transactions conflict, so the retry re-reads.
+- *NT-a:* hold call A in the tool (slow) past the phase bound, then issue B. Call rows never exceed `limits.toolCalls`, and the final `visits` equals the number of advancing calls.
+
+**GC-b (MEDIUM, DEMONSTRATED static): `retry_count` is not retries.**
+- The disclosed fact is "Retries already spent on the current step" (baselines/primitives.ts:108-111).
+- But it is computed as `priorCalls - 1` (governance/facts.ts:53), with `priorCalls = callsToThisTool`: every call to that tool in the whole job (controls.ts:29,96; gateway.ts:265).
+- Under A-1, a normal four-batch plan presents `retry_count` 0, 1, 2, 3 to the guardrails on batches 0 to 3 with no retry at all. Three ordinary discovery rounds present 2.
+- So a guardrail such as `retry_count >= 2 → deny apply`, of the kind evolution is expected to propose, denies batch 2 of every four-batch plan. The fact misleads both the evolved and the expert surfaces.
+- Related, for part 2: gateway.ts:281 sets the decision identity's `batchOrdinal` to `callsToThisTool - 1`, not to the batch's ordinal.
+- *Fix:* for an effectful call, count the earlier call rows of the same `logicalKey`. For other tools, count calls since the last advancing move out of the current node, or those whose previous outcome was `retryable_error`.
+- *NT-b:* guardrail `retry_count >= 1 → deny` on apply, with a four-batch plan. All four batches are admitted. A `StaleTarget` retry of batch 0 is denied on its second attempt.
+
+**Smaller notes.**
+- A replay with a mismatched digest is denied without writing a row, so it costs no budget. That is harmless, because the model cannot choose `argsDigest`, but the doc comment says every denied call is counted.
+- The `callNumber` in the payload can trail the row `ordinal` after a duplicate-key retry in `appendStep`. `end` uses the ordinal, so this is cosmetic.
+- Lead ruling: an apply on an empty plan returns success with zero effects. The controls are neutral to it (`documentsToChange` 0). Checked in part 2.
+
+## PKT-16 re-read, part 2: gateway, tools, service (2026-10-11, about 14:20Z, claude-opus-5-5)
+
+**Pin.** These matched the packet: `gateway.ts` 30233d67, `store.ts` e8f563ca, `tools/apply-cleanup-batch.ts` 0c741169, `test/baselines-walk.integration.test.ts` 4e24d6ef. The full `src` and `test` list is in `pkt16-p2-pin.txt` in the scratchpad. The controls files are still moving (the overlap flake fix); they are re-read last.
+
+**Checks.** I did not run the live suites. They reset databases on the replica sets the owners and the verifiers are using; the verifiers are running them in parallel. Every disposition below is by reading.
+
+| Item | Disposition | Basis |
+|---|---|---|
+| `batches_remaining` derivation | CLOSED | `batchesRemaining` comes from the stored plan's batches and `committedBatchCount` over committed receipts (apply-cleanup-batch.ts:56-66 and the result). The gateway maps it to the edge outcome (gateway.ts:151-163). The model supplies only an ordinal. |
+| Empty-plan apply | CLOSED | With 0 batches, apply returns `emptyPlan: true` and `appliedEffects: 0` with no effect, receipt or counter write, and refuses a named non-zero batch (apply-cleanup-batch.ts:141-158). Verification then says "not verified". The call row and the decision row are still written, which is correct. |
+| `callNumber` ordinal and decision identity | CLOSED for the gateway | A non-apply decision is identified by (toolId, `callNumber`, `argsDigest`). Apply uses the real batch ordinal (gateway.ts:279-283). The `retry_count` semantics (GC-b) are still open in controls. |
+| `appendStepAfter` fencing (GC-a) | CLOSED in design | The fence write, the control reads and the insert all run in one transaction (store.ts:220-262). Concurrent same-holder calls conflict on the job row's `commitSeq` and retry. Final disposition waits until the controls pass `session` to their reads, or are shown not to need it. |
+| Blocking baseline walk | **Partly CLOSED** | *Closed:* both baselines complete a four-batch mixed_eligibility plan through the real gateway (visits.apply = 4, effects = 4; expert verifies, W0 is denied verify); a replay of ordinal 0 mid-plan writes no workflow row and takes no visit; a skipped ordinal is `BatchOutOfOrder` with no visit; the empty plan. **Not closed:** the `partial_retry` case runs with NO faults (P2-1). |
+| DG1 shared records | **NOT CLOSED** | See P2-2. |
+| DG2 content as identity | CLOSED | Only fields the owner policy marks as identity become identity bindings (fields.ts:14-26, resolve-subject.ts:50-53). |
+| DG7 non-string ids | CLOSED by reading | Typed binding keys (`s:`, `o:`, `l:`, `n:`) and the identity-rule conversions are in values.ts:61-106. Not executed by me. |
+| DG8 silent truncation | CLOSED | A truncated closure is recorded (resolve-subject.ts:70), and completion refuses with `ClosureIncomplete` (complete-cleanup.ts:34). |
+| DG11 authority-loss code | CLOSED | `AuthorityMissing` is in `AUTHORITY_CODES` (gateway.ts:138). |
+| DG12 diagnostic sanitizing | CLOSED | NFKC, case-insensitive, and also covers the e-mail local part (report-diagnostic.ts:28-41). Residual LOW: values under 3 characters, and split or encoded forms, are not covered here. |
+| DG10, DG13, DG16 | Not re-verified this pass | No claim either way. |
+| Principals | CLOSED | `DomainStore` and `createDomainEnv` require `domain_executor` or a gateway principal (store.ts:122, env.ts:59). The edge repository requires executor, fixture_builder or setup. |
+| Service routes | CLOSED, with a note | Constant-time bearer to exactly one principal, the owner id taken from configuration, and a token that never works outside its own route family (auth.ts, handler.ts:106-112). Routes not served answer 501 honestly. *LOW:* configuration does not require the three tokens to be distinct. If the read token equals the approval token, the last match wins (`approval`), so a read-only holder could post decisions once that route is served. Refuse duplicate tokens at load. |
+
+**P2-1 (MEDIUM-HIGH for the experiment, DEMONSTRATED static): the world's fault plan is not realized on the real execution path.**
+- `partial_retry` worlds carry `faults: { partialAcknowledgements: 2, interruptAfterEffects: 2, transientFailures: 1 }` (fixtures recipes.ts:123).
+- Nothing in `packages/domain/src` or the test rig injects them (grep finds no fault code). The only fault injector is the grader's labelled simulator, used by the FAKE gate port.
+- So the blocking walk "completes partial_retry" on a fault-free world, the `retryable_error` edge is never driven at runtime, and in a real campaign `partial_retry` is structurally the same as `direct_nested`.
+- Spec line 289 requires partial-ack, interruption and retry faults, and line 295 requires equal faults per pair.
+- *Related (LIKELY):* `StaleTarget`, `StaleDocumentVersion` and `StaleWorldRevision` are retryable, but no baseline graph has an edge from `apply` back to `discover` or `preview`. A retry of the same stale plan fails again until apply visits run out, so on a genuinely stale target both baselines dead-end. Whether that is intended W0 and expert behaviour is a lead decision; it must at least be disclosed.
+- *Fix:* a labelled fault layer in the domain effect path, driven by the trusted run binding's fault plan for campaign worlds only (never selectable by the model). It covers transient pre-commit errors, interruption after N effects, and lost post-commit acknowledgement reconciled through the saved-receipt path.
+- *Test:* each baseline on a fault-injected `partial_retry` world, through the real gateway. The trace contains a `retryable_error` that the graph admits, and the effects are committed exactly once.
+
+**P2-2 (DG1 still open, HIGH, LIKELY by reading): an outgoing chain reaches a shared parent, and the binding cascade remains.**
+- Discovery now never turns back along an edge (discover-references.ts:29-32), which removes the up-then-down path.
+- But `direction` defaults to both ways (discover-references.ts:90), and the closure walks `direction: 'both'` (closure.ts:59-64). A record that the subject *references* is reached outgoing.
+- *Counterexample:* C1{org_ref: O} and C2{org_ref: O}, with O eligible for delete and the edge `customers.org_ref → orgs._id`.
+  - Outgoing from C1 reaches O, so O is in the closure and the plan.
+  - Preview still adds every target id to the bindings (preview-cleanup.ts:64-68).
+  - So after apply, C2.org_ref is a residual. Redacting it rewrites another subject's record; leaving it fails verification.
+- The `ReferenceDeclaration.owner` field recorded as a PKT-16b decision is absent from contracts (grep finds no `owner?:` in `ReferenceDeclaration`). So nothing tells the walk which direction means ownership.
+- *Fix:* as in DG1. Per-edge ownership (`owner: 'from' | 'to' | 'none'`), set by the owner and the generator; follow owned direction only; a reached record without an ownership path is retained `not_subject_owned` and never becomes a binding.
+- *NT-1b:* the counterexample above. O is not a target, C2 is byte-identical after the job, and verification is `verified: true`.
+
 ## Footer
 
 ```
@@ -281,3 +359,28 @@ FINDINGS: demonstrated=2 likely=10 speculative=6
 BLOCKED: live domain gateway suite not run by reviewer (no test URI; teammates' containers not used because the rig resets the database)
 STATUS: COMPLETE
 ```
+
+## GC-a and GC-b, from the overlap analysis (2026-10-11, about 14:30Z)
+
+- **GC-a: CLOSED as a design, with a disclosed residual.**
+  - The compiler admits one edge per (from, when) (`workflow_duplicate_transition`, harness-compiler/workflow.ts:131-135). From a settled position, therefore, only one non-exempt node is admissible, and an overlap cannot produce a hop the graph does not have.
+  - `begin` and `end` read and append inside one fenced transaction (`appendStepAfter`). `end` recomputes from the latest committed workflow row. A begun call reserves its node's visit.
+  - *Residual:* the same node can repeat without a self edge for that outcome, bounded by `maxVisits` and `toolCalls`. It is not driven through the real runtime phase bound.
+  - I do not recommend refusing `begin` while an unended admitted call exists: an abandoned tool would then block the run.
+- **GC-b: CLOSED by reading.** `retry_count` now counts earlier attempts at the same `logicalKey` for effects, and calls since the last edge-taking move for reads (controls.ts, `attemptsAt` and `callsSinceLastMove`).
+- **Hash caveat.** gateway-controls reported its frozen controls at `controls.ts` 75f3e89b and test 67087b09. At 14:30Z the tree has `controls.ts` bb2740b5 and test 78471637 (`workflow.ts` 2a4ae9c9, `budget.ts` 2b90c4e2 and helpers 89377e82 match). The final disposition binds to the hashes the verifier runs on.
+- **Hash caveat resolved (about 14:35Z).** gateway-controls confirms that `controls.ts` bb2740b5221e and `controls.integration.test.ts` 78471637c1f5 are its current tree: a comment-only change to controls (the DISCLOSED overlap note) and an added overlapping-applies test pair. I re-checked the hashes. I did not diff against 75f3e89b because I hold no copy of those bytes. The GC-a and GC-b dispositions bind to bb2740b5 and 78471637.
+
+## Lead override on PKT-16 (2026-10-11, about 14:50Z)
+
+The lead lands PKT-16 with P2-1 and P2-2 recorded OPEN and freeze-blocking. The conditions are a KNOWN GAP test pinning NT-1b, the partial_retry walk relabelled fault-free, README disclosure, and PKT-16b scheduled first.
+
+**Reviewer: ACCEPTED.** I found no harm path today:
+- Generated worlds have no shared parent by construction (fixtures README, design notes).
+- Grep finds no code outside tests that creates a custom scope registry or world.
+
+**Added condition:** until PKT-16b lands, any path that registers a non-generated scope stays blocked on PKT-16b. That includes demo seeds, customer-shaped worlds, and Hider WorldSpecs if they can express a shared parent.
+- **Hider condition: SATISFIED (about 15:00Z).**
+  - PKT-42 adds `packages/adversary/test/hider.test.ts:258+`: union-find over registered edges for every admitted enumerator world, with a mutated case that fails.
+  - Every generated edge targets `record_id`, which is path `_id` (generator.ts:324,359), so joining on `_id` values covers every edge the generator can emit. The structural guarantee is the WorldSpec grammar, which cannot name another chain's record.
+  - *Notes for PKT-16b:* extend the check if registries ever join on non-`_id` keys. A model-driven Hider needs this check at admission, not only in a test.
