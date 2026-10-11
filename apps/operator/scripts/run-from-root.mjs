@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadEnvFile } from 'node:process';
+import process, { loadEnvFile } from 'node:process';
+import console from 'node:console';
 
 const operator = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const root = resolve(operator, '../..');
@@ -14,6 +15,18 @@ const root = resolve(operator, '../..');
  * telemetry code is not changed; this only sets the flag it already honors.
  */
 export function childEnvironment(env) {
+  const forbidden = Object.keys(env)
+    .filter(
+      (name) =>
+        name.startsWith('MONGODB_') &&
+        typeof env[name] === 'string' &&
+        env[name].trim(),
+    )
+    .sort();
+  if (forbidden.length)
+    throw new Error(
+      `Operator environment contains forbidden database credentials: ${forbidden.join(', ')}. Use the operator role environment.`,
+    );
   const next = { ...env };
   if (next.EXPUNGE_ALLOW_TELEMETRY !== '1') next.DO_NOT_TRACK = '1';
   return next;
@@ -24,12 +37,12 @@ function main() {
   if (!['dev', 'build', 'start', 'typecheck', 'test'].includes(script))
     throw new Error('Choose dev, build, start, typecheck or test.');
   try {
-    loadEnvFile(resolve(root, '.env'));
+    loadEnvFile(resolve(root, '.env.operator'));
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
   }
-  // Existing process environment wins, then root .env. No credential values are
-  // logged or copied. Upstream startup can still load a standalone operator .env.
+  // Existing process environment wins, then the operator's role-scoped file.
+  // Upstream startup also checks its environment after loading its standalone .env.
   const child = spawn('npm', ['run', script, ...process.argv.slice(3)], {
     cwd: operator,
     env: childEnvironment(process.env),

@@ -2,6 +2,7 @@ import type {
   ExpungeReadiness,
   ReadinessCheck,
   ReadinessReason,
+  SourceReadinessView,
 } from '../../shared/expunge.js';
 import { describeExpungeConfig, type ExpungeConfigView } from './config.js';
 import type {
@@ -13,7 +14,10 @@ const PROBE_TIMEOUT_MS = 3000;
 export const EVIDENCE_STALE_MS = 60 * 60 * 1000;
 
 /** Fixed vocabulary. Never echoes an upstream body, URL or credential. */
-const DETAIL: Record<ReadinessReason, string> = {
+/** Allowed difference between the backend's clock and this one before a future proof time is rejected. */
+export const EVIDENCE_CLOCK_SKEW_MS = 5_000;
+
+const DETAIL: Record<ReadinessReason | 'evidence_clock_skew', string> = {
   env_missing:
     'Server configuration is missing. Set the named variables in the server environment and restart the operator.',
   env_malformed:
@@ -32,10 +36,28 @@ const DETAIL: Record<ReadinessReason, string> = {
     'The domain service refused this operator credential for the projection (HTTP 403).',
   scope_unbound:
     'The domain service accepted the credential but has not bound this owner to a scope.',
+  source_registration_unreported:
+    'The domain service has not reported a registered real source. Cleanup is blocked until the actual source registry is connected.',
+  source_missing:
+    'No owner-approved real source is registered for this scope. Register the source and its exact cleanup policy with the domain service.',
+  source_revoked:
+    'The source registration has been revoked. Cleanup remains blocked until the owner reviews and authorizes a current registration.',
+  source_unsupported:
+    'The domain service cannot support the registered source within the declared scope. Review the source adapter and measured limitations.',
+  legacy_backend:
+    'This is a legacy fixture backend. It cannot authorize real-source cleanup or establish production readiness.',
+  cleanup_permission_not_checked:
+    'The domain service has not checked cleanup permission for the current source registration. Cleanup is blocked.',
+  cleanup_permission_denied:
+    'The domain service denied cleanup permission for this source. Ask the source owner to review the intended write scope.',
+  cleanup_permission_revoked:
+    'Cleanup permission for this source has been revoked. A new owner authorization is required before any cleanup.',
   evidence_unconfigured:
     'The backend reports that the observability path (Raindrop) is not configured.',
   evidence_never_proven:
-    'The backend has not yet proven that observability events can be written and read back. Cleanup can run; improvement proposals will wait for evidence.',
+    'The backend has not yet proven that observability events can be written and read back. Improvement proposals will wait for evidence.',
+  evidence_clock_skew:
+    "The backend's evidence proof is dated in the future, so the clocks disagree and the proof is not trusted. Treated as stale.",
   evidence_stale:
     'The last proof that observability events can be read back is more than an hour old.',
   evidence_dead_letter:
@@ -52,6 +74,76 @@ const check = (
 
 const unknown = (why: string): ReadinessCheck =>
   check('unknown', null, `Not evaluated: ${why}`, null);
+
+/** Pure mapping of the domain's validated registry/permission DTO; never probes or infers a grant. */
+export function describeSourceReadiness(
+  source: SourceReadinessView | null | undefined,
+  observedAt: string,
+  backendKind: 'live' | 'fixture' = 'live',
+): { sourceRegistered: ReadinessCheck; cleanupAuthorized: ReadinessCheck } {
+  const fail = (reason: ReadinessReason) =>
+    check('fail', reason, DETAIL[reason], observedAt);
+  if (backendKind !== 'live')
+    return {
+      sourceRegistered: fail('legacy_backend'),
+      cleanupAuthorized: fail('legacy_backend'),
+    };
+  if (!source)
+    return {
+      sourceRegistered: fail('source_registration_unreported'),
+      cleanupAuthorized: check(
+        'unknown',
+        'cleanup_permission_not_checked',
+        DETAIL.cleanup_permission_not_checked,
+        null,
+      ),
+    };
+  const completeBinding =
+    source.sourceId !== null &&
+    source.sourceKind !== null &&
+    source.sourceRegistrationHash !== null &&
+    source.registrationRevision !== null &&
+    source.policyRevision !== null &&
+    source.authorizationRevision !== null;
+  const sourceRegistered =
+    source.registration === 'active' && completeBinding
+      ? check(
+          'pass',
+          null,
+          'The backend reports an active owner-approved real-source registration with its current identity, policy and authorization revisions.',
+          observedAt,
+        )
+      : fail(
+          source.registration === 'missing'
+            ? 'source_missing'
+            : source.registration === 'revoked'
+              ? 'source_revoked'
+              : 'source_unsupported',
+        );
+  const cleanupAuthorized =
+    sourceRegistered.status !== 'pass'
+      ? check(
+          'unknown',
+          'cleanup_permission_not_checked',
+          DETAIL.cleanup_permission_not_checked,
+          null,
+        )
+      : source.permission === 'authorized'
+        ? check(
+            'pass',
+            null,
+            'The backend reports owner-authorized cleanup permission for this source registration. Each effect still rechecks current authority.',
+            observedAt,
+          )
+        : fail(
+            source.permission === 'denied'
+              ? 'cleanup_permission_denied'
+              : source.permission === 'revoked'
+                ? 'cleanup_permission_revoked'
+                : 'cleanup_permission_not_checked',
+          );
+  return { sourceRegistered, cleanupAuthorized };
+}
 
 function reachFailure(code: DomainErrorCode): ReadinessReason {
   if (code === 'unreachable') return 'connect_refused';
@@ -72,6 +164,13 @@ export async function computeReadiness(
     checkedAt,
     writes: config.writes,
     telemetry: config.telemetry,
+    source: null,
+    sourceRegistered: unknown(
+      'the domain service has not reported source registration.',
+    ),
+    cleanupAuthorized: unknown(
+      'the domain service has not reported cleanup permission.',
+    ),
   };
   if (config.configured.status !== 'pass' || !domain)
     return {
@@ -130,6 +229,13 @@ export async function computeReadiness(
         checkedAt,
       )
     : check('fail', 'scope_unbound', DETAIL.scope_unbound, checkedAt);
+  const sourceChecks =
+    authorized.status === 'pass'
+      ? describeSourceReadiness(body.source, checkedAt, body.backend.kind)
+      : {
+          sourceRegistered: unknown('this owner is not bound to a scope.'),
+          cleanupAuthorized: unknown('this owner is not bound to a scope.'),
+        };
   let evidenceReady: ReadinessCheck;
   if (authorized.status !== 'pass')
     evidenceReady = unknown('this owner is not bound to a scope.');
@@ -155,6 +261,18 @@ export async function computeReadiness(
       null,
     );
   else if (
+    Date.parse(body.evidence.readBackProvenAt) - now().getTime() >
+    EVIDENCE_CLOCK_SKEW_MS
+  )
+    // A proof dated in the future cannot be fresh: the clocks disagree, so it is not trusted (DA-7 RD4).
+    // The readiness vocabulary has no clock reason, so it is reported as stale with its own sentence.
+    evidenceReady = check(
+      'fail',
+      'evidence_stale',
+      DETAIL.evidence_clock_skew,
+      body.evidence.readBackProvenAt,
+    );
+  else if (
     now().getTime() - Date.parse(body.evidence.readBackProvenAt) >
     EVIDENCE_STALE_MS
   )
@@ -177,10 +295,17 @@ export async function computeReadiness(
     configured: config.configured,
     reachable,
     authorized,
+    ...sourceChecks,
+    source: body.source ?? null,
     evidenceReady,
-    ready: [config.configured, reachable, authorized, evidenceReady].every(
-      (item) => item.status === 'pass',
-    ),
+    ready: [
+      config.configured,
+      reachable,
+      authorized,
+      sourceChecks.sourceRegistered,
+      sourceChecks.cleanupAuthorized,
+      evidenceReady,
+    ].every((item) => item.status === 'pass'),
   };
 }
 

@@ -1,6 +1,7 @@
 /* eslint-disable no-undef -- Node script driving a browser; not part of the vitest run. */
 /**
- * Browser verification runner for the Expunge workflow (DA-7 E1).
+ * Legacy fixture browser runner for the former synthetic-data workflow (DA-7 E1).
+ * It is retained for historical source attribution only and cannot establish production acceptance.
  *
  *   EXPUNGE_E2E_OUT=<dir> node --import tsx tests/expunge-browser.e2e.mjs s1 [s2 s3 ...]
  *
@@ -23,14 +24,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sourceBuildId } from '../scripts/build-id.mjs';
 
+if (process.argv[2] !== '--legacy-fixture-inspection')
+  throw new Error(
+    'Legacy fixture runner is disabled. Real-source browser acceptance requires actual authorized services and source inputs. Historical fixture inspection requires --legacy-fixture-inspection and is not production evidence.',
+  );
+
 const operator = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
 );
-const slices = process.argv.slice(2);
+const slices = process.argv.slice(3);
 if (slices.length === 0)
   throw new Error(
-    'Usage: node --import tsx tests/expunge-browser.e2e.mjs <slice> [<slice> ...]',
+    'Legacy-only usage: node --import tsx tests/expunge-browser.e2e.mjs --legacy-fixture-inspection <slice> [<slice> ...]',
   );
 for (const slice of slices)
   if (!/^s\d+$/.test(slice)) throw new Error(`Unknown slice: ${slice}`);

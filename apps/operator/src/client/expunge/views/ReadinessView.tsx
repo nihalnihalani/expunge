@@ -14,6 +14,7 @@ import { useAnnounce } from '../components/LiveRegion';
 import { PageHeading } from '../components/PageHeading';
 import { TableWrap } from '../components/TableWrap';
 import { StatusChip, type ChipState } from '../components/StatusChip';
+import { SourceScopeNotice } from '../components/SourceScopeNotice';
 import {
   EmptyState,
   ErrorState,
@@ -57,6 +58,18 @@ const CHECKS = [
       'Does it accept this operator credential and bind the owner to a scope?',
   },
   {
+    key: 'sourceRegistered',
+    name: 'Source registered',
+    question:
+      'Does the backend report an active owner-approved real source and its current registration?',
+  },
+  {
+    key: 'cleanupAuthorized',
+    name: 'Cleanup permitted',
+    question:
+      'Has the backend authorized cleanup against that source under the current policy?',
+  },
+  {
     key: 'evidenceReady',
     name: 'Evidence-ready',
     question:
@@ -72,6 +85,9 @@ export function chipFor(check: ReadinessCheck): ChipState {
     case 'unauthorized':
     case 'forbidden':
     case 'scope_unbound':
+    case 'cleanup_permission_denied':
+    case 'cleanup_permission_revoked':
+    case 'source_revoked':
       return 'rejected';
     case 'evidence_never_proven':
       return 'waiting_evidence';
@@ -104,7 +120,7 @@ export function ReadinessRows({
     <TableWrap label="Readiness checks">
       <table className="ex-table">
         <caption>
-          Four separate checks. A configured address is never a connection test.
+          Six separate checks. Credentials alone never authorize source cleanup.
         </caption>
         <thead>
           <tr>
@@ -206,13 +222,14 @@ function Worlds({ authorized }: { authorized: boolean }) {
     <TableWrap label="Authorized worlds">
       <table className="ex-table">
         <caption>
-          Controlled worlds this owner may clean up. Coverage is what the scope
-          registry declares, not a guarantee that every copy of a subject is
-          registered.
+          Scope metadata reported by the backend. Cleanup requires a current
+          real-source binding and permission. Coverage is limited to the
+          registered scope.
         </caption>
         <thead>
           <tr>
-            <th scope="col">World</th>
+            <th scope="col">Source scope</th>
+            <th scope="col">Target</th>
             <th scope="col">Scope and revisions</th>
             <th scope="col">Registry</th>
             <th scope="col">Allowed effects</th>
@@ -233,6 +250,18 @@ function Worlds({ authorized }: { authorized: boolean }) {
                   <StatusChip state="unavailable" label="Maintenance mode" />
                 )}
               </th>
+              <td>
+                <StatusChip
+                  state={world.source ? 'unknown' : 'unavailable'}
+                  label={
+                    world.source?.sourceKind === 'original'
+                      ? 'Original source'
+                      : world.source?.sourceKind === 'isolated_replay'
+                        ? 'Isolated snapshot / replay'
+                        : 'Source unreported'
+                  }
+                />
+              </td>
               <td className="ex-num">
                 {world.scopeId}
                 <div className="ex-note">
@@ -294,30 +323,36 @@ export default function ReadinessView(_props: ViewProps) {
   const data = resource.data;
   const ageMs = resource.updatedAt === null ? null : now - resource.updatedAt;
   const stale = ageMs !== null && ageMs > STALE_AFTER_MS;
-  const ready = data?.ready && !stale;
   const failing = data
-    ? CHECKS.filter((item) => data[item.key].status !== 'pass').length
+    ? CHECKS.filter((item) => data[item.key]?.status !== 'pass').length
     : 0;
+  const ready = data?.ready && !stale && failing === 0;
   const lastAnnounced = useRef<string>('');
   useEffect(() => {
     if (!data || stale) return;
-    const text = data.ready
-      ? 'All four readiness checks pass.'
-      : `Not ready. ${failing} of 4 readiness checks do not pass.`;
+    const text = ready
+      ? 'All six readiness checks pass.'
+      : `Not ready. ${failing} of 6 readiness checks do not pass.`;
     if (lastAnnounced.current !== text) {
       lastAnnounced.current = text;
       announce(text);
     }
-  }, [data, stale, failing, announce]);
+  }, [data, stale, ready, failing, announce]);
   const setupOnly =
     data?.configured.status === 'fail' && data.backend.kind === 'none';
   return (
     <div className="ex-page">
       <PageHeading eyebrow="Expunge" title="Setup and readiness">
-        Cleanup runs only against a trusted domain service. These four checks
-        are separate on purpose: a configured address says nothing about whether
-        the service answers, accepts this operator, or can show evidence.
+        Cleanup runs only against a trusted domain service. These six checks are
+        separate on purpose: a configured address says nothing about whether the
+        service answers, registers this source, permits cleanup, or can show
+        evidence.
       </PageHeading>
+      <p className="ex-note">
+        A registered original source and an isolated snapshot or replay have
+        different targets. Cleanup of a copied dataset does not establish
+        original-source erasure.
+      </p>
       <ConnectionBanner
         connection={
           stale && resource.status === 'ok'
@@ -366,7 +401,7 @@ export default function ReadinessView(_props: ViewProps) {
                       ? 'Result out of date'
                       : ready
                         ? 'Ready'
-                        : `Not ready: ${failing} of 4 checks do not pass`
+                        : `Not ready: ${failing} of 6 checks do not pass`
                   }
                 />
               )}
@@ -383,6 +418,9 @@ export default function ReadinessView(_props: ViewProps) {
           </>
         )}
       </section>
+      {data?.source && (
+        <SourceScopeNotice sourceKind={data.source.sourceKind} />
+      )}
       {data && (
         <section className="ex-section" aria-labelledby="ex-writes-h">
           <h2 className="ex-h2" id="ex-writes-h">
@@ -443,7 +481,7 @@ export default function ReadinessView(_props: ViewProps) {
       )}
       <section className="ex-section" aria-labelledby="ex-worlds-h">
         <h2 className="ex-h2" id="ex-worlds-h">
-          Authorized worlds
+          Source scopes
         </h2>
         <Worlds authorized={data?.authorized.status === 'pass' && !stale} />
       </section>
