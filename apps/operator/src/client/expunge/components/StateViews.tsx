@@ -42,6 +42,15 @@ export function ErrorState({
   stale?: boolean;
   onRetry?: () => void;
 }) {
+  if (error?.code === 'owner_auth_required')
+    return (
+      <UnavailableState
+        what={what[0].toUpperCase() + what.slice(1)}
+        reason="The operator requires its owner access token for every Expunge read and write. Unlock the workspace with the token."
+        missing={error.missing}
+        onRecheck={onRetry}
+      />
+    );
   return (
     <div className="ex-state" role="alert">
       <p className="ex-state-title">

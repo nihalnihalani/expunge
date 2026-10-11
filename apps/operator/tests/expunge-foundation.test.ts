@@ -55,10 +55,13 @@ it('inherits owner/origin protection and does not turn an absent backend into fa
   expect(
     await (await app.request('/api/expunge/status', { headers })).json(),
   ).toEqual({
-    operator: 'ready',
+    // DA-7 RD3: derived from the actual configuration, not asserted.
+    operator: 'setup_only',
     domain: 'unconfigured',
-    authority: 'mongodb',
-    telemetry: 'enabled',
+    authority: 'unconfigured',
+    telemetry: 'disabled',
+    ownerAuth: 'configured',
+    build: null,
   });
   const missing = await app.request('/api/expunge/jobs/job-1', { headers });
   expect(missing.status).toBe(503);

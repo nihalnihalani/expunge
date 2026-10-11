@@ -35,6 +35,10 @@ export interface JobProjectionState {
   dropped: number;
   /** Highest applied event sequence. */
   lastSequence: number;
+  /** Stream epoch the window belongs to; null until the backend names one. */
+  epoch: string | null;
+  /** Consecutive snapshots ignored because they were older than the one shown. */
+  staleStreak: number;
   /** Local time of the last successful read. */
   updatedAt: number | null;
   attempt: number;
@@ -46,6 +50,9 @@ export interface JobProjectionState {
   version: number;
 }
 
+/** After this many consecutive older snapshots with no epoch, the backend is treated as restored. */
+export const MAX_STALE_SNAPSHOTS = 3;
+
 export function initialState(jobId: string): JobProjectionState {
   return {
     jobId,
@@ -54,6 +61,8 @@ export function initialState(jobId: string): JobProjectionState {
     events: [],
     dropped: 0,
     lastSequence: 0,
+    epoch: null,
+    staleStreak: 0,
     updatedAt: null,
     attempt: 0,
     nextRetryMs: null,
@@ -69,6 +78,8 @@ export type ProjectionAction =
       type: 'events';
       events: ForwardedProjectionEvent[];
       nextSequence: number;
+      /** Stream epoch of the page, when the backend names one. */
+      epoch?: string | null;
       now: number;
     }
   | {
@@ -109,14 +120,33 @@ function trim(events: ForwardedProjectionEvent[], dropped: number) {
     : { events: events.slice(start), dropped: dropped + start };
 }
 
+/** Index of the retained event with this sequence, or -1 (the window is sorted by sequence). */
+function indexOfSequence(events: ForwardedProjectionEvent[], sequence: number) {
+  let low = 0;
+  let high = events.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const found = events[mid].sequence;
+    if (found === sequence) return mid;
+    if (found < sequence) low = mid + 1;
+    else high = mid - 1;
+  }
+  return -1;
+}
+
 /**
  * Applies one action. Rules:
- * - A snapshot whose sequence is lower than the last applied event sequence means the backend
- *   was restored or restarted: drop the window and show a reset notice. Aggregate state is
- *   always the snapshot's.
- * - Events are applied in order and deduplicated by sequence. The first new event must be
- *   lastSequence + 1; otherwise the page is ignored and a re-bootstrap is requested, so a gap
- *   can never be silently skipped.
+ * - Snapshot order is judged against the snapshot already shown, never against the event cursor
+ *   (a snapshot read can lag an events read in the same poll). An older snapshot in the same
+ *   stream epoch is ignored and the newer one stays; it is not a reset.
+ * - A different stream epoch (snapshot or events page) means the backend history was replaced,
+ *   including a restore that has since moved past the old cursor: drop the window, label it a
+ *   reset, adopt the new snapshot and re-page from 0. Where the backend names no epoch,
+ *   MAX_STALE_SNAPSHOTS consecutive older snapshots are treated the same way.
+ * - Events are applied in order and deduplicated by sequence (also within one page and against
+ *   the retained window). A known sequence that arrives with a different eventId is a conflict.
+ *   The first new event must be lastSequence + 1 and the rest consecutive; otherwise the page is
+ *   ignored and a re-bootstrap is requested, so a gap can never be silently skipped.
  */
 export function reduce(
   state: JobProjectionState,
@@ -127,61 +157,108 @@ export function reduce(
     ...patch,
     version: state.version + 1,
   });
+  const clearWindow = {
+    events: [] as ForwardedProjectionEvent[],
+    dropped: 0,
+    lastSequence: 0,
+  };
   switch (action.type) {
     case 'snapshot': {
-      const regress = action.snapshot.sequence < state.lastSequence;
+      const incoming = action.snapshot;
+      const epoch = incoming.streamEpoch ?? null;
+      const shown = state.snapshot;
+      const epochChanged =
+        epoch !== null && state.epoch !== null && epoch !== state.epoch;
+      const older = shown !== null && incoming.sequence < shown.sequence;
+      if (older && !epochChanged) {
+        const streak = state.staleStreak + 1;
+        if (epoch === null && streak >= MAX_STALE_SNAPSHOTS)
+          return {
+            state: bump({
+              snapshot: incoming,
+              ...clearWindow,
+              notice: 'reset',
+              staleStreak: 0,
+              connection: 'live',
+              updatedAt: action.now,
+              attempt: 0,
+              nextRetryMs: null,
+              failure: null,
+            }),
+            needsRebootstrap: true,
+          };
+        return {
+          state: bump({
+            staleStreak: streak,
+            connection: 'live',
+            updatedAt: action.now,
+            attempt: 0,
+            nextRetryMs: null,
+            failure: null,
+          }),
+          needsRebootstrap: false,
+        };
+      }
       return {
         state: bump({
-          snapshot: action.snapshot,
-          ...(regress
-            ? {
-                events: [],
-                dropped: 0,
-                lastSequence: 0,
-                notice: 'reset' as const,
-              }
-            : {}),
+          snapshot: incoming,
+          ...(epochChanged ? { ...clearWindow, notice: 'reset' as const } : {}),
+          epoch: epoch ?? state.epoch,
+          staleStreak: 0,
           connection: 'live',
           updatedAt: action.now,
           attempt: 0,
           nextRetryMs: null,
           failure: null,
         }),
-        needsRebootstrap: regress,
+        needsRebootstrap: epochChanged,
       };
     }
     case 'events': {
-      const fresh = action.events.filter(
-        (event) => event.sequence > state.lastSequence,
-      );
-      if (fresh.length === 0) return { state, needsRebootstrap: false };
-      if (fresh[0].sequence !== state.lastSequence + 1)
+      const epoch = action.epoch ?? null;
+      if (epoch !== null && state.epoch !== null && epoch !== state.epoch)
         return {
-          state: bump({
-            events: [],
-            dropped: 0,
-            lastSequence: 0,
-            notice: 'gap',
-          }),
+          state: bump({ ...clearWindow, epoch: null, notice: 'reset' }),
           needsRebootstrap: true,
         };
+      // Deduplicate by sequence, inside the page as well as against what is retained. The same
+      // event repeated is harmless; a different event claiming the same sequence is a conflict.
+      const seen = new Map<number, string>();
+      const fresh: ForwardedProjectionEvent[] = [];
+      let conflict = false;
+      for (const event of action.events) {
+        if (event.sequence <= state.lastSequence) {
+          const at = indexOfSequence(state.events, event.sequence);
+          if (at >= 0 && state.events[at].eventId !== event.eventId)
+            conflict = true;
+          continue;
+        }
+        const prior = seen.get(event.sequence);
+        if (prior !== undefined) {
+          if (prior !== event.eventId) conflict = true;
+          continue;
+        }
+        seen.set(event.sequence, event.eventId);
+        fresh.push(event);
+      }
+      if (fresh.length === 0 && !conflict)
+        return { state, needsRebootstrap: false };
+      const gap = () => ({
+        state: bump({ ...clearWindow, notice: 'gap' as const }),
+        needsRebootstrap: true,
+      });
+      if (conflict || fresh[0].sequence !== state.lastSequence + 1)
+        return gap();
       for (let index = 1; index < fresh.length; index++)
         if (fresh[index].sequence !== fresh[index - 1].sequence + 1)
-          return {
-            state: bump({
-              events: [],
-              dropped: 0,
-              lastSequence: 0,
-              notice: 'gap',
-            }),
-            needsRebootstrap: true,
-          };
+          return gap();
       const merged = trim([...state.events, ...fresh], state.dropped);
       return {
         state: bump({
           events: merged.events,
           dropped: merged.dropped,
           lastSequence: fresh[fresh.length - 1].sequence,
+          epoch: epoch ?? state.epoch,
           updatedAt: action.now,
         }),
         needsRebootstrap: false,

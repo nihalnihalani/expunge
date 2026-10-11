@@ -297,6 +297,7 @@ export default function register(state: FixtureState) {
     (job.snapshot as { receiptVerdict?: string }).receiptVerdict = complete
       ? 'complete'
       : 'incomplete';
+    job.snapshot.receipt = { receiptId: `rcpt-${jobId}`, sequence: 6 };
   };
   done('job-complete', true);
   done('job-incomplete', false);

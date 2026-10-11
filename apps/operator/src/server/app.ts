@@ -23,6 +23,8 @@ export interface AppOptions {
   platform?: Platform;
   expungeDomain?: ExpungeDomainService;
   expungeConfig?: ExpungeConfigView;
+  /** Build identity for /api/expunge/status; null when running unbuilt. */
+  expungeBuild?: string | null;
 }
 export function createApp({
   store,
@@ -33,6 +35,7 @@ export function createApp({
   platform,
   expungeDomain,
   expungeConfig,
+  expungeBuild,
 }: AppOptions) {
   const app = new Hono();
   app.use(
@@ -105,7 +108,13 @@ export function createApp({
     );
   const voice = platform ? new VoiceService(platform) : undefined;
   if (platform && voice) app.route('/api', workspaceRoutes(platform, voice));
-  app.route('/api', expungeRoutes(expungeDomain, expungeConfig));
+  app.route(
+    '/api',
+    expungeRoutes(expungeDomain, expungeConfig, {
+      ownerAuthenticated: Boolean(ownerToken),
+      build: expungeBuild ?? null,
+    }),
+  );
   app.get('/api/state', (c) =>
     c.json({
       settings: store.settings(),

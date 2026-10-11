@@ -254,15 +254,17 @@ export interface Counter {
   used: number;
   cap: number;
 }
-export type GraphNodeState =
-  | 'discovered'
-  | 'inspected'
-  | 'previewed'
-  | 'applied'
-  | 'retained'
-  | 'excluded'
-  | 'residual'
-  | 'not_inspected';
+export const GRAPH_NODE_STATES = [
+  'residual',
+  'applied',
+  'previewed',
+  'inspected',
+  'discovered',
+  'retained',
+  'excluded',
+  'not_inspected',
+] as const;
+export type GraphNodeState = (typeof GRAPH_NODE_STATES)[number];
 
 export interface ExpungeJobSnapshotV2 {
   schemaVersion: 2;
@@ -271,6 +273,8 @@ export interface ExpungeJobSnapshotV2 {
   status: JobStatus;
   /** Highest committed event sequence reflected in this snapshot (contiguous per job stream). */
   sequence: number;
+  /** Identifies one backend history of this job's stream; a change means restore or replacement. */
+  streamEpoch?: string;
   runId?: string;
   harness?: { hash: string; parentHash: string | null; activeRevision: number };
   scope: {
@@ -358,6 +362,10 @@ export interface ExpungeJobListItem {
   worldId?: string;
   harnessHash?: string;
   receiptDomainStatus?: 'complete_in_registered_scope' | 'incomplete';
+  /** Present with receiptDomainStatus: the committed receipt that carries the verdict. */
+  receiptId?: string;
+  receiptSequence?: number;
+  verifiedWorldRevision?: number;
   updatedAt: string;
 }
 export interface ExpungeJobList {
@@ -942,12 +950,19 @@ export interface ExpungeProjectionEvent {
 export interface ExpungeCommittedEvents {
   events: ExpungeProjectionEvent[];
   nextSequence: number;
+  streamEpoch?: string;
 }
 export interface ExpungeFoundationStatus {
-  operator: 'ready';
+  /** `ready` only when the domain service address and read credential are present and well formed. */
+  operator: 'ready' | 'setup_only';
   domain: 'configured' | 'unconfigured';
-  authority: 'mongodb';
+  /** `mongodb` only when a domain service is configured; otherwise there is no authority to name. */
+  authority: 'mongodb' | 'unconfigured';
   telemetry: 'disabled' | 'enabled';
+  /** Whether writes and reads of job data are possible: needs OWNER_TOKEN on the operator. */
+  ownerAuth: 'configured' | 'missing';
+  /** Build identity from dist/build-id.json (a hash of the source the build was made from), or null if unbuilt. */
+  build: string | null;
 }
 
 // ---- Review tool: registered through the client hook and the projection agent allowlist ----

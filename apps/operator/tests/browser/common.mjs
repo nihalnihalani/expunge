@@ -17,10 +17,16 @@ export const VIEWPORTS = [
 export const THEMES = ['light', 'dark'];
 
 export function config() {
-  const base = process.env.EXPUNGE_E2E_BASE ?? 'http://127.0.0.1:4393';
+  // No default ports: another agent's listener on a shared port could answer for a different
+  // build (DA-7 E1). tests/expunge-browser.e2e.mjs starts isolated listeners and sets these.
+  const base = process.env.EXPUNGE_E2E_BASE;
   const tokenFile = process.env.EXPUNGE_E2E_TOKEN_FILE;
   const out = process.env.EXPUNGE_E2E_OUT;
-  const fixture = process.env.EXPUNGE_E2E_FIXTURE ?? 'http://127.0.0.1:4320';
+  const fixture = process.env.EXPUNGE_E2E_FIXTURE;
+  if (!base || !fixture)
+    throw new Error(
+      'EXPUNGE_E2E_BASE and EXPUNGE_E2E_FIXTURE are required; run tests/expunge-browser.e2e.mjs.',
+    );
   if (!out) throw new Error('Set EXPUNGE_E2E_OUT to the screenshot directory.');
   fs.mkdirSync(out, { recursive: true });
   const token = tokenFile ? fs.readFileSync(tokenFile, 'utf8').trim() : '';
@@ -177,7 +183,8 @@ export function scanFn() {
         continue;
       textNodes++;
       const cs = getComputedStyle(el);
-      const fg0 = parse(cs.color);
+      // SVG text is painted with fill, not color.
+      const fg0 = parse(el instanceof SVGElement ? cs.fill : cs.color);
       if (!fg0) continue;
       const bg = bgOf(el);
       const fg = over(fg0, bg);
@@ -253,8 +260,14 @@ export function scanFn() {
   };
 }
 
-export function finish(name, results) {
-  const summary = { slice: name, failures, okCount: notes.length, results };
+export function finish(name, results, meta = {}) {
+  const summary = {
+    slice: name,
+    ...meta,
+    failures,
+    okCount: notes.length,
+    results,
+  };
   console.log(
     `\n${name}: ${notes.length} checks passed, ${failures.length} failed`,
   );

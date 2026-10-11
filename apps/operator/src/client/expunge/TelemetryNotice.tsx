@@ -13,7 +13,7 @@ export function telemetrySentence(state: TelemetryState) {
 }
 
 let cached: Promise<TelemetryState> | undefined;
-function readTelemetry(): Promise<TelemetryState> {
+export function readTelemetry(): Promise<TelemetryState> {
   cached ??= fetch('/api/expunge/status', { headers: authHeaders() })
     .then((response) => (response.ok ? response.json() : null))
     .then((body: { telemetry?: string } | null) =>
@@ -21,7 +21,13 @@ function readTelemetry(): Promise<TelemetryState> {
         ? body.telemetry
         : 'unknown',
     )
-    .catch(() => 'unknown' as const);
+    .catch(() => 'unknown' as const)
+    .then((state) => {
+      // An unreadable answer (401 before the owner token is set, a network error) is not cached,
+      // so the next notice that mounts asks the server again (DA-7 TN1).
+      if (state === 'unknown') cached = undefined;
+      return state;
+    });
   return cached;
 }
 /** Test hook. */

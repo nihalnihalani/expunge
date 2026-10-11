@@ -390,7 +390,7 @@ it('logs a rejection once, without values, and a throwing logger cannot change t
     transport,
   );
   const { expungeRoutes } = await import('../src/server/expunge/routes.js');
-  const app = expungeRoutes(service);
+  const app = expungeRoutes(service, undefined, { ownerAuthenticated: true });
   const response = await app.request(
     '/expunge/jobs/job-1/events?afterSequence=0',
   );
@@ -426,9 +426,9 @@ it('forwards the schema output, not the raw upstream body', async () => {
     transport,
   );
   const { expungeRoutes } = await import('../src/server/expunge/routes.js');
-  const response = await expungeRoutes(service).request(
-    '/expunge/jobs/job-1/events?afterSequence=0',
-  );
+  const response = await expungeRoutes(service, undefined, {
+    ownerAuthenticated: true,
+  }).request('/expunge/jobs/job-1/events?afterSequence=0');
   const text = await response.text();
   for (const key of Object.keys(CANARIES))
     expect(text).not.toContain(`"${key}"`);

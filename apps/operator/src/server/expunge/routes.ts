@@ -26,16 +26,28 @@ const looseId = /^[A-Za-z0-9_.:-]{1,128}$/;
 const cursor = /^[A-Za-z0-9_=.:-]{1,256}$/;
 const param = (c: Context, name: string) => c.req.param(name) ?? '';
 
+export interface ExpungeAccess {
+  /**
+   * The operator has an owner access token configured, and the boundary in app.ts has already
+   * verified it on this request. Without one, nothing but readiness and status is served: a
+   * local process that sends no Origin must not be able to read jobs, submit, cancel or approve.
+   */
+  ownerAuthenticated: boolean;
+  /** Build identity written at build time (dist/build-id.json), or null when running unbuilt. */
+  build?: string | null;
+}
+
 /** Mount after OpenDots' owner/origin/content-type boundary under /api. */
 export function expungeRoutes(
   domain?: ExpungeDomainService,
   config: ExpungeConfigView = describeExpungeConfig({}),
+  access: ExpungeAccess = { ownerAuthenticated: false },
 ) {
   const routes = new Hono();
   const readiness = new ReadinessCache(config, domain);
   const problem = (
     c: Context,
-    status: 400 | 404 | 409 | 501 | 502 | 503,
+    status: 400 | 401 | 404 | 409 | 501 | 502 | 503,
     code: string,
     error: string,
     missing?: string[],
@@ -152,12 +164,33 @@ export function expungeRoutes(
       ? undefined
       : problem(c, 400, 'invalid_request', `Invalid ${what}.`);
 
+  // Every route except readiness and status needs an owner token on the operator, reads included.
+  routes.use('/expunge/*', async (c, next) => {
+    const open =
+      c.req.method === 'GET' &&
+      /\/expunge\/(readiness|status)$/.test(c.req.path);
+    if (!open && !access.ownerAuthenticated)
+      return problem(
+        c,
+        401,
+        'owner_auth_required',
+        'Expunge needs the owner access token. Set OWNER_TOKEN on the operator, restart, and unlock with it.',
+        ['OWNER_TOKEN'],
+      );
+    await next();
+  });
   routes.get('/expunge/status', (c) =>
     c.json({
-      operator: 'ready',
+      // Derived from the actual configuration, not asserted: setup-only until the domain is configured.
+      operator: config.configured.status === 'pass' ? 'ready' : 'setup_only',
       domain: domain ? 'configured' : 'unconfigured',
-      authority: 'mongodb',
+      authority:
+        domain && config.configured.status === 'pass'
+          ? 'mongodb'
+          : 'unconfigured',
       telemetry: config.telemetry,
+      ownerAuth: access.ownerAuthenticated ? 'configured' : 'missing',
+      build: access.build ?? null,
     }),
   );
   routes.get('/expunge/readiness', async (c) => {
