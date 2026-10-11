@@ -19,6 +19,7 @@ From the 2026-10-11 13:01Z takeover the build runs in the Claude Code CLI (2.1.2
 | devils-advocate | Opus 5.5 | `docs/review/` (findings only; never product code) |
 | verifier-2 | Sonnet 5.5 (added 2026-10-11 11:45 UTC when packet checks queued behind one verifier) | append-only section `## verifier-2 packet checks` at the end of `VERIFICATION.md`; its own replica set on 127.0.0.1:27218; no product code, no Git |
 | gateway-controls | Sonnet 5.5 (added 2026-10-11 12:20Z real UTC for DA-5 DG3, DG4, DG6) | `packages/domain/src/controls.ts` (body of `createGatewayControls`), `packages/domain/src/workflow.ts`, `packages/domain/src/budget.ts`, `packages/domain/test/controls.integration.test.ts`, optional `packages/domain/test/controls-helpers.ts`; under mongodb-authority's direction; own replica set on 127.0.0.1:27418; no Git |
+| verifier-3 | Sonnet 5.5 (added 2026-10-11 13:40Z real UTC when packet checks queued behind two verifiers) | append-only section `## verifier-3 packet checks` at the end of `VERIFICATION.md`; its own replica set on 127.0.0.1:27518 (compose project expunge-v3); no product code, no Git |
 | commit-steward | Haiku 5.5 | Git index and commits only; `COMMIT-LEDGER.md` |
 
 Unlisted upstream files under `apps/operator/` (OpenDots at pin `625452e06cde74cb25b0ce319e2c1be0488f5a5f`) are frozen; changes to `platform.ts`, `dot-agent.ts`, `app.ts`, `index.ts` require a proposal to team-lead and are then owned by ui-ux-improver for that change.
@@ -31,7 +32,7 @@ Unlisted upstream files under `apps/operator/` (OpenDots at pin `625452e06cde74c
 4. **Principals**: `PRINCIPALS` in `packages/mongo/src/client.ts`; env variable names `MONGODB_<PRINCIPAL>_URI`.
 5. **Job/lease/effect protocol**: `JobRepository`, `EffectRepository`, `DeploymentRepository` method signatures as they exist today, plus the changes listed under A2-R in TASKS.json (approval requirement derived from stored policy, not caller-supplied).
 6. **Worker tool IDs**: `inspect_scope`, `resolve_subject`, `discover_references`, `preview_cleanup`, `apply_cleanup_batch`, `verify_registered_scope`, `complete_cleanup`, `inspect_harness`, `report_diagnostic`.
-7. **Projection transport** between operator and worker: `GET /internal/projection/jobs/:jobId` and `.../events?afterSequence=N` as documented in `infra/opendots/README.md`.
+7. **Projection transport** between operator and worker: `GET /internal/projection/jobs/:jobId` and `.../events?afterSequence=N` as documented in `infra/opendots/README.md`. Additive (lead decision 2026-10-11 13:35Z, DA-7 R2): both carry an optional durable per-job `streamEpoch` that changes only when the per-job event sequence is rebuilt or reset. Jobs list items carry `receiptId`, `receiptSequence` and `verifiedWorldRevision` only when a committed completion receipt exists.
 
 ## Coding rules that came out of review
 
