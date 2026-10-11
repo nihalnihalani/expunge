@@ -1,0 +1,6 @@
+# PKT-45 manifest (HITL review tool, client half + tests), 2026-10-11T15:16:20Z. Tests are UNIT-LEVEL: mocked useHumanInTheLoop, static markup, real ExpungeProjectionAgent; NO live chat turn (no CopilotKit key). Single-mount test parses the JSX of App.tsx (a commented-out mount fails it; mutation checked). Previous scratch-export evidence build e609b1601d3d...; depends on PKT-37 (landed), PKT-40.
+6d5d37abdb76ffeceef3928c1250fcc8fc448685223ee897ec538f2ec2987b84  apps/operator/src/client/expunge/review/ReviewCard.tsx
+ac9877f2d582b46d66cad6319b61dcffad833c5bd30a3c620feb45e91a693a4b  apps/operator/src/client/expunge/review/ExpungeReviewTool.tsx
+f78ebec1cf53e0427d8f824edb5fd5febcc51f021b850323b8763f83730ce243  apps/operator/src/client/expunge/css/70-review-card.css
+0aa763717002c9880aef5fff00e5d6a9ed0c05f35cdb9fdc2804a8ebbabf43c4  apps/operator/tests/expunge-review-tool.test.tsx
+607fbde6f0561be62071f0d3e5230dc9014434a861002cc9d0e08efbea9cede6  apps/operator/src/client/App.tsx

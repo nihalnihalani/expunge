@@ -1,0 +1,14 @@
+/* The chat review card lives outside the Expunge shell, so it brings its own root. */
+.ex-root.ex-chatcard {
+  display: grid;
+  gap: var(--ex-space-3);
+  justify-items: start;
+  min-height: 0;
+  padding: var(--ex-space-4);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root.ex-chatcard p {
+  margin: 0;
+}
