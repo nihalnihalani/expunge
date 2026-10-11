@@ -106,4 +106,29 @@ describe('evidence packets and the control arms', () => {
       }),
     ).toThrow('NoUnrelatedIncident');
   });
+
+  it('the shared selector skips a pool bundle that shares the incident run, even under another evidence ID', () => {
+    const sameRun = {
+      ...INCIDENT_A,
+      evidenceId: 'evb_aaa_same_run',
+      binding: { ...INCIDENT_A.binding },
+    };
+    const wrong = buildEvidencePacket({
+      arm: 'wrong_incident',
+      incident: [INCIDENT_A],
+      pool: [sameRun, INCIDENT_B],
+      budgetChars: BUDGET,
+    });
+    // Sorted by ID alone `evb_aaa_same_run` would win; it names the same job and world, so it is not unrelated.
+    expect(wrong.citableIds).not.toContain('evb_aaa_same_run');
+    expect(wrong.citableIds).toContain('evb_train_b02');
+    expect(() =>
+      buildEvidencePacket({
+        arm: 'wrong_incident',
+        incident: [INCIDENT_A],
+        pool: [sameRun],
+        budgetChars: BUDGET,
+      }),
+    ).toThrow('NoUnrelatedIncident');
+  });
 });

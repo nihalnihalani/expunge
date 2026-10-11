@@ -6,6 +6,7 @@ import {
   type EvidenceBundle,
   type EvidenceReference,
   type JsonValue,
+  selectWrongIncident,
 } from '@expunge/contracts';
 
 export type EvidenceArm = 'trace_informed' | 'score_only' | 'wrong_incident';
@@ -149,10 +150,8 @@ export function buildEvidencePacket(input: {
     shown = [...input.incident];
     items = shown.map((bundle) => ({ evidenceId: bundle.evidenceId, view: scoreOnlyView(bundle) }));
   } else {
-    // Unrelated incident, same schema and budget: the first pool bundle (by ID) that is not the real incident.
-    const unrelated = [...(input.pool ?? [])]
-      .filter((bundle) => !incidentIds.includes(bundle.evidenceId))
-      .sort((left, right) => left.evidenceId.localeCompare(right.evidenceId))[0];
+    // Unrelated incident, same schema and budget: the shared selector, disjoint in job, world and every source.
+    const unrelated = selectWrongIncident(input.incident, input.pool ?? []);
     if (!unrelated) throw new Error('NoUnrelatedIncident');
     shown = [unrelated];
     items = [{ evidenceId: unrelated.evidenceId, view: traceView(unrelated) }];

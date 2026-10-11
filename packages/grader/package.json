@@ -7,5 +7,8 @@
   "dependencies": {
     "@expunge/contracts": "0.1.0",
     "@expunge/fixtures": "0.1.0"
+  },
+  "devDependencies": {
+    "@expunge/observability": "0.1.0"
   }
 }

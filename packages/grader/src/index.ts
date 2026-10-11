@@ -1,4 +1,6 @@
 /** Privileged evaluation service only. No runtime tool may import or expose this package. */
+export { mintPrivateIdSalt, privateIdSetOf } from './private-ids.js';
+export type { PrivateIdSet } from './private-ids.js';
 export {
   referenceSolve,
   applyReferenceAction,
