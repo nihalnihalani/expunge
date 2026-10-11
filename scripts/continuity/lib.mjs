@@ -486,7 +486,11 @@ function mongoFinding(text) {
   let m;
   while ((m = srv.exec(text)) !== null) {
     const rest = m[1];
-    if (rest.length >= 3 && !PLACEHOLDER_RE.test(rest)) return true;
+    if (rest.length < 3 || PLACEHOLDER_RE.test(rest)) continue;
+    // Same fixture rules as the plain scheme: a trivially short password or a reserved/example host is test data.
+    const creds = /^([^:@/]+):([^@/]*)@([^/?]*)/.exec(rest);
+    if (creds && (creds[2].length < 3 || RESERVED_HOST_RE.test(creds[3].replace(/:\d+$/, '')))) continue;
+    return true;
   }
   const plain = /mongodb:\/\/([^\s/'"`@]+):([^\s/'"`@]+)@([^\s/'"`?]*)/g;
   while ((m = plain.exec(text)) !== null) {
@@ -506,7 +510,8 @@ const SECRET_RULES = [
   { id: 'private-key-block', re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/ },
   {
     id: 'bearer-token',
-    re: /\bBearer\s+(?=[A-Za-z0-9._~+/=-]*\d)(?=[A-Za-z0-9._~+/=-]*[A-Za-z])[A-Za-z0-9._~+/=-]{20,}/,
+    // A token that names itself as a fixture (test, fake, dummy, example, ...) is test data, not a credential.
+    re: /\bBearer\s+(?![A-Za-z0-9._~+/=-]*(?:test|fake|dummy|mock|example|sample|fixture|canary|placeholder|changeme|redacted))(?=[A-Za-z0-9._~+/=-]*\d)(?=[A-Za-z0-9._~+/=-]*[A-Za-z])[A-Za-z0-9._~+/=-]{20,}/i,
   },
   { id: 'github-token', re: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})/ },
   { id: 'slack-token', re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/ },
@@ -653,7 +658,10 @@ export function resolveCheckpointArg(arg, repo) {
   if (arg === 'latest') {
     const base = path.join(repo, '.expunge', 'checkpoints');
     const id = readLatest(base);
-    if (!id) throw new Error(`no LATEST pointer under ${base}`);
+    if (!id)
+      throw new Error(
+        `no LATEST pointer under ${base}. .expunge/ is gitignored and does not travel with git: copy the .expunge/checkpoints directory (or the whole working directory) to this machine, or pass an explicit checkpoint directory instead of "latest"`,
+      );
     return path.join(base, id);
   }
   return path.resolve(arg);

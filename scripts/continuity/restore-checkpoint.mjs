@@ -16,6 +16,13 @@
 // Exit codes: 0 READY (dry-run) / APPLIED / ALREADY_APPLIED; 2 usage; 3 invalid or incomplete checkpoint or bad
 // target; 4 base mismatch; 5 conflict, partial presence or post-restore verification failure; 6 stale checkpoint
 // needing --force-review; 7 active writer lock.
+//
+// After a successful --apply (APPLIED or ALREADY_APPLIED) the checkpoint's briefing is handed to the next agent:
+// briefing/HANDOFF.md is copied to <target>/HANDOFF.md. A HANDOFF.md that already exists is never overwritten: if it
+// is identical nothing happens, if it differs the copy is written beside it as HANDOFF.from-<checkpointId>.md (and
+// if that name is taken by different content, nothing is written and the resume line names the pack copy). The
+// result always ends with a `resume:` line naming the file to read first and the pack path. HANDOFF.md is
+// gitignored in this project, so the copy does not appear in `git status`.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -211,6 +218,7 @@ export function planRestore(checkpointArg, targetArg, { allowIncomplete = false,
       code: 0,
       manifest,
       target,
+      dir,
       counts,
       actions: [],
       notes: [...staleLocks, ...reviewedNotes(reviewed)],
@@ -285,7 +293,15 @@ export function planRestore(checkpointArg, targetArg, { allowIncomplete = false,
   if (hasUnstaged) actions.push({ kind: 'apply-unstaged-patch', files: manifest.patches.unstaged.files });
   if (copyPending.length > 0) actions.push({ kind: 'copy-untracked', files: copyPending.length });
   return {
-    notes: [...staleLocks, ...reviewedNotes(reviewed)],
+    notes: [
+      ...staleLocks,
+      ...reviewedNotes(reviewed),
+      ...(manifest.briefing
+        ? [
+            `--apply will also copy the briefing to ${path.basename(manifest.briefing.copy)} in the target (or ${briefingAlongsideName(manifest, path.basename(manifest.briefing.copy))} if one already exists)`,
+          ]
+        : []),
+    ],
     status: 'READY',
     code: 0,
     manifest,
@@ -343,10 +359,93 @@ export function applyRestore(plan) {
     code: 0,
     manifest,
     target,
+    dir: plan.dir,
     counts: plan.counts,
     actions: plan.actions,
     notes: plan.notes,
   };
+}
+
+const briefingAlongsideName = (manifest, name) => {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  return `${stem}.from-${manifest.checkpointId}${ext}`;
+};
+
+function writeExclusive(file, buf) {
+  // 'wx' refuses an existing path and a symlink, so a concurrent writer or a planted link is never followed.
+  fs.writeFileSync(file, buf, { flag: 'wx', mode: 0o644 });
+}
+
+function sameBytes(file, buf) {
+  try {
+    const st = fs.lstatSync(file);
+    return st.isFile() && !st.isSymbolicLink() && fs.readFileSync(file).equals(buf);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hand the checkpoint's briefing to the next agent without ever overwriting an existing file.
+ * Returns { status, file, packFile, resume } with status one of:
+ *   none | written | already-present | written-alongside | already-present-alongside | not-written
+ */
+export function placeBriefing({ manifest, dir, target }) {
+  const b = manifest.briefing;
+  if (!b) {
+    return {
+      status: 'none',
+      file: null,
+      packFile: null,
+      resume: `this checkpoint has no briefing; read the repository's own handoff documents and the pack at ${dir}`,
+    };
+  }
+  const packFile = path.join(dir, b.copy);
+  const buf = fs.readFileSync(packFile);
+  if (sha256Buffer(buf) !== b.sha256)
+    throw new Error('briefing copy in the pack no longer matches the manifest');
+  const name = path.basename(b.copy);
+  const primary = resolveInside(target, name);
+  let status;
+  let file = primary;
+  try {
+    writeExclusive(primary, buf);
+    status = 'written';
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    if (sameBytes(primary, buf)) status = 'already-present';
+    else {
+      file = resolveInside(target, briefingAlongsideName(manifest, name));
+      try {
+        writeExclusive(file, buf);
+        status = 'written-alongside';
+      } catch (err2) {
+        if (err2.code !== 'EEXIST') throw err2;
+        if (sameBytes(file, buf)) status = 'already-present-alongside';
+        else {
+          status = 'not-written';
+          file = null;
+        }
+      }
+    }
+  }
+  const extra = ['CLAUDE.md', 'AGENTS.md', 'EXPUNGE-PORTABLE-RESUME-PROMPT.txt'].filter((f) =>
+    fs.existsSync(path.join(target, f)),
+  );
+  const first = file ?? packFile;
+  const resume =
+    `read ${first} first${extra.length > 0 ? `, then ${extra.join(' and ')}` : ''}; ` +
+    `the checkpoint pack is ${dir} (keep it with the repository: \`node scripts/continuity/verify-checkpoint.mjs ${dir} --repo ${target}\` re-hashes this tree against it)`;
+  return { status, file, packFile, resume };
+}
+
+/** After a successful --apply: place the briefing and attach it plus the resume instruction to the result. */
+export function completeRestore(result) {
+  if (result.status !== 'APPLIED' && result.status !== 'ALREADY_APPLIED') return result;
+  const placed = placeBriefing({ manifest: result.manifest, dir: result.dir, target: result.target });
+  return { ...result, briefing: placed, notes: [...(result.notes ?? [])] };
 }
 
 function main(argv) {
@@ -390,6 +489,7 @@ function main(argv) {
     });
     let result = plan;
     if (plan.status === 'READY' && parsed.values.apply) result = applyRestore(plan);
+    if (parsed.values.apply) result = completeRestore(result);
     const mode = parsed.values.apply ? 'APPLY' : 'DRY-RUN';
     if (parsed.values.json) {
       printLine(
@@ -403,6 +503,14 @@ function main(argv) {
           actions: result.actions,
           conflicts: result.conflicts,
           notes: result.notes,
+          briefing: result.briefing
+            ? {
+                status: result.briefing.status,
+                file: result.briefing.file,
+                packFile: result.briefing.packFile,
+              }
+            : undefined,
+          resume: result.briefing?.resume,
         }),
       );
     } else {
@@ -414,6 +522,19 @@ function main(argv) {
       for (const n of result.notes ?? []) printLine(`note: ${n}`);
       if (result.status === 'READY') printLine('nothing written; pass --apply to restore');
       if (result.status === 'ALREADY_APPLIED') printLine('no-op: the target already matches this checkpoint');
+      if (result.briefing) {
+        const bf = result.briefing;
+        const label = {
+          none: 'no briefing in this checkpoint',
+          written: `copied to ${bf.file}`,
+          'already-present': `already present at ${bf.file}`,
+          'written-alongside': `an existing HANDOFF.md differs and was not touched; copied to ${bf.file}`,
+          'already-present-alongside': `an existing HANDOFF.md differs and was not touched; the copy is already at ${bf.file}`,
+          'not-written': `an existing HANDOFF.md and its alongside copy both differ; nothing written, read ${bf.packFile}`,
+        }[bf.status];
+        printLine(`briefing: ${label}`);
+        printLine(`resume: ${bf.resume}`);
+      }
     }
     return result.code;
   } catch (err) {

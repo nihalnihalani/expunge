@@ -133,6 +133,9 @@ test('scanner rules: true positives, placeholders and look-alikes', () => {
   assert.deepEqual(hit('mongodb' + '://user:Fx9kQ2mZ7pL4@host.example/db'), []);
   assert.deepEqual(hit('mongodb' + '://user:Fx9kQ2mZ7pL4@db.invalid:27017/x'), []);
   assert.deepEqual(hit('mongodb' + '://admin:x@h/db'), []);
+  assert.deepEqual(hit('mongodb' + '+srv://u:p@cluster.example/db'), []);
+  assert.deepEqual(hit('mongodb' + '+srv://svc:Fx9kQ2mZ7pL4@cluster0.example.invalid/db'), []);
+  assert.deepEqual(hit('mongodb' + '+srv://svc:Fx9kQ2mZ7pL4@cluster0.abc12.mongodb.net/db'), ['mongodb-uri']);
   assert.deepEqual(hit('mongodb' + '://user:Fx9kQ2mZ7pL4@127.0.0.1:27018/x'), []);
   assert.deepEqual(hit('mongodb' + '://user:Fx9kQ2mZ7pL4@db.internal.corp:27017/x'), ['mongodb-uri']);
   assert.deepEqual(
@@ -147,6 +150,12 @@ test('scanner rules: true positives, placeholders and look-alikes', () => {
   assert.deepEqual(hit('task-runner disk-usage risk-register ask-me-anything'), []);
   assert.deepEqual(hit('Authorization: Bearer ${token} and Bearer <token>'), []);
   assert.deepEqual(hit('Bearer authentication-credentials-required'), []);
+  // Tokens that name themselves as fixtures are test data; a random-looking one is still a credential.
+  assert.deepEqual(hit('Authorization: Bearer test-owner-access-token-12345'), []);
+  assert.deepEqual(hit('Authorization: Bearer FAKE-token-0123456789abcdef'), []);
+  assert.deepEqual(hit("Authorization: 'Bearer fixture-read-token-0123456789abcdef'"), []);
+  assert.deepEqual(hit('Authorization: Bearer dummy.jwt.value.0123456789ab'), []);
+  assert.deepEqual(hit(`Authorization: ${secrets.bearer()}`), ['bearer-token']);
   assert.deepEqual(hit('export const sk = "sk-learn"'), []);
 });
 
