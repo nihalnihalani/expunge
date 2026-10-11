@@ -22,6 +22,8 @@ From the 2026-10-11 13:01Z takeover the build runs in the Claude Code CLI (2.1.2
 | verifier-3 | Sonnet 5.5 (added 2026-10-11 13:40Z real UTC when packet checks queued behind two verifiers) | append-only section `## verifier-3 packet checks` at the end of `VERIFICATION.md`; its own replica set on 127.0.0.1:27518 (compose project expunge-v3); no product code, no Git |
 | commit-steward | Haiku 5.5 | Git index and commits only; `COMMIT-LEDGER.md` |
 
+Later assignments (16:40Z): `packages/plugin-sandbox/` and `packages/campaign-host/` were not listed above. `packages/plugin-sandbox/` belongs to runtime-raindrop, which built it. rsi-evolution made a one-time edit to `test/execute.test.ts` (the PS-3 maxInputBytes test) on the lead's instruction. `packages/campaign-host/`, `packages/rehearsal/` and `packages/meta-evolution/` belong to rsi-evolution. One-time grants recorded: gateway-controls on `packages/fixtures/src/generator.ts` and the new `test/owner-emission.test.ts` (PKT-16b owner and identity emission only); ui-ux-improver on `apps/operator/tests/telemetry.test.ts` (PKT-70 only).
+
 Unlisted upstream files under `apps/operator/` (OpenDots at pin `625452e06cde74cb25b0ce319e2c1be0488f5a5f`) are frozen; changes to `platform.ts`, `dot-agent.ts`, `app.ts`, `index.ts` require a proposal to team-lead and are then owned by ui-ux-improver for that change.
 
 ## Frozen interfaces (change only by team-lead decision recorded in PROJECT-STATE.md)

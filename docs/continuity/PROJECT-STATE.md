@@ -54,6 +54,10 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 
 15. Runtime attestation (DA-8 D8-2/D8-3, 15:43Z): the worker computes runtimeHash() in-process from its loaded runtime, vendored OpenMuse and contracts bytes and writes it to the job checkpoint at claim. The gate compares that value against the stored campaign freeze. This is accepted as trusted-infrastructure attestation: the worker is a separate identity that no candidate or caller can supply or alter. It is disclosed as a self-measurement of the worker build, not an external measurement such as a TPM or signed image digest. Candidate- and port-supplied attestations are never admitted.
 
+16. Campaign result artifacts (16:10Z): campaign artifacts live in insert-only `campaign_artifacts` (_id `campaign:<campaignId>`) and `campaign_artifact_rows`. The grader can INSERT and FIND, projection_reader can FIND, and nobody can UPDATE or REMOVE. A summary is refused until all of its rows are committed. A row commit emits `campaign_row_committed` in the same transaction. The job references the artifact by its deterministic id. Lands in PKT-62; projection serving in PKT-63.
+17. Meta draw commitment (16:11Z, DA-8 R3 gap): `meta_draw_commitments` is INSERT-only. It is written with `forceServerObjectId`, its time is `_id.getTimestamp()` (server time to 1 s), and each row must be at least 2 s (META_DRAW_MIN_GAP_MS) after the previous one (commitment, I1, freeze, draw). I1's creation time is server-stamped the same way. No `$currentDate` upsert, so there is no UPDATE grant. Lands in PKT-62 (grants) and PKT-43 (use).
+18. PKT-24/25 must carry the `packages/fixtures/src/sealed.ts` and `splits.ts` changes. The gate imports their sealed-plan exports, and HEAD typecheck fails without them (verifier pre-run, 16:09Z).
+
 ## Blocked acceptance items (need human input)
 
 - Root `.env` with the principal URIs, provider key(s), CopilotKit Intelligence key and Raindrop keys. Names only in `.env.example`.
