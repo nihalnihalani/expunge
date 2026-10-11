@@ -49,7 +49,10 @@ beforeEach(async () => {
   );
 });
 afterEach(async () => {
-  await Promise.all(running.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+  const servers = running.splice(0);
+  // A request held open by a test must not keep close() waiting: drop every connection first.
+  for (const server of servers) server.closeAllConnections();
+  await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
 });
 
 /** What the trusted side does: mint a 128-bit random id, bind it to artifact, input, job, run and call, set an expiry. */
@@ -381,9 +384,46 @@ test(
       },
     });
     holder.on('error', () => undefined);
-    holder.write('{"artifactHash":');
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal((await direct(single, '/artifact/fetch', { artifactHash: hash })).status, 429);
-    holder.destroy();
+    try {
+      holder.write('{"artifactHash":');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Without the cap this request would be served or wait on the held one; either way it must fail fast, not hang.
+      const second = await fetch(single + '/artifact/fetch', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${brokerToken}`,
+          'x-expunge-candidate-id': 'candidate-1',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ artifactHash: hash }),
+        signal: AbortSignal.timeout(3_000),
+      });
+      assert.equal(second.status, 429);
+    } finally {
+      holder.destroy();
+    }
   },
 );
+
+test('PKT-68: a second legitimate call in the same run (a different callNumber) with a different value is accepted, not 409', async () => {
+  const first = mint({ callNumber: 0 });
+  const second = mint({ callNumber: 1 });
+  assert.equal((await viaProxy('/result/submit', { ticketId: first.ticketId, value: VALUE })).status, 200);
+  assert.equal(
+    (await viaProxy('/result/submit', { ticketId: second.ticketId, value: { candidates: [] } })).status,
+    200,
+  );
+  assert.deepEqual(
+    spooled().map((l) => JSON.parse(l).callNumber),
+    [0, 1],
+  );
+});
+
+test('PKT-68: an admitted artifact larger than the size cap (256 KiB) is refused as not admitted (404), not served', async () => {
+  const atCap = Buffer.alloc(256 * 1024, 97);
+  const over = Buffer.alloc(256 * 1024 + 1, 98);
+  writeFileSync(join(dirs.artifacts, sha(atCap)), atCap);
+  writeFileSync(join(dirs.artifacts, sha(over)), over); // named by its own sha256, so only the size cap can refuse it
+  assert.equal((await viaProxy('/artifact/fetch', { artifactHash: sha(atCap) })).status, 200);
+  assert.equal((await viaProxy('/artifact/fetch', { artifactHash: sha(over) })).status, 404);
+});
