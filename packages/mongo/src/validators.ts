@@ -26,6 +26,8 @@ const object = (properties: Record<string, Schema>, required = Object.keys(prope
 });
 const MUTATION_CLASSES = ['tightening', 'behavioral', 'authority_expansion'];
 const scope = { tenantId: str, env: en(['dev', 'evaluation', 'demo']), scopeId: str };
+// A native owner source is bound to an explicit release environment, never an inferred demo binding.
+const sourceScope = { tenantId: str, env: en(['staging', 'production']), scopeId: str };
 const actor = object({ ...scope, actorId: str, authorizationRevision: integer });
 const binding = object({
   jobId: str,
@@ -812,6 +814,31 @@ export const WORLD_VALIDATORS: Record<string, Document> = {
       from: address,
       to: address,
       createdAt: date,
+    }),
+  },
+  // A native owner source registration: insert-only per revision, hashed. The body is validated and re-hashed in code.
+  owner_sources: {
+    $jsonSchema: object({
+      _id: str,
+      ...sourceScope,
+      sourceId: str,
+      deploymentId: str,
+      revision: integer,
+      registrationHash: hash,
+      registration: { bsonType: 'object' },
+      createdAt: date,
+    }),
+  },
+  // How far the owner's change stream has been observed. Advanced by compare-and-set; a lost history bumps `epoch`.
+  owner_source_state: {
+    $jsonSchema: object({
+      _id: str,
+      ...sourceScope,
+      sourceId: str,
+      observedSeq: integer,
+      epoch: integer,
+      resumeTokens: { bsonType: 'object' },
+      updatedAt: date,
     }),
   },
   world_scope_bindings: {
