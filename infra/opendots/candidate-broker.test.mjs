@@ -344,42 +344,46 @@ test('BR-3: the environment is an ALLOWLIST: any other name (database URIs under
   assert.throws(() => createCandidateBroker({ ...brokerEnv(), EXPUNGE_BROKER_RATE_PER_MINUTE: '0' }));
 });
 
-test('BR-4: a per-candidate rate bound (fixed one-minute window) and a cap on concurrent requests', async () => {
-  const limited = await listen(
-    createCandidateBroker(
-      { ...brokerEnv(), EXPUNGE_BROKER_RATE_PER_MINUTE: '3', EXPUNGE_BROKER_MAX_CONCURRENCY: '4' },
-      () => now,
-    ),
-  );
-  const fetchArtifact = () => direct(limited, '/artifact/fetch', { artifactHash: hash });
-  assert.deepEqual(
-    [(await fetchArtifact()).status, (await fetchArtifact()).status, (await fetchArtifact()).status],
-    [200, 200, 200],
-  );
-  assert.equal((await fetchArtifact()).status, 429);
-  now += 61_000; // the next window
-  assert.equal((await fetchArtifact()).status, 200);
-  // Concurrency: with a cap of 1, a request held open by an unfinished body blocks the next one.
-  const single = await listen(
-    createCandidateBroker({ ...brokerEnv(), EXPUNGE_BROKER_MAX_CONCURRENCY: '1' }, () => now),
-  );
-  const url = new URL(single);
-  const { request } = await import('node:http');
-  const holder = request({
-    host: url.hostname,
-    port: url.port,
-    path: '/artifact/fetch',
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${brokerToken}`,
-      'x-expunge-candidate-id': 'candidate-1',
-      'Content-Type': 'application/json',
-      'Content-Length': '100',
-    },
-  });
-  holder.on('error', () => undefined);
-  holder.write('{"artifactHash":');
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal((await direct(single, '/artifact/fetch', { artifactHash: hash })).status, 429);
-  holder.destroy();
-});
+test(
+  'BR-4: a per-candidate rate bound (fixed one-minute window) and a cap on concurrent requests',
+  { timeout: 10_000 },
+  async () => {
+    const limited = await listen(
+      createCandidateBroker(
+        { ...brokerEnv(), EXPUNGE_BROKER_RATE_PER_MINUTE: '3', EXPUNGE_BROKER_MAX_CONCURRENCY: '4' },
+        () => now,
+      ),
+    );
+    const fetchArtifact = () => direct(limited, '/artifact/fetch', { artifactHash: hash });
+    assert.deepEqual(
+      [(await fetchArtifact()).status, (await fetchArtifact()).status, (await fetchArtifact()).status],
+      [200, 200, 200],
+    );
+    assert.equal((await fetchArtifact()).status, 429);
+    now += 61_000; // the next window
+    assert.equal((await fetchArtifact()).status, 200);
+    // Concurrency: with a cap of 1, a request held open by an unfinished body blocks the next one.
+    const single = await listen(
+      createCandidateBroker({ ...brokerEnv(), EXPUNGE_BROKER_MAX_CONCURRENCY: '1' }, () => now),
+    );
+    const url = new URL(single);
+    const { request } = await import('node:http');
+    const holder = request({
+      host: url.hostname,
+      port: url.port,
+      path: '/artifact/fetch',
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${brokerToken}`,
+        'x-expunge-candidate-id': 'candidate-1',
+        'Content-Type': 'application/json',
+        'Content-Length': '100',
+      },
+    });
+    holder.on('error', () => undefined);
+    holder.write('{"artifactHash":');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal((await direct(single, '/artifact/fetch', { artifactHash: hash })).status, 429);
+    holder.destroy();
+  },
+);
