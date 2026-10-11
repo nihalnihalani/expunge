@@ -223,14 +223,6 @@ describeLive('MongoEpisodePort over the real worker and domain gateway (FAKE mod
       const result = await als.run({ kind: arm === 'parent' ? 'w0' : 'child', applies }, () =>
         port.run(request),
       );
-      console.log(
-        'DBG',
-        arm,
-        result.outcome,
-        result.failureCode,
-        JSON.stringify(result.faults),
-        JSON.stringify(result.cost),
-      );
       expect(result.evidence).toBe('committed');
       expect(result.runtimeHash).toBe(RT);
       expect(result.world).not.toBeNull();

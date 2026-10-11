@@ -10,7 +10,7 @@ import {
   FreezeStore,
   candidateKeyOf,
   childProjectionOf,
-  reportIdOf,
+  GateStore,
   ZERO_COST,
 } from '../src/index.js';
 import { ScriptedEpisodePort } from '../src/testing/index.js';
@@ -82,7 +82,6 @@ describeLive('DA-8 findings (real replica set)', () => {
       ['evaluator', { evaluatorHash: 'e'.repeat(64) }, 'evaluator_hash_mismatch'],
       ['generator', { fixtureGeneratorHash: 'e'.repeat(64) }, 'fixture_generator_hash_mismatch'],
       ['compiler', { compilerHash: 'e'.repeat(64) }, 'compiler_hash_mismatch'],
-      ['split', { splitManifestCommitment: 'e'.repeat(64) }, 'split_commitment_mismatch'],
       ['profile', { workerProfileHash: 'e'.repeat(64) }, 'worker_profile_mismatch'],
       ['budget', { budgetHash: 'e'.repeat(64) }, 'budget_mismatch'],
       ['runtime', { runtimeHash: 'e'.repeat(64) }, 'runtime_hash_mismatch'],
@@ -96,6 +95,19 @@ describeLive('DA-8 findings (real replica set)', () => {
       expect(out.reasonCodes, label).toContain(reason);
       expect(port.requests, `${label}: rejected before any episode`).toHaveLength(0);
     }
+  }, 120_000);
+
+  it('D8-2/V-2: a self-consistent view that is not the frozen one is refused before the claim', async () => {
+    const id = next();
+    const port = rulePort(gate, 'claim_without_work', 'solve');
+    await gate.freezeCampaign(id, { splitManifestCommitment: 'e'.repeat(64) }, port);
+    const childHash = await fresh();
+    await expect(gate.run(childHash, id, port)).rejects.toThrow('GatePlanViewCommitmentMismatch');
+    expect(port.requests).toHaveLength(0);
+    // Nothing was consumed: the same candidate can still be gated under a correct freeze.
+    const ok = next();
+    await gate.freezeCampaign(ok, {}, port);
+    expect((await gate.run(childHash, ok, port)).verdict).toBe('admit');
   }, 120_000);
 
   it('D8-2: a worker that attests another runtime is rejected, a missing attestation holds, a mix rejects', async () => {
@@ -119,6 +131,54 @@ describeLive('DA-8 findings (real replica set)', () => {
       expect(out.reasonCodes).toContain(reason);
     }
   }, 240_000);
+
+  it('F-2: a veto hook can only add ineligibility; stored eligibility and labels are not switchable', async () => {
+    const evidence = {
+      provider: 'raindrop',
+      externalSignalIds: [],
+      localSourceIds: ['s-revoked'],
+      origin: 'verifier_feedback' as const,
+      redactionPolicy: 'p',
+      retrievedAt: '2026-10-11T00:00:00.000Z',
+      contentHash: '9'.repeat(64),
+    };
+    const scope = { tenantId: 'owner-tenant', env: 'dev' as const, scopeId: 'owner-scope' };
+    const cases: Array<[string, 'training' | 'revoked', boolean]> = [
+      ['label revoked, hook says false', 'revoked', false],
+      ['stored row revoked, label training, hook says false', 'training', false],
+    ];
+    for (const [label, permittedUse, hook] of cases) {
+      const bundle = {
+        ...uniqueChild(gate.parent, gate.parentHash),
+        evidence: [{ ...evidence, permittedUse }],
+      };
+      const childHash = await gate.insertBundle(bundle);
+      if (label.startsWith('stored'))
+        await gate.env.service.control.collection('artifact_eligibility').insertOne({
+          ...scope,
+          artifactHash: evidence.contentHash,
+          state: 'revoked',
+          policyHash: 'a'.repeat(64),
+          reasonCode: 'source_retracted',
+          sourceIds: [],
+          updatedAt: new Date(),
+        } as never);
+      const id = next();
+      const port = rulePort(gate, 'claim_without_work', 'solve');
+      await gate.freezeCampaign(id, {}, port);
+      const out = await gate.run(childHash, id, port, { sourcesIneligible: async () => hook });
+      expect(out.verdict, label).toBe('reject');
+      expect(out.reasonCodes, label).toContain('source_ineligible');
+      expect(port.requests, label).toHaveLength(0);
+    }
+    // And the hook alone can veto.
+    const clean = await fresh();
+    const id = next();
+    const port = rulePort(gate, 'claim_without_work', 'solve');
+    await gate.freezeCampaign(id, {}, port);
+    const vetoed = await gate.run(clean, id, port, { sourcesIneligible: async () => true });
+    expect(vetoed.reasonCodes).toContain('source_ineligible');
+  }, 120_000);
 
   it('D8-4/D8-16: one gate run per executable child; a rerun, a rename and an evidence reorder are refused', async () => {
     const childBundle = uniqueChild(gate.parent, gate.parentHash);
@@ -377,20 +437,46 @@ describeLive('DA-8 findings (real replica set)', () => {
     const bundle = uniqueChild(gate.parent, gate.parentHash);
     const childHash = await gate.insertBundle(bundle);
     const projection = childProjectionOf(bundle);
-    // Poison the report slot so saving the decision fails after the episodes ran.
-    await gate.env.service.control
-      .collection('gate_reports')
-      .insertOne({ _id: reportIdOf(gate.parentHash, projection) } as never, {
-        bypassDocumentValidation: true,
-      });
     const id = next();
     const port = rulePort(gate, 'claim_without_work', 'solve');
     await gate.freezeCampaign(id, {}, port);
-    await expect(gate.run(childHash, id, port)).rejects.toThrow('GateReportExists');
+    // The validator refuses the stored report (candidate id over 256 characters), after all episodes ran.
+    await expect(gate.run(childHash, id, port, { candidateId: 'x'.repeat(300) })).rejects.toBeDefined();
     expect(port.requests).toHaveLength(76);
-    expect((await new ClaimStore(gate.grader).read(candidateKeyOf(gate.parentHash, projection)))?.state).toBe(
-      'held',
-    );
+    const claims = new ClaimStore(gate.grader);
+    const claimKey = candidateKeyOf(gate.parentHash, projection);
+    expect((await claims.read(claimKey))?.state).toBe('held');
+    expect(await claims.heldRunsOf(claimKey)).toHaveLength(1);
+  }, 240_000);
+
+  it('a crash between saving the report and settling the claim finishes settling, never deciding twice', async () => {
+    const bundle = uniqueChild(gate.parent, gate.parentHash);
+    const childHash = await gate.insertBundle(bundle);
+    const claimKey = candidateKeyOf(gate.parentHash, childProjectionOf(bundle));
+    const id = next();
+    const port = rulePort(gate, 'claim_without_work', 'solve');
+    await gate.freezeCampaign(id, {}, port);
+    const first = await gate.run(childHash, id, port);
+    expect(first.verdict).toBe('admit');
+    // Simulate the kill: the report is stored but the claim was left open.
+    await gate.env.service.control
+      .collection('gate_claims')
+      .updateOne({ _id: claimKey as never }, { $set: { state: 'open' } });
+    const claims = new ClaimStore(gate.grader);
+    // Recovery after the hard kill: open -> held, then a later campaign takes the pair over.
+    await claims.recover(claimKey);
+    expect((await claims.read(claimKey))?.state).toBe('held');
+    const again = next();
+    const port2 = rulePort(gate, 'claim_without_work', 'solve');
+    await gate.freezeCampaign(again, {}, port2);
+    await expect(gate.run(childHash, again, port2)).rejects.toThrow('DecisionAlreadyRecorded');
+    expect((await claims.read(claimKey))?.state).toBe('decided');
+    expect(await claims.heldRunsOf(claimKey)).toHaveLength(0);
+    const stored = await new GateStore(await gate.env.as('promoter')).readReport(first.reportId);
+    expect(stored.digest).toBe(first.digest);
+    // And a settled claim cannot be recovered or retaken.
+    await expect(claims.recover(claimKey)).rejects.toThrow('ClaimNotOpen');
+    await expect(gate.run(childHash, next(), port2)).rejects.toThrow();
   }, 240_000);
 
   it('a freeze that was edited, or never written, is refused', async () => {
