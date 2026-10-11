@@ -22,6 +22,7 @@ import { formatTime, plural } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useResource } from '../hooks/useResource';
 import type { ViewMeta, ViewProps } from '../registry';
+import { formatRoute } from '../routes';
 
 export const meta: ViewMeta = {
   id: 'receipt',
@@ -72,10 +73,13 @@ export function ReceiptDocument({
   receipt,
   sequence,
   narrative,
+  privacyHref,
 }: {
   receipt: CompletionReceiptView;
   sequence: number;
   narrative?: ModelNarrativeView | null;
+  /** Set only when the job has a committed retraction record to open. */
+  privacyHref?: string;
 }) {
   const notInspected = receipt.registeredCollectionIds.filter(
     (id) => !receipt.inspectedCollectionIds.includes(id),
@@ -242,6 +246,13 @@ export function ReceiptDocument({
           />{' '}
           {ERASURE_COPY[receipt.externalErasureStatus]}
         </p>
+        {privacyHref && (
+          <p>
+            <a className="ex-link" href={privacyHref}>
+              See the retraction and provider deletion record
+            </a>
+          </p>
+        )}
       </section>
 
       {receipt.independentGrader && (
@@ -379,6 +390,11 @@ export function ReceiptPanel({
       receipt={receipt}
       sequence={snapshot.receipt.sequence}
       narrative={narrative}
+      privacyHref={
+        snapshot.artifacts.some((item) => item.kind === 'retraction')
+          ? formatRoute({ name: 'privacy', jobId: snapshot.jobId })
+          : undefined
+      }
     />
   );
 }

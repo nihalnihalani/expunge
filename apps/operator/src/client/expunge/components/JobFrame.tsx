@@ -11,6 +11,7 @@ import { ConnectionBanner, type Connection } from './ConnectionBanner';
 import { HashChip } from './HashChip';
 import { useAnnounce } from './LiveRegion';
 import { PageHeading } from './PageHeading';
+import { RelatedRecords } from './RelatedRecords';
 import {
   EmptyState,
   ErrorState,
@@ -168,6 +169,9 @@ export function JobFrame({
         </div>
       )}
       {snapshot && <Header snapshot={snapshot} />}
+      {snapshot && (
+        <RelatedRecords jobId={snapshot.jobId} artifacts={snapshot.artifacts} />
+      )}
       <ConnectionBanner
         connection={connection}
         attempt={state.attempt}
