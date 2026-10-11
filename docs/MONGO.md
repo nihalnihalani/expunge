@@ -261,3 +261,55 @@ authentic owner data, not Atlas).
 |---|---|
 | GB-2: held-out per-pair rows reach `projection_reader` | the `gate_reports` row carries per-pair protected and validation rows. Accepted until rsi-evolution's F-10 reduces withheld splits to aggregates in the report; until then the projection layer must serve aggregates for withheld splits. |
 | GB-3: the grader's FIND is cluster-wide | `completion_receipts`, `effects`, `preview_plans` are not campaign-scoped, and `preview_plans.bindings` hold subject identity values from every scope. Acceptable for the privileged evaluator; the gate should scope its reads by campaign scope in code. |
+
+## Atlas RBAC evidence (first real Atlas run; read-only)
+**What this is.** The role-scoped Atlas database users created from `atlasRoleManifests()` were probed on the invited Sandbox
+cluster (MongoDB 8.0.34, replica set; `probe:mongo` shows `rbacEnforced: true` for the worker principal: 46 privileges, none naming
+`expunge_private`, a direct read of the private database refused with code 13). **What it is not:** evidence about Atlas Search or
+Vector, about the owner's own source database, or about row-level isolation (Atlas privileges are per collection and verb).
+
+**Method** (`scripts/atlas-rbac-probe.ts`, `--matrix` for the full list). Each principal connects with its own `MONGODB_<PRINCIPAL>_URI`
+(read by name; nothing secret is printed) and tries every verb on every collection of the world, control and private databases
+with an operation that cannot change data whether or not it is authorized: `find` is a `findOne` on an `_id` that cannot exist;
+`update` and `remove` use a filter that matches nothing (no upsert); `insert` sends a document with an unknown field to a
+collection whose strict validator has `additionalProperties: false`, so an authorized insert is rejected by the validator (code 121)
+and an unauthorized one by authorization (code 13). Authorization runs before matching and validation, so code 13 means denied and
+anything else means the server got past authorization. Every outcome is compared with what `atlasRoleManifests()` says.
+
+| Principal | probed ops | allowed | denied | insert not probed | errors | surprises |
+|---|---|---|---|---|---|---|
+| approval_issuer | 288 | 10 | 278 | 28 | 0 | 0 |
+| domain_executor | 288 | 81 | 207 | 28 | 0 | 0 |
+| fixture_builder | 288 | 63 | 225 | 28 | 0 | 0 |
+| grader | 288 | 59 | 229 | 28 | 0 | 0 |
+| observer | 288 | 25 | 263 | 28 | 0 | 0 |
+| privacy_controller | 288 | 37 | 251 | 28 | 0 | 0 |
+| projection_reader | 288 | 15 | 273 | 28 | 0 | 0 |
+| promoter | 288 | 39 | 249 | 28 | 0 | 0 |
+| proposer | 288 | 8 | 280 | 28 | 0 | 0 |
+
+**Result: 0 surprises, 0 errors, 0 unexpected writes, no principal missing a URI.** For all nine runtime principals, every
+probed (principal, namespace, verb) outcome equals the manifest: nothing is allowed that the manifest does not grant, and nothing the
+manifest grants is refused. (The `setup` principal has no role manifest and is not probed.)
+
+**Gap: insert is not probed on 28 collections** because their validator is not strict enough for the probe document to be
+certainly rejected (a probe there could write): expunge_control.action_intents, expunge_control.artifact_eligibility, expunge_control.deployment_outbox, expunge_control.evidence, expunge_control.external_deletions, expunge_control.meta_campaigns, expunge_control.observer_cursors, expunge_control.projection_sequences, expunge_control.provenance_edges, expunge_control.public_trial_rows, expunge_control.runs, expunge_control.stream_offsets, expunge_control.telemetry_outbox, expunge_control.telemetry_receipts, expunge_private.expected_poststates, expunge_private.fixture_specs, expunge_private.grader_results, expunge_private.heldout_assignments, expunge_private.oracle_manifests, expunge_private.preservation_hashes, expunge_world.accounts, expunge_world.archives, expunge_world.customers, expunge_world.events, expunge_world.messages, expunge_world.notes, expunge_world.retained_invoices, expunge_world.schema_registry. For those, find, update and remove are probed; the insert
+grant is checked only by the manifest and the local RBAC lane.
+
+
+**Allowed set per principal.** Every other (collection, verb) the probe tried for that principal was refused with code 13. Verbs are `f`=find, `i`=insert, `u`=update, `r`=remove; an insert marked `i` was authorized (the strict validator then rejected the probe document); an insert on a collection not listed under the gap above is not shown even if granted.
+
+- `approval_issuer` (9 collections): approvals:i, artifact_eligibility:f, artifacts:f, authority_revisions:fu, authority_touches:u, candidates:f, deployments:f, gate_reports:f, provenance_edges:f
+- `domain_executor` (46 collections): action_intents:f, action_receipts:fi, approvals:f, artifact_eligibility:f, artifacts:f, authority_revisions:f, authority_touches:fu, campaign_artifact_permits:f, campaign_artifact_rows:f, campaign_artifacts:f, campaign_authority:f, campaign_authority_touches:fu, completion_receipts:fi, decisions:fi, deployments:f, diagnostics:fi, domain_steps:fi, effects:fi, erasure_suppressions:f, job_subjects:fi, jobs:fiu, preview_plans:fi, projection_events:fi, projection_sequences:fu, promotions:f, provenance_edges:f, rollback_refusals:f, run_attestations:fi, runs:fu, telemetry_outbox:f, verification_sweeps:fi, wake_commands:fi, world_faults:f, world.accounts:fur, world.archives:fur, world.customers:fur, world.events:fur, world.identity_edges:fiu, world.messages:fur, world.notes:fur, world.owner_source_state:fiu, world.owner_sources:f, world.retained_invoices:f, world.schema_registry:f, world.world_revisions:fu, world.world_scope_bindings:f
+- `fixture_builder` (32 collections): artifact_eligibility:f, artifacts:fi, campaign_authority:fi, campaign_authority_touches:i, campaign_freezes:fi, deployments:f, jobs:fiu, meta_draw_commitments:fi, projection_events:i, projection_sequences:u, world_faults:i, world_splits:i, private.campaign_keys:fi, private.expected_poststates:f, private.fixture_specs:f, private.grader_results:f, private.heldout_assignments:f, private.oracle_manifests:f, private.preservation_hashes:f, world.accounts:fur, world.archives:fur, world.customers:fur, world.events:fur, world.identity_edges:fiur, world.messages:fur, world.notes:fur, world.owner_source_state:fiu, world.owner_sources:fi, world.retained_invoices:fu, world.schema_registry:fu, world.world_revisions:fiu, world.world_scope_bindings:fiu
+- `grader` (45 collections): adversary_campaigns:fi, adversary_trials:fi, artifact_eligibility:f, artifacts:f, campaign_artifact_permits:fi, campaign_artifact_rows:fi, campaign_artifacts:fi, campaign_freezes:f, completion_receipts:f, deployments:f, domain_steps:f, effects:f, gate_attempts:fiu, gate_claims:fiu, gate_held_runs:fi, gate_reports:i, jobs:fiu, meta_draw_commitments:f, preview_plans:f, projection_events:fi, projection_sequences:fu, provenance_edges:f, run_attestations:f, world_faults:f, world_splits:f, private.campaign_keys:f, private.expected_poststates:f, private.fixture_specs:f, private.grader_results:f, private.heldout_assignments:f, private.oracle_manifests:f, private.preservation_hashes:f, world.accounts:f, world.archives:f, world.customers:f, world.events:f, world.identity_edges:f, world.messages:f, world.notes:f, world.owner_source_state:f, world.owner_sources:f, world.retained_invoices:f, world.schema_registry:f, world.world_revisions:f, world.world_scope_bindings:f
+- `observer` (17 collections): artifact_eligibility:f, erasure_suppressions:f, evidence:f, guard_exports:f, jobs:fiu, observer_cursors:fu, projection_events:fi, projection_sequences:u, provenance_edges:f, runs:f, stream_offsets:fur, subject_set_generations:f, telemetry_outbox:fu, telemetry_receipts:fu, world_splits:f, world.world_revisions:f, world.world_scope_bindings:f
+- `privacy_controller` (17 collections): artifact_eligibility:fu, erasure_suppressions:fiu, evidence:fu, external_deletions:fu, guard_exports:fi, jobs:fiu, lessons:fiu, projection_events:i, projection_sequences:u, provenance_closures:fiu, provenance_edges:f, raw_artifacts:fiur, subject_set_generations:fiu, subject_tokens:fir, telemetry_outbox:fu, world.world_revisions:f, world.world_scope_bindings:f
+- `projection_reader` (13 collections): action_receipts:f, campaign_artifact_rows:f, campaign_artifacts:f, completion_receipts:f, deployments:f, gate_reports:f, jobs:f, projection_events:f, promotions:f, public_trial_rows:f, rollback_refusals:f, run_attestations:f, stream_offsets:fur
+- `promoter` (31 collections): approvals:f, artifact_eligibility:f, artifacts:f, authority_policies:f, authority_revisions:f, authority_touches:fu, campaign_authority:f, campaign_authority_touches:fu, candidates:fu, deployments:fiu, gate_reports:f, grant_consumptions:fi, jobs:fiu, projection_events:i, projection_sequences:u, promotions:i, provenance_edges:f, rollback_refusals:i, world.accounts:f, world.archives:f, world.customers:f, world.events:f, world.identity_edges:f, world.messages:f, world.notes:f, world.owner_source_state:f, world.owner_sources:f, world.retained_invoices:f, world.schema_registry:f, world.world_revisions:f, world.world_scope_bindings:f
+- `proposer` (6 collections): artifact_eligibility:f, artifacts:fi, candidates:fi, evidence:f, lessons:f, provenance_edges:f
+
+**Does the issuer's `tainted()` need `provenance_closures`? No.** `tainted`, `permitted` and `blockedByAncestry` read only `artifact_eligibility` and `provenance_edges`; `provenance_closures` is touched only by the revocation closure methods (`revoke`, `closure`), which the issuer does not call. The issuer therefore holds FIND on the two collections and not on `provenance_closures` (the probe confirms it is denied there).
+
+**Reproduce.** `node --import tsx --env-file-if-exists=.env scripts/atlas-rbac-probe.ts [--matrix]` (exit 1 on any surprise or any
+accepted insert). The run covered all three databases (`expunge_world`, `expunge_control`, `expunge_private`) as configured.
