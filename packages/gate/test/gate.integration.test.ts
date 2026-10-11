@@ -30,7 +30,23 @@ describeLive('runGate on a real replica set (SCRIPTED port declaring committed e
     expect(stored.digest).toBe(reportDigestOf(out.report!));
     expect(stored.report.computedClass).toBe('behavioral');
     expect(stored.report.verdict).toBe('admit');
-    expect(stored.report.pairedTrials).toHaveLength(38);
+    // Only training pairs are stored one by one; protected and validation appear as totals (F-10).
+    expect(stored.report.pairedTrials).toHaveLength(6);
+    const controls = stored.report.causalControls as {
+      pairSplits: Record<string, string>;
+      withheld: Record<string, { pairs: number }>;
+      allRowsDigest: string;
+    };
+    expect(Object.values(controls.pairSplits).every((split) => split === 'train')).toBe(true);
+    expect(controls.withheld).toMatchObject({ protected: { pairs: 16 }, validation: { pairs: 16 } });
+    expect(controls.allRowsDigest).toMatch(/^[a-f0-9]{64}$/);
+    // No withheld run label, family or seed commitment is anywhere in the stored document.
+    const text = JSON.stringify(stored.report);
+    for (const row of out.rows.filter((r) => r.split !== 'train')) {
+      expect(text).not.toContain(row.pairId);
+      expect(text).not.toContain(row.parent.runId);
+      expect(text).not.toContain(row.seedCommitment);
+    }
     const claim = await new ClaimStore(gate.grader).read(
       candidateKeyOf(gate.parentHash, childProjectionOf(childOf(gate.parent, gate.parentHash, 4))),
     );
