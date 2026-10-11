@@ -193,7 +193,7 @@ describe('read-back of events the worker produced through the SDK', () => {
     fake.seedEvent({
       id: 'evt-run-1',
       assistant_output: '{"status":"failed"}',
-      tool_calls: [{ name: 'inspect_scope' }],
+      tool_calls: [{ tool_name: 'inspect_scope' }],
     });
     const { dispatcher, enqueue, outbox } = rig();
     const intent = episode();
@@ -221,7 +221,7 @@ describe('read-back of events the worker produced through the SDK', () => {
   it('HOLDs a visible but incomplete event, keeps re-reading, and releases it only when enrichment completes', async () => {
     fake.seedEvent({ id: 'evt-run-1', assistant_output: '{"status":"failed"}' });
     fake.enrichLater('evt-run-1', 2, (event) => {
-      event.tool_calls = [{ name: 'inspect_scope' }];
+      event.tool_calls = [{ tool_name: 'inspect_scope' }];
     });
     const { dispatcher, enqueue, outbox, clock } = rig();
     const intent = episode();

@@ -362,7 +362,7 @@ describeLive('telemetry outbox and observer on a real replica set (local protoco
       await runner.runOnce(query, { requiredFields: ['tool_calls', 'signals'] });
       expect(await evidenceRows().countDocuments({})).toBe(1);
       fake.enrichLater('evt-000', 0, (event) => {
-        event.tool_calls = [{ name: 'inspect_scope' }];
+        event.tool_calls = [{ tool_name: 'inspect_scope' }];
         event.signals = [{ id: 's1', name: 'cleanup_not_verified', score: null }];
       });
       await runner.runOnce(query, { requiredFields: ['tool_calls', 'signals'] });

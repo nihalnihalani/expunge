@@ -130,7 +130,7 @@ describe('late enrichment', () => {
   it('keeps an event pending until its signals and tool calls arrive, then stores a NEW revision and drains pending', async () => {
     seedWorkerEvents(fake, 1, false); // no tool_calls / signals yet
     fake.enrichLater('evt-000', 3, (event) => {
-      event.tool_calls = [{ name: 'inspect_scope' }];
+      event.tool_calls = [{ tool_name: 'inspect_scope' }];
       event.signals = [{ id: 'sig-1', name: 'cleanup_verified', score: null }];
     });
     const { runner, cursors, evidence } = makeRig(fake);

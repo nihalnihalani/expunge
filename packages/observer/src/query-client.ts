@@ -22,8 +22,10 @@ export class RaindropQueryError extends Error {
     readonly kind: QueryErrorKind,
     readonly status: number | null,
     readonly retryAfterMs?: number,
+    /** For `invalid_response`: the zod issue PATHS that failed (e.g. `data.tool_calls.0.name`). Paths only, never values. */
+    readonly paths: readonly string[] = [],
   ) {
-    super(`RaindropQuery:${kind}${status ? `:${status}` : ''}`);
+    super(`RaindropQuery:${kind}${status ? `:${status}` : ''}${paths.length ? `:${paths.join(',')}` : ''}`);
     this.name = 'RaindropQueryError';
   }
 }
@@ -43,7 +45,18 @@ const eventSchema = looseObject({
   signals: z
     .array(looseObject({ id: z.string(), name: z.string(), score: z.number().nullable().optional() }))
     .optional(),
-  tool_calls: z.array(looseObject({ name: z.string() })).optional(),
+  // Documented shape (QueryEventToolCall, query.raindrop.ai/v1/openapi.json): the name is `tool_name`.
+  tool_calls: z
+    .array(
+      looseObject({
+        tool_name: z.string(),
+        status: z.string().optional(),
+        duration_ms: z.number().optional(),
+        started_at: z.string().optional(),
+        span_id: z.string().optional(),
+      }),
+    )
+    .optional(),
   error_spans: z.array(z.unknown()).optional(),
   topics: z.array(z.unknown()).optional(),
 });
@@ -251,7 +264,13 @@ export class RaindropQueryClient {
 
   private parse<T extends z.ZodType>(body: unknown, schema: T): z.infer<T> {
     const result = schema.safeParse(body);
-    if (!result.success) throw new RaindropQueryError('invalid_response', null);
+    if (!result.success) {
+      // Paths only: an issue's message or received value can carry event content, so neither is kept.
+      const paths = [
+        ...new Set(result.error.issues.map((issue) => issue.path.map(String).join('.') || '(root)')),
+      ].slice(0, 20);
+      throw new RaindropQueryError('invalid_response', null, undefined, paths);
+    }
     return result.data;
   }
 

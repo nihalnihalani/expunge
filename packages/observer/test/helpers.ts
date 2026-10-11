@@ -111,7 +111,7 @@ export function seedWorkerEvents(fake: FakeRaindrop, count: number, enriched = t
       assistant_output: '{"status":"failed"}',
       ...(enriched
         ? {
-            tool_calls: [{ name: 'inspect_scope' }],
+            tool_calls: [{ tool_name: 'inspect_scope' }],
             signals: [{ id: 'sig-1', name: 'cleanup_not_verified', score: null }],
           }
         : {}),

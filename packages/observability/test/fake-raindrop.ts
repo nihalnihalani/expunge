@@ -34,7 +34,7 @@ export type FakeEvent = {
   properties: Record<string, unknown>;
   feature_flags: Record<string, unknown>;
   signals?: Array<{ id: string; name: string; score: number | null }>;
-  tool_calls?: Array<{ name: string }>;
+  tool_calls?: Array<{ tool_name: string }>;
   error_spans?: unknown[];
   topics?: unknown[];
 };
@@ -262,7 +262,7 @@ export class FakeRaindrop {
     if (ai.output != null) event.assistant_output = ai.output;
     if (item.properties) event.properties = { ...event.properties, ...item.properties };
     if (Array.isArray(ai.tool_calls) && ai.tool_calls.length)
-      event.tool_calls = ai.tool_calls.map((t: any) => ({ name: t.name }));
+      event.tool_calls = ai.tool_calls.map((t: any) => ({ tool_name: t.name }));
     this.events.set(id, event);
   }
 
