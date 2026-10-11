@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { EnvModelResolver, UsageMeter, pricingFromEnv, profileFingerprint, readUsage } from '../src/index.js';
+import {
+  EnvModelResolver,
+  UsageMeter,
+  pricingFromEnv,
+  profileFingerprint,
+  readMeterCarry,
+  readUsage,
+} from '../src/index.js';
 import { makeBundle, makeJob } from './fakes.js';
 
 describe('readUsage', () => {
@@ -78,5 +85,36 @@ describe('profile pricing and fingerprint', () => {
     );
     expect(a).not.toBe(profileFingerprint('openai/gpt-5-mini', priced.pricing));
     expect(a).not.toBe(profileFingerprint(priced.spec, undefined));
+  });
+});
+
+describe('provider attempt counters in the meter carry', () => {
+  const base = {
+    v: 1,
+    modelCalls: 1,
+    inputTokens: 2,
+    outputTokens: 3,
+    costMicrousd: 4,
+    unpricedCalls: 0,
+    wallTimeMs: 5,
+  };
+  it('reads them back when present, and treats an absent block as none', () => {
+    const provider = { attempts: 3, retriedStatuses: [429, 503], backoffTimeout: false };
+    expect(readMeterCarry({ meter: { ...base, provider } })).toEqual({ carry: { ...base, provider } });
+    expect(readMeterCarry({ meter: base })).toEqual({ carry: base });
+  });
+  it('a present but malformed block is invalid, never zero', () => {
+    for (const provider of [
+      null,
+      'x',
+      { attempts: -1, retriedStatuses: [], backoffTimeout: false },
+      { attempts: 1, retriedStatuses: [99], backoffTimeout: false },
+      { attempts: 1, retriedStatuses: 'x', backoffTimeout: false },
+      { attempts: 1, retriedStatuses: [], backoffTimeout: 'no' },
+      { attempts: 1, retriedStatuses: Array.from({ length: 51 }, () => 429), backoffTimeout: false },
+    ])
+      expect(readMeterCarry({ meter: { ...base, provider } }), JSON.stringify(provider)).toEqual({
+        invalid: true,
+      });
   });
 });

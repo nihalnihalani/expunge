@@ -95,13 +95,6 @@ export function evidenceReadiness(env: Env, sources: EvidenceSources = {}): Evid
   return { status: blockers.length ? 'BLOCKED' : 'READY', mode, blockers, lines };
 }
 
-/** A suppression source that refuses to answer. Wired when no real source exists: every event intent is HELD. */
-export const SUPPRESSION_UNAVAILABLE: ExportSuppression = {
-  suppressedUserIds: async () => {
-    throw new Error('SuppressionUnavailable');
-  },
-};
-
 export type EvidenceLog = (entry: {
   level: 'info' | 'warn' | 'error';
   message: string;

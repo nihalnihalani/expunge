@@ -12,52 +12,63 @@ export type ProviderAttempts = {
 
 const MAX_RECORDED_STATUSES = 50;
 const RETRIABLE = new Set<number>(MODEL_RETRY_POLICY.retriedStatuses);
+/**
+ * Only these count as PROVIDER-side backoff for the per-window flag: 429, any 5xx, or a connection error. 408 and 409 are
+ * retried by the SDK too but are never provider evidence here (every 408 is behaviour).
+ */
+const providerSide = (status: number): boolean => status === 429 || status >= 500;
 
 /**
  * A counting `fetch` for the provider SDK clients. It records, per run, how many HTTP attempts were made and which
- * retriable statuses came back, and it knows when the SDK is BETWEEN attempts (the last response was retriable, or the
- * connection failed, and the SDK has attempts left): that is "a retry or backoff is pending". Observation only: the request
- * and the response pass through untouched, and nothing is read from either.
+ * retriable statuses came back, and it keeps ONE flag per watchdog window: `retriedSinceArm` is set when any provider-side
+ * retriable response (429, 5xx) or connection error happened since the runtime last armed its phase watchdog (`clearWindow`),
+ * and cleared on re-arm. A phase timeout inside such a window is the provider's delay (retry-after backoff plus the retried
+ * call), not the candidate's. Observation only: the request and the response pass through untouched, and nothing is read
+ * from either. It decides from the status alone, so it ignores an `x-should-retry` response header the SDK may honour.
  */
 export class ProviderAttemptRecorder {
   private attempts = 0;
-  private readonly retriedStatuses: number[] = [];
-  private consecutiveFailures = 0;
-  private pending = false;
+  private retriedStatuses: number[] = [];
+  private windowRetried = false;
   private backoffTimeoutSeen = false;
 
   constructor(private readonly base: typeof fetch = globalThis.fetch) {}
 
+  /** Starts from the counts of earlier sessions of the same job (the meter carry), so the totals are per JOB. */
+  seed(prior: ProviderAttempts): void {
+    this.attempts = prior.attempts;
+    this.retriedStatuses = prior.retriedStatuses.slice(0, MAX_RECORDED_STATUSES);
+    this.backoffTimeoutSeen = prior.backoffTimeout;
+  }
+
   /** Pass this as the SDK client's `fetch`. */
   readonly fetch: typeof fetch = async (input, init) => {
     this.attempts++;
-    this.pending = false;
     let response: Response;
     try {
       response = await this.base(input, init);
     } catch (error) {
-      this.afterFailedAttempt(); // the SDK retries connection errors
+      this.windowRetried = true; // the SDK retries connection errors
       throw error;
     }
     if (RETRIABLE.has(response.status)) {
       if (this.retriedStatuses.length < MAX_RECORDED_STATUSES) this.retriedStatuses.push(response.status);
-      this.afterFailedAttempt();
-    } else this.consecutiveFailures = 0;
+      if (providerSide(response.status)) this.windowRetried = true;
+    }
     return response;
   };
 
-  private afterFailedAttempt(): void {
-    this.consecutiveFailures++;
-    // With attempts left the SDK sleeps and retries; on the last attempt it gives up and throws instead.
-    this.pending = this.consecutiveFailures < MODEL_RETRY_POLICY.attempts;
+  /** Called when the runtime (re-)arms its phase watchdog: a new window starts clean. */
+  clearWindow(): void {
+    this.windowRetried = false;
   }
 
-  /** True while the SDK is sleeping before its next attempt. */
-  get retryPending(): boolean {
-    return this.pending;
+  /** True when a provider-side retry or backoff happened since the watchdog was last armed. */
+  get retriedSinceArm(): boolean {
+    return this.windowRetried;
   }
 
-  /** Called by the runtime when the phase watchdog fires during a pending retry. */
+  /** Called by the runtime when the phase watchdog fires inside such a window. */
   markBackoffTimeout(): void {
     this.backoffTimeoutSeen = true;
   }
