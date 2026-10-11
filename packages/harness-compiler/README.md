@@ -30,6 +30,15 @@ TypeScript evaluator against an interpreter of the emitted operator subset (400 
     MONGODB_PARITY_URI=mongodb://127.0.0.1:27029 npx vitest run packages/harness-compiler
     docker rm -f expunge-c2-parity-mongo
 
+## Evidence catalog
+
+`buildEvidenceCatalog(bundles)` maps every identifier a patch may cite (the bundle ID and each source's event, trace,
+signal and local IDs) to what the evidence may be used for **and to the job and run it was recorded under**
+(`evidenceId`, `jobId`, `runId`, from the bundle's binding). Citation existence and permitted use are checked here; the
+binding lets a consumer attribute a rule's effect to the evidence it cites (see `@expunge/evolution`: a rule citing an
+unrelated incident earns no attributed standing). The compiler's own `no_op_rule` test stays global: a rule whose
+removal changes no replayed decision anywhere is a phantom rule.
+
 ## Mutation classes
 
 Computed from the bundles, never from the proposer's claim (which is recorded): adding a tool grant, removing a

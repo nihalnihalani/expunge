@@ -31,17 +31,30 @@ export interface EvidenceCatalogEntry {
   permittedUse: EvidenceReference['permittedUse'];
   origin: SourceOrigin;
   split: EvidenceBundle['split'];
+  /** The bundle this identifier belongs to and the job and run it was recorded from (the C1 binding). */
+  evidenceId: string;
+  jobId: string;
+  runId: string;
 }
 export type EvidenceCatalog = ReadonlyMap<string, EvidenceCatalogEntry>;
 
-/** Every identifier a patch may legitimately cite, mapped to what the evidence may be used for. */
+/**
+ * Every identifier a patch may legitimately cite, mapped to what the evidence may be used for and to the job and run
+ * it came from. The binding is what lets a rule's standing be attributed to the evidence it cites.
+ */
 export function buildEvidenceCatalog(bundles: readonly EvidenceBundle[]): EvidenceCatalog {
   const catalog = new Map<string, EvidenceCatalogEntry>();
   for (const bundle of bundles) {
+    const bound = {
+      evidenceId: bundle.evidenceId,
+      jobId: bundle.binding.jobId,
+      runId: bundle.binding.runId,
+    };
     catalog.set(bundle.evidenceId, {
       permittedUse: 'training',
       origin: 'verifier_feedback',
       split: bundle.split,
+      ...bound,
     });
     for (const source of bundle.sources) {
       const ids = [
@@ -52,7 +65,12 @@ export function buildEvidenceCatalog(bundles: readonly EvidenceBundle[]): Eviden
       ];
       for (const id of ids)
         if (id)
-          catalog.set(id, { permittedUse: source.permittedUse, origin: source.origin, split: bundle.split });
+          catalog.set(id, {
+            permittedUse: source.permittedUse,
+            origin: source.origin,
+            split: bundle.split,
+            ...bound,
+          });
     }
   }
   return catalog;

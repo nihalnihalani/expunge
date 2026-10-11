@@ -2,14 +2,21 @@
 // without standing and retry, back off from rejected candidates, rank the compiled survivors, and keep every loser
 // with its reason codes. Candidates never leave this module as "better": replay is diagnostic, fresh trials decide.
 import { contentHash, type TypedPatch } from '@expunge/contracts';
-import { compileAndReplay, proposeCandidate, type ProposalRecord, type ProposeInput } from './propose.js';
+import {
+  compileAndReplay,
+  evidenceLevelOf,
+  isGoodCandidate,
+  proposeCandidate,
+  type ProposalRecord,
+  type ProposeInput,
+} from './propose.js';
 
 const CLASS_RANK = { tightening: 0, behavioral: 1, authority_expansion: 2 } as const;
 
 export interface SearchBudget {
   /** Hard cap on model proposals per arm: the equal budget the control arms share. */
   maxProposals: number;
-  /** Stop as soon as a compiled candidate fixes a recorded harm and regresses nothing. */
+  /** Stop as soon as a compiled candidate fixes recorded harm OUT OF SAMPLE and regresses nothing. */
   stopOnGood: boolean;
 }
 export const DEFAULT_BUDGET: SearchBudget = { maxProposals: 3, stopOnGood: true };
@@ -26,12 +33,23 @@ export interface RoundResult {
   selected: ProposalRecord | null;
   losers: LoserRecord[];
   stopped: 'good_candidate' | 'budget';
+  /**
+   * What the selection rests on. `held_out`: the selected candidate fixed harm on runs other than its incident's.
+   * `in_sample_only`: the best it shows is repairing the incident's own rows (or nothing), so it is only a
+   * "candidate for gate". `none`: nothing compiled.
+   */
+  selectionBasis: 'held_out' | 'in_sample_only' | 'none';
 }
 
+// Ranking uses OUT-OF-SAMPLE evidence only: fixes on runs other than the incident's, minus twice the regressions
+// anywhere. The incident's own rows decide nothing here. They break a tie only through attribution (below), and a
+// selection resting on them is flagged `in_sample_only`.
 const score = (record: ProposalRecord): number =>
-  record.replay ? record.replay.fixes.length - 2 * record.replay.regressions.length : 0;
+  record.replay ? record.replay.heldOutFixes.length - 2 * record.replay.regressions.length : 0;
+const attributed = (record: ProposalRecord): number => record.replay?.attribution.attributedFlips ?? 0;
 function better(left: ProposalRecord, right: ProposalRecord): boolean {
   if (score(left) !== score(right)) return score(left) > score(right);
+  if (attributed(left) !== attributed(right)) return attributed(left) > attributed(right);
   if ((left.patches?.length ?? 99) !== (right.patches?.length ?? 99))
     return (left.patches?.length ?? 99) < (right.patches?.length ?? 99);
   const classes = [left, right].map((entry) => CLASS_RANK[entry.computedClass ?? 'authority_expansion']);
@@ -77,13 +95,7 @@ export async function runEvolutionRound(
       );
       records.push(record);
     }
-    if (
-      record.status === 'compiled' &&
-      record.replay &&
-      record.replay.fixes.length > 0 &&
-      record.replay.regressions.length === 0 &&
-      budget.stopOnGood
-    ) {
+    if (isGoodCandidate(record) && budget.stopOnGood) {
       stopped = 'good_candidate';
       break;
     }
@@ -97,7 +109,12 @@ export async function runEvolutionRound(
     else if (!losers.some((loser) => loser.record === entry))
       losers.push({ record: entry, reasonCodes: [...entry.reasonCodes] });
   }
-  return { arm: input.packet.arm, budget, proposalsUsed, records, selected, losers, stopped };
+  const selectionBasis: RoundResult['selectionBasis'] = !selected
+    ? 'none'
+    : evidenceLevelOf(selected.replay) === 'out_of_sample_fix'
+      ? 'held_out'
+      : 'in_sample_only';
+  return { arm: input.packet.arm, budget, proposalsUsed, records, selected, losers, stopped, selectionBasis };
 }
 
 /**

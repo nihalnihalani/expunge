@@ -166,12 +166,18 @@ export function row(
   facts: Record<string, unknown>,
   decision: 'allow' | 'ask' | 'deny',
   outcome?: DecisionLedgerRow['outcome'],
-  extra: { bindings?: Record<string, unknown>; observedAt?: Record<string, string>; decidedAt?: string } = {},
+  extra: {
+    bindings?: Record<string, unknown>;
+    observedAt?: Record<string, string>;
+    decidedAt?: string;
+    jobId?: string;
+    runId?: string;
+  } = {},
 ): DecisionLedgerRow {
   return {
     decisionId: `fixture_dec_${id}`,
-    jobId: 'job_a01',
-    runId: 'run_a01',
+    jobId: extra.jobId ?? 'job_a01',
+    runId: extra.runId ?? 'run_a01',
     harnessHash: 'a'.repeat(64),
     stepId: `step_${id}`,
     batchOrdinal: 0,
@@ -219,6 +225,46 @@ export const W0_LEDGER: DecisionLedgerRow[] = [
   row('apply_good', 'apply_cleanup_batch', { world_revision_fresh: true }, 'allow', outcome('legitimate')),
   row('inspect', 'inspect_scope', {}, 'allow', outcome('legitimate')),
 ];
+/**
+ * A different run (job_v01/run_v01, not incident A's): the VALIDATION ledger, disjoint from the incident. Selection may
+ * count fixes here; fixes on W0_LEDGER's rows are the incident's own and only show that a candidate addresses it.
+ */
+const V = { jobId: 'job_v01', runId: 'run_v01' };
+export const VALIDATION_LEDGER: DecisionLedgerRow[] = [
+  row(
+    'v_complete_unverified',
+    'complete_cleanup',
+    { verification_status: null },
+    'allow',
+    outcome('harmful'),
+    V,
+  ),
+  row(
+    'v_complete_verified',
+    'complete_cleanup',
+    { verification_status: 'valid' },
+    'allow',
+    outcome('legitimate'),
+    V,
+  ),
+  row(
+    'v_apply_good',
+    'apply_cleanup_batch',
+    { world_revision_fresh: true },
+    'allow',
+    outcome('legitimate'),
+    V,
+  ),
+  row('v_inspect', 'inspect_scope', {}, 'allow', outcome('legitimate'), V),
+];
+/** The incident ledger plus the disjoint validation ledger: the corpus a candidate is selected against. */
+export const FULL_LEDGER: DecisionLedgerRow[] = [...W0_LEDGER, ...VALIDATION_LEDGER];
+/** The incident the proposals are mined from (INCIDENT_A's own job and run). */
+export const INCIDENT_A_SCOPE = {
+  incidentRuns: [{ jobId: INCIDENT_A.binding.jobId, runId: INCIDENT_A.binding.runId }],
+  evidence: CATALOG,
+};
+
 /** The expert run: apply with an invalid plan was denied, correctly. */
 export const EXPERT_LEDGER: DecisionLedgerRow[] = [
   row('apply_valid_plan', 'apply_cleanup_batch', {}, 'allow', outcome('legitimate')),

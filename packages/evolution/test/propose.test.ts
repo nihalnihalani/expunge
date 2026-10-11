@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { contentHash, type HarnessBundle } from '@expunge/contracts';
+import { contentHash, type GuardrailAst, type HarnessBundle } from '@expunge/contracts';
 import {
   buildEvidencePacket,
+  isGoodCandidate,
   createLabeledFakeEvolverModel,
   proposeCandidate,
   type FakeMode,
@@ -12,6 +13,7 @@ import {
   CATALOG,
   INCIDENT_A,
   INCIDENT_B,
+  FULL_LEDGER,
   INCIDENT_C,
   W0_LEDGER,
   compileContext,
@@ -34,7 +36,7 @@ async function propose(
   branchIndex: number,
   incident = INCIDENT_A,
   parent: HarnessBundle = w0(),
-  over: { maxEdits?: number } = {},
+  over: { maxEdits?: number; corpus?: typeof W0_LEDGER } = {},
 ): Promise<ProposalRecord> {
   return proposeCandidate({
     model: createLabeledFakeEvolverModel(mode),
@@ -44,7 +46,7 @@ async function propose(
     actor: ACTOR,
     context: compileContext(),
     catalog: CATALOG,
-    corpus: W0_LEDGER,
+    corpus: FULL_LEDGER,
     ...over,
   });
 }
@@ -70,8 +72,26 @@ describe('one generated candidate per surface against W0', () => {
       'guardrails.deny_complete_without_verification',
     ]);
     expect(record.replay!.label).toBe('decision replay');
-    expect(record.replay!.fixes.length).toBe(2);
+    // In-sample (the incident's own run) and out-of-sample (a disjoint validation run) are separate fields.
+    expect(record.replay!.inSample.fixes).toBe(2);
+    expect(record.replay!.heldOut.fixes).toBe(1);
     expect(record.replay!.regressions).toEqual([]);
+    expect(record.evidenceLevel).toBe('out_of_sample_fix');
+    expect(isGoodCandidate(record)).toBe(true);
+  });
+  it('guardrails: with only the incident run to replay against, the same candidate is merely a candidate for gate', async () => {
+    const record = await propose('honest', 1, INCIDENT_A, w0(), { corpus: W0_LEDGER });
+    expect(record.status).toBe('compiled');
+    expect(record.replay!.inSample.fixes).toBe(2);
+    expect(record.replay!.heldOut).toMatchObject({ rows: 0, fixes: 0 });
+    expect(record.evidenceLevel).toBe('in_sample_only');
+    expect(isGoodCandidate(record)).toBe(false);
+  });
+  it('edits replay cannot see (context, workflow, tool policy) carry no replay signal and no fix claim', async () => {
+    const record = await propose('honest', 0);
+    expect(record.evidenceLevel).toBe('no_replay_signal');
+    expect(record.replay!.attribution.applicable).toBe(false);
+    expect(isGoodCandidate(record)).toBe(false);
   });
   it('workflow: the open-frontier incident yields a bounded discovery loop (behavioral)', async () => {
     const record = await propose('honest', 0, INCIDENT_C);
@@ -191,5 +211,90 @@ describe('what the evolver guarantees about a proposal', () => {
     expect(record.status).toBe('replay_rejected');
     expect(record.reasonCodes).toEqual(['replay_regression']);
     expect(record.replay!.knownAuthorityFlips).toHaveLength(2);
+  });
+});
+
+// A scripted proposer: the rule and its citation are chosen by the test, not by the packet text.
+const scriptedRule = (citedId: string): GuardrailAst => ({
+  ruleId: 'deny_complete_without_verification',
+  predicate: {
+    op: 'not',
+    predicate: {
+      op: 'compare',
+      comparator: 'eq',
+      left: { kind: 'fact', factId: 'verification_status' },
+      right: { kind: 'constant', value: 'valid' },
+    },
+  },
+  result: 'deny',
+  sourceEvidenceIds: [citedId],
+  appliesTo: ['complete_cleanup'],
+});
+const scriptedModel = (citedId: string) => ({
+  id: 'FAKE-scripted-guardrail',
+  kind: 'fake' as const,
+  propose: async () => ({
+    abstain: false,
+    hypothesis: 'Block completion without verification.',
+    claimedClass: 'tightening',
+    patches: [
+      {
+        surface: 'guardrails',
+        path: 'guardrails.deny_complete_without_verification',
+        after: scriptedRule(citedId),
+        hypothesis: 'Completion without verification is what the recorded run did wrong.',
+        sourceEvidenceIds: [citedId],
+      },
+    ],
+  }),
+});
+
+describe('standing is attributed to the evidence a rule cites', () => {
+  const run = (arm: 'trace_informed' | 'wrong_incident', incident: typeof INCIDENT_A, citedId: string) =>
+    proposeCandidate({
+      model: scriptedModel(citedId),
+      packet: buildEvidencePacket({
+        arm,
+        incident: [incident],
+        pool: [INCIDENT_A, INCIDENT_B, INCIDENT_C],
+        budgetChars: BUDGET,
+      }),
+      branchIndex: 0,
+      parent: w0(),
+      actor: ACTOR,
+      context: compileContext(),
+      catalog: CATALOG,
+      // Only incident A's rows (run_a01), so a rule citing incident C or B can flip them but is not about them.
+      corpus: W0_LEDGER,
+    });
+
+  it('a trace-informed rule citing the incident evidence flips its own rows and is attributed', async () => {
+    const record = await run('trace_informed', INCIDENT_A, 'evt_a01');
+    expect(record.status).toBe('compiled');
+    expect(record.replay!.attribution).toMatchObject({ applicable: true, attributedFlips: 2 });
+  });
+
+  it('a trace-informed rule whose cited evidence is not about the rows it flips earns no standing (negative test)', async () => {
+    // The packet is incident C (run_c03) and the rule cites incident C; the corpus holds only run_a01 rows.
+    const record = await run('trace_informed', INCIDENT_C, 'evt_c03');
+    expect(record.replay!.flips.length).toBeGreaterThan(0);
+    expect(record.replay!.attribution).toMatchObject({ applicable: true, attributedFlips: 0 });
+    expect(record.status).toBe('replay_rejected');
+    expect(record.reasonCodes).toEqual(['no_attributed_effect']);
+  });
+
+  it('a control arm is reported with its attributed and unattributed counts, not rejected', async () => {
+    // Wrong-incident arm: the packet shows incident B, the rule cites B's evidence, the corpus is A's run.
+    const record = await run('wrong_incident', INCIDENT_A, 'evt_b02');
+    expect(record.status).toBe('compiled');
+    expect(record.replay!.attribution).toMatchObject({
+      applicable: true,
+      attributedFlips: 0,
+      unattributedFlips: 2,
+    });
+    expect(record.arm).toBe('wrong_incident');
+    // It still flips the incident's rows, labelled in-sample, and is a candidate for gate at most.
+    expect(record.evidenceLevel).toBe('in_sample_only');
+    expect(isGoodCandidate(record)).toBe(false);
   });
 });

@@ -19,6 +19,12 @@ export interface EvidencePacket {
   arm: EvidenceArm;
   /** Evidence IDs of the incident the proposer is meant to address. */
   incidentIds: string[];
+  /**
+   * The job and run of that incident, whichever arm this is. Replay rows from these runs are IN-SAMPLE for every
+   * arm: they are the evidence the proposal was mined from (or, for a control, meant to address) and cannot be used
+   * to select it.
+   */
+  incidentRuns: Array<{ jobId: string; runId: string }>;
   items: EvidenceItem[];
   /** Every identifier a patch may cite; anything else is rejected before compilation. */
   citableIds: string[];
@@ -155,6 +161,10 @@ export function buildEvidencePacket(input: {
   return {
     arm: input.arm,
     incidentIds,
+    incidentRuns: input.incident.map((bundle) => ({
+      jobId: bundle.binding.jobId,
+      runId: bundle.binding.runId,
+    })),
     items: fitted.items,
     citableIds: [...new Set(shown.flatMap(identifiers))],
     references: shown.flatMap((bundle) => bundle.sources),
