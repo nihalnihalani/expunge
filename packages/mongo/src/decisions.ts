@@ -103,6 +103,12 @@ export class DecisionRepository {
       await this.rows.insertOne({ _id: decisionId, ...record });
     } catch (error) {
       if (!(error && typeof error === 'object' && 'code' in error && error.code === 11000)) throw error;
+      // The same decision is already on the ledger. Return the STORED row, never the caller's object: a re-record
+      // with different inputs must not look as if its inputs were the ones written.
+      const stored = await this.rows.findOne({ _id: decisionId });
+      if (!stored) throw error;
+      const { _id: _ignored, ...existing } = stored;
+      return existing;
     }
     return record;
   }

@@ -14,7 +14,9 @@ export * from './scope.js';
 export * from './policy.js';
 export * from './candidates.js';
 export * from './worlds.js';
-export * from './worldkey.js';
+// `worldKeyOf` and `worldKeyFromStoredBinding` mint capabilities and stay inside the package: callers get a WorldKey from
+// `JobRepository.worldKey` (the stored job) or `WorldRepository.bind` (the stored world row), never from a value they hold.
+export { isWorldKey, assertWorldKey, type WorldKey } from './worldkey.js';
 export * from './authority.js';
 export * from './decisions.js';
 export * from './wake.js';

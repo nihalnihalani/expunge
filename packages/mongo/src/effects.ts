@@ -11,10 +11,10 @@ import {
   type DomainAddress,
   type ScopeRegistry,
 } from '@expunge/contracts';
-import { fail, requirePrincipal, type MongoService } from './client.js';
+import { fail, requirePrincipal, worldFilter, type MongoService, type RuntimeDocument } from './client.js';
 import { AuthorityRepository } from './authority.js';
 import { DecisionRepository, deriveDecisionId } from './decisions.js';
-import { canonicalAddress, nodeKey } from './hashes.js';
+import { addressId, canonicalAddress, nodeKey } from './hashes.js';
 import { JobRepository, type LeaseBinding } from './jobs.js';
 import { ScopeRepository } from './scope.js';
 import { WorldRepository } from './worlds.js';
@@ -75,6 +75,26 @@ function assertDerivedIdentity(intent: ActionIntent): void {
   if (intent.argsDigest !== deriveArgsDigest(intent)) fail('EffectKeyMismatch');
   if (intent.decisionId !== deriveDecisionId(intent)) fail('DecisionMismatch');
 }
+
+/**
+ * The versions an intent binds must be exactly its targets: every target once, with a non-negative integer version,
+ * and nothing else. An intent that names a target without a version (or a version without a target) is refused
+ * before any write, so a target can never be touched at a version the plan did not see.
+ */
+function assertVersionBinding(intent: ActionIntent): void {
+  const targets = intent.targetAddresses.map(nodeKey);
+  const bound = intent.expectedDocumentVersions.map((entry) => nodeKey(entry.address));
+  if (
+    new Set(targets).size !== targets.length ||
+    new Set(bound).size !== bound.length ||
+    targets.length !== bound.length ||
+    !bound.every((key) => targets.includes(key)) ||
+    !intent.expectedDocumentVersions.every(
+      (entry) => Number.isSafeInteger(entry.version) && entry.version >= 0,
+    )
+  )
+    fail('VersionBindingMismatch');
+}
 /** Every applied effect must be on a target the intent named, once, with the intent's effect kind. */
 function assertAppliedWithinTargets(intent: ActionIntent, applied: readonly AppliedEffect[]): void {
   const allowed = new Set(intent.targetAddresses.map(nodeKey));
@@ -104,7 +124,7 @@ function assertReceiptCoversRegistry(receipt: CompletionReceipt, registry: Scope
     !limitations.every((limitation) => receipt.limitations.includes(limitation)) ||
     (registry.discoveryCompleteness.kind === 'partial' && receipt.limitations.length === 0)
   )
-    fail('IncompleteReceipt');
+    fail('ReceiptCoverageIncomplete');
 }
 
 export type EffectRecord = {
@@ -174,6 +194,7 @@ export class EffectRepository {
     )
       fail('EffectNotAuthorized');
     assertDerivedIdentity(intent);
+    assertVersionBinding(intent);
     const saved = await this.replay(actor, intent);
     if (saved) return saved;
     const receiptId = randomUUID(),
@@ -190,6 +211,17 @@ export class EffectRepository {
         await this.decisions.verify(actor, intent, session);
         if (input.validate) await input.validate(session);
         await this.worlds.assertRunnable(actor, job.binding.worldId, job.binding.scopeRevision, session);
+        // Every target must still be at the version the plan saw, read in this transaction's snapshot. A write that
+        // lands between this read and the commit conflicts with the transaction, so the check cannot go stale.
+        for (const expected of intent.expectedDocumentVersions) {
+          const current = await this.service.world
+            .collection<RuntimeDocument>(expected.address.collectionId)
+            .findOne(worldFilter(actor, job.binding.worldId, { _id: addressId(expected.address) }), {
+              session,
+              projection: { _rev: 1 },
+            });
+          if (!current || current._rev !== expected.version) fail('StaleDocumentVersion');
+        }
         const resultingWorldRevision = await this.worlds.advance(
           actor,
           job.binding.worldId,
@@ -199,6 +231,9 @@ export class EffectRepository {
         const appliedEffects = await input.apply(session, resultingWorldRevision);
         if (appliedEffects.length > intent.targetAddresses.length) fail('UnboundedEffectResult');
         assertAppliedWithinTargets(intent, appliedEffects);
+        // Every target needs an applied effect. A batch where some target matched nothing aborts as a whole: nothing
+        // is committed, and the caller learns which kind of failure it was.
+        if (appliedEffects.length < intent.targetAddresses.length) fail('PartialEffect');
         const receipt: ActionReceipt = {
           receiptId,
           effectKey: intent.effectKey,
@@ -249,6 +284,7 @@ export class EffectRepository {
     receipt: CompletionReceipt,
     validate?: (session: ClientSession) => Promise<void>,
   ): Promise<CompletionReceipt> {
+    requirePrincipal(this.service, ['domain_executor', 'setup']);
     if (receipt.domainStatus !== 'complete_in_registered_scope' || receipt.operationalResiduals !== 0)
       fail('IncompleteReceipt');
     return this.commitReceipt(actor, lease, receipt, 'succeeded', validate);
@@ -265,6 +301,7 @@ export class EffectRepository {
     receipt: CompletionReceipt,
     validate?: (session: ClientSession) => Promise<void>,
   ): Promise<CompletionReceipt> {
+    requirePrincipal(this.service, ['domain_executor', 'setup']);
     if (receipt.domainStatus !== 'incomplete' || receipt.operationalResiduals < 1)
       fail('ReceiptNotIncomplete');
     return this.commitReceipt(actor, lease, receipt, 'failed', validate);
