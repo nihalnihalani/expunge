@@ -1,0 +1,27 @@
+# PKT-53 manifest (Hider/meta campaign view with the stored preregistered verdict, plus gate decisionSummary types (MERGED with former PKT-55)), 2026-10-11T16:03:46Z; HEAD 355cd31 (PKT-40 and PKT-45 landed) stacked with the PKT-46, 49, 52, 53, 56 manifests in that order, S5 held tab patch applied; node 24.13.1. Build id of the stack up to and including this packet: 08a29a9b919c850cf9e7bac8de9c9114b61cdab57d1568d8b4623249de5c0c71. Evidence (screenshots, results-s*.json) comes from the full stack through PKT-56, build id f7191af190b98436a8348cf006b99869c050cb2bec17efcec21801a34c1c0964. No-gain guard: every rendered word of gain/improve/percent is stripped only if it is one of the fixed disclaimer sentences, and a mutant that renders a computed "gain +N" is killed. Zero rows: "no rows recorded yet". Rows may show a separate incidentOutcome (win/loss/tie) and worker successes when reported. CampaignView imports MetaVerdict directly (no held patch). metaVerdict shape CONFIRMED by rsi-evolution: {verdict, incidents, wins, losses, ties, p, net, noiseNet, noDataNet}; the projection writer (mongodb-authority) still has to emit it and gate_report.decisionSummary. Real edits to src/shared/expunge.ts and src/server/expunge/schemas.ts (PKT-37 landed).
+b6904a7831a0cbfe9815df3c7167f1acda48d4c17dfd824126b2bed2e451d119  apps/operator/src/client/expunge/components/MetaVerdict.tsx
+12df1e362ec31235f332b39f51245f244cf9bdd85c8980267c2ecfeb21c93d1e  apps/operator/src/client/expunge/views/CampaignView.tsx
+490d511060e4a58f9651e802525ecabf2e0f4cd90d1ed13a3ba321632700e9e5  apps/operator/src/server/expunge/schemas.ts
+2b6185e83546149d0cfdbe5db698f2aef058b81ce166e2d2e346795936859cc7  apps/operator/src/shared/expunge.ts
+702f4333d6fa9f0e35fbe4edb0d94a19777f231b3d3b348fb7a0ab0a52471c88  apps/operator/tests/browser/s8.mjs
+f69cc3653aad377b3fa321433b9150ab4ba3d84577a25dfc60d259e0a4a45108  apps/operator/tests/browser/s9.mjs
+ca4053ebe2b67001d7be126e1eb6abb6e543ce08c9e5009486439e847b25e727  apps/operator/tests/expunge-campaign.test.tsx
+36724819bcea9afa4a3f5b899ca77928d6c81276785fcfc471d58c174cf69cf9  apps/operator/tests/expunge-meta-verdict.test.tsx
+b219796cb21278c90827e1f52a2e7c33a52fc0791ff2dbb930398f82c9ad553e  apps/operator/tests/fixtures/ext/60-campaign.ts
+5d915f8da8e97facff9e78e71a3277a349273ae662149f2bf071ef223e554995  apps/operator/tests/fixtures/ext/65-meta-verdict.ts
+73e109744645f45f0187e8751bf5bf1c92ad1c8311894c593f4d523a8e39f56b  apps/operator/tests/fixtures/ext/66-gate-summary.ts
+470ef0345b28b1344ec569f39e4888fe673db18bff62e49dcebd610345a28745  docs/ui/screens/s8/results-s8.json
+65fe86a744adc60f5a9cdb20503fd8c74b43e38e665619088106e1adf0eae6d7  docs/ui/screens/s8/s8-campaign-1024-dark.png
+a0ceb778c4a50628d3d51e7366ca61f17ad5744f44adfa913ce9780d7eb308bf  docs/ui/screens/s8/s8-campaign-1024-light.png
+2a9b7531473c62d09e0ff32a0b293af2e3fb99a922c17c82ee86e0a573a463db  docs/ui/screens/s8/s8-campaign-1440-dark.png
+5a4436ee57aa9c0e340a045a9103c65e8c7d7d5662ee68d2b51761a2ab89d11d  docs/ui/screens/s8/s8-campaign-1440-light.png
+38adb8f13fca7a7c0d024a5c97b2ed8a121ad3288303d47d58b8af104e220e62  docs/ui/screens/s8/s8-campaign-390-dark.png
+c3b48d4c487f496d8f75bc63dcc470f6fb798951f6a2df568328ece7d29ba689  docs/ui/screens/s8/s8-campaign-390-light.png
+9b2226af51437fde7bacdf930284a091ca37966ad9d6548b088c04b02b821f76  docs/ui/screens/s8/s8-campaign-768-dark.png
+0d242b74ef8190b1c849b1bbef9bdd4f1d047934aa34d4d8cdef4f3b78cb5ce5  docs/ui/screens/s8/s8-campaign-768-light.png
+abde01f3e31645797e78d8002491d526501cbd6de5d29f5c6003de20c92bedd9  docs/ui/screens/s8/s8-campaign-flawed-1440-light.png
+d8f2977891e47f7c735cc98f8eab9cc21e5215c160c35eb0fe26f43e0eb30a4e  docs/ui/screens/s8/s8-campaign-valid-1440-light.png
+08435a42e1199a1c572ae26d6245aa5d6c411694e8c55acb7c45bf92c7bd942d  docs/ui/screens/s9/results-s9.json
+36adfdd0a009f3d6ac852c02bc54c1464d2a1051859dedf971162694cc2c5cf5  docs/ui/screens/s9/s9-gate-summary-1440-light.png
+2aa80c646c7ef7bbdaee76e0f3934721d2662a2b16b1345b903a26ecd37f9b9f  docs/ui/screens/s9/s9-metaverdict-gain-1440-light.png
+bd570f0e32000a11a5d944e7c5e182b0e23b22e08087ad8c6a08cd8ae4a25d8c  docs/ui/screens/s9/s9-metaverdict-tie-1440-light.png

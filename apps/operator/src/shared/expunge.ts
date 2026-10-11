@@ -830,6 +830,19 @@ export interface ControlRowView {
   episodes: number;
   costMicrousd: number;
 }
+/** The gate's own stored decision summary (packages/gate AdmissionSummary, the figures it decided on). */
+export interface GateDecisionSummaryView {
+  /** Candidate minus parent successes on the training split only; may be negative. */
+  triggerGain: number;
+  triggerRequiredGain: number;
+  splits: Partial<
+    Record<
+      'train' | 'protected' | 'validation' | 'final',
+      { trials: number; parentSuccesses: number; candidateSuccesses: number }
+    >
+  >;
+  protectedRegressedWorlds: number;
+}
 export interface GateReportView {
   reportId: string;
   candidateId: string;
@@ -849,6 +862,8 @@ export interface GateReportView {
   unpricedCalls: number;
   verdict: 'admit' | 'reject' | 'hold';
   reasonCodes: string[];
+  /** Absent when the backend does not project the gate's summary. */
+  decisionSummary?: GateDecisionSummaryView;
 }
 export interface DeploymentVersionView {
   hash: string;
@@ -883,6 +898,23 @@ export interface DeploymentView {
     reasonCodes: string[];
   }>;
 }
+/**
+ * The preregistered meta verdict exactly as the backend stored it (summarizeMeta, PREREGISTRATION.md).
+ * The operator displays it and never recomputes it. `net` and `noDataNet` may be negative.
+ */
+export interface MetaVerdictView {
+  verdict: 'gain' | 'tie' | 'loss';
+  incidents: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  /** Two-sided exact sign test on wins versus losses, 0 to 1. */
+  p: number;
+  net: number;
+  /** Wins minus losses of I0 against I0 over the same incidents; signed. */
+  noiseNet: number;
+  noDataNet: number;
+}
 export interface CampaignView {
   campaignId: string;
   kind: 'hider' | 'meta';
@@ -894,6 +926,8 @@ export interface CampaignView {
   quarantined: Array<{ rowId: string; reasonCodes: string[] }>;
   noiseControl: { present: boolean; rowId: string | null };
   noDataControl: { present: boolean; rowId: string | null };
+  /** Present only for a finished meta campaign whose backend stored the preregistered verdict. */
+  metaVerdict?: MetaVerdictView;
 }
 export interface ProvenanceEdgeView {
   edgeKey: string;
