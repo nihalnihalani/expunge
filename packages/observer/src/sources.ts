@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import type { ScopeKey } from '@expunge/contracts';
 import { GuardFileError, parseGuardFile, type LeakGuard } from '@expunge/observability';
 import { ErasureSuppressionRepository, type MongoService } from '@expunge/mongo';
@@ -23,6 +23,10 @@ export class EvidenceSourceError extends Error {
  *
  * Verified here: the file is not group/other accessible, it is for THIS scope and provider organization, the count and
  * digest match its content (not truncated or edited), and a malformed `privateIds` block is refused rather than dropped.
+ * The digest is UNKEYED (a plain content hash): it detects truncation and accidental edits, not a deliberate forgery by whoever
+ * can write the file (that party can recompute it); the file's integrity rests on its owner-only mode and read-only mount. The
+ * organization check compares this process's configuration with the value the exporter was configured with; both come from
+ * configuration, so it catches a mix-up between deployments, not a wrong organization configured in both places.
  * Not verified: that it is the current generation of the subject set (follow-up: a Mongo generation row). It is read once at
  * start; a changed subject set needs a restart. Absent => undefined, so the process stays BLOCKED; invalid => throws.
  */
@@ -32,8 +36,16 @@ export function loadGuardFile(
 ): LeakGuard | undefined {
   if (!path?.trim()) return undefined;
   try {
-    if ((statSync(path).mode & 0o077) !== 0) throw new EvidenceSourceError('EXPUNGE_LEAK_GUARD_FILE:mode');
-    return parseGuardFile(readFileSync(path, 'utf8'), expected).guard;
+    // Stat and read the SAME open file (no stat-then-read gap in which the path could be swapped).
+    const fd = openSync(path, 'r');
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile() || (stat.mode & 0o077) !== 0)
+        throw new EvidenceSourceError('EXPUNGE_LEAK_GUARD_FILE:mode');
+      return parseGuardFile(readFileSync(fd, 'utf8'), expected).guard;
+    } finally {
+      closeSync(fd);
+    }
   } catch (error) {
     if (error instanceof EvidenceSourceError) throw error;
     if (error instanceof GuardFileError)
