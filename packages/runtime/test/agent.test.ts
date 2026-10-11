@@ -2,7 +2,7 @@ import { AbstractAgent } from '@ag-ui/client';
 import { EventType, type BaseEvent } from '@ag-ui/core';
 import { contentHash, type CompletionReceipt, type HarnessBundle } from '@expunge/contracts';
 import { ProtocolError } from '@expunge/mongo';
-import { defineTool, type ToolDefinition } from '@expunge/vendor-openmuse';
+import { defineTool, type ChatMiddleware, type ToolDefinition } from '@expunge/vendor-openmuse';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -45,6 +45,7 @@ type RigOptions = {
   pricing?: { inputMicrousdPerMillion?: number; outputMicrousdPerMillion?: number };
   jobOver?: Parameters<typeof makeJob>[1];
   extraBundles?: HarnessBundle[];
+  chatMiddleware?: ChatMiddleware[];
 };
 
 function rig(options: RigOptions) {
@@ -85,6 +86,7 @@ function rig(options: RigOptions) {
     toolDrainMs: options.toolDrainMs,
     acceptClientState: options.acceptClientState,
     requirePricing: options.requirePricing,
+    chatMiddleware: options.chatMiddleware,
     receipts: options.receipt === undefined ? undefined : { find: async () => options.receipt ?? null },
   });
   const agent = new ExpungeExecutionAgent(deps, { actor: ACTOR, lease });
@@ -1061,5 +1063,44 @@ describe('B2-2 hardening: client state, terminal labels, provenance and metering
     });
     await collect(r.agent.run(runInput()));
     expect((await r.agent.settled())?.metered).toMatchObject({ unpricedCalls: 1, costCoverage: 'none' });
+  });
+});
+
+describe('chat middleware (observability) passthrough', () => {
+  it('reaches the real chat loop and observes the run without changing its outcome', async () => {
+    const seen: string[] = [];
+    const middleware: ChatMiddleware = {
+      name: 'recording',
+      onStart: () => void seen.push('start'),
+      onFinish: (_ctx, info) => void seen.push(`finish:${info.content}`),
+    };
+    const r = rig({ script: [fakeText('ok')], chatMiddleware: [middleware] });
+    await collect(r.agent.run(runInput()));
+    expect(seen).toEqual(['start', 'finish:ok']);
+    expect((await r.agent.settled())?.endedBy).toBe('finished');
+  });
+
+  it('a middleware that throws or rejects cannot fail the run; the error is reported through onHookError', async () => {
+    const errors: string[] = [];
+    const middleware: ChatMiddleware = {
+      name: 'explodes',
+      onStart: () => {
+        throw new Error('telemetry exploded');
+      },
+      onFinish: async () => {
+        throw new Error('telemetry rejected');
+      },
+    };
+    const r = rig({
+      script: [fakeText('ok')],
+      chatMiddleware: [middleware],
+      hooks: { onHookError: (hook) => void errors.push(hook) },
+    });
+    const events = await collect(r.agent.run(runInput()));
+    expect(typesOf(events).at(-1)).toBe('RUN_FINISHED');
+    expect((await r.agent.settled())?.endedBy).toBe('finished');
+    expect(errors).toEqual(
+      expect.arrayContaining(['chatMiddleware:explodes.onStart', 'chatMiddleware:explodes.onFinish']),
+    );
   });
 });

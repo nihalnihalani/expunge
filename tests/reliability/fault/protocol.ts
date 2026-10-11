@@ -42,6 +42,7 @@ export type ChildEvent =
   | { event: 'ready'; pid: number; workerId: string }
   | { event: 'point'; name: string; n: number; pid: number }
   | { event: 'effect'; receiptId: string; replayed: boolean }
+  | { event: 'repaired'; count: number }
   | { event: 'tool-error'; message: string }
   | { event: 'result'; outcome: string; errorCode?: string; reason?: string }
   | { event: 'fatal'; message: string };

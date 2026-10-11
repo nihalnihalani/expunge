@@ -9,7 +9,8 @@ import type {
   JsonValue,
   ScopeKey,
 } from '@expunge/contracts';
-import type { AnyTextAdapter, ProviderEnv, ToolDefinition } from '@expunge/vendor-openmuse';
+import type { AnyTextAdapter, ChatMiddleware, ProviderEnv, ToolDefinition } from '@expunge/vendor-openmuse';
+import type { MeterCarry } from './meter.js';
 
 export type WaitStatus = 'waiting_evidence' | 'waiting_approval' | 'waiting_external';
 export type LeaseBinding = { jobId: string; ownerId: string; fence: number };
@@ -94,6 +95,8 @@ export type PhaseInfo = {
   elapsedMs: number;
   /** The adapter that actually served the run so far (provider-reported name and model), once known. */
   model?: { provider: string; model: string };
+  /** Cumulative usage of the JOB (prior sessions included), to be persisted in the checkpoint. */
+  meter?: MeterCarry;
 };
 
 export type SecurityEvent =
@@ -114,6 +117,11 @@ export interface ExecutionHooks {
   onPhaseComplete?(info: PhaseInfo): Promise<void | 'continue' | 'stop'>;
   /** Projection/tracing adapter. Errors are reported through onHookError and do not abort the run. */
   onEvent?(event: BaseEvent): void | Promise<void>;
+  /**
+   * Called once when the session ends, while the lease is still held and BEFORE it is released, with the job's cumulative
+   * usage. Persist it (the worker writes it into the checkpoint) so a takeover starts from the committed totals.
+   */
+  onMeter?(carry: MeterCarry): Promise<void>;
   onSecurityEvent?(event: SecurityEvent): void;
   onHookError?(hook: string, error: unknown): void;
 }
@@ -150,6 +158,12 @@ export type ExecutionDependencies = {
   readonly modelStateTools?: boolean;
   /** Trusted system prompt for the run. Defaults to `defaultWorkerPrompt`. */
   readonly prompt?: (job: Job, bundle: HarnessBundle) => string;
+  /**
+   * Observability middleware for the model loop (e.g. GenAI spans). Host code only: it observes the loop and cannot
+   * change what the run is allowed to do. A failing middleware is the middleware's problem; the run's authority,
+   * limits and lease handling do not depend on it. Default none.
+   */
+  readonly chatMiddleware?: readonly ChatMiddleware[];
 };
 
 export type ExecutionBinding = {
@@ -202,6 +216,8 @@ export type RunStats = {
   elapsedMs: number;
   usage?: unknown;
   metered?: UsageSummary;
+  /** The cumulative totals as persisted (prior sessions included). */
+  meterCarry?: MeterCarry;
   provenance?: RunProvenance;
   /** sha256 and length of the model's final text; the narrative itself is not retained here. */
   narrative?: { sha256: string; length: number };

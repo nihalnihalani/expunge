@@ -2,11 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { EventType, type BaseEvent, type RunAgentInput } from '@ag-ui/core';
 import type { HarnessBundle, Job, ScopeKey } from '@expunge/contracts';
 import { tanstackAgent, type TanStackAgent, type ToolDefinition } from '@expunge/vendor-openmuse';
+import { guardMiddleware } from './middleware-guard.js';
 import type { Subscriber, Subscription } from 'rxjs';
 import { filterModelStateEvent, stripProtectedKeys } from './authority.js';
 import { RuntimeError, JobWaitSignal, errorCode, isFenceLoss, type RuntimeErrorCode } from './errors.js';
 import { releaseLease } from './lease-release.js';
-import { UsageMeter } from './meter.js';
+import { EMPTY_CARRY, UsageMeter, readMeterCarry, type MeterCarry } from './meter.js';
 import { profileFingerprint } from './models.js';
 import { defaultWorkerPrompt } from './prompt.js';
 import type {
@@ -68,6 +69,8 @@ export class RunSession {
   private job?: Job;
   private usage: unknown;
   private meter?: UsageMeter;
+  /** Usage of the job's earlier sessions, read from the durable checkpoint at start. */
+  private carried: MeterCarry = EMPTY_CARRY;
   private provenance?: Omit<RunProvenance, 'provider' | 'model'>;
   private stepLimitReached = false;
   private stepLimitNoteExpected = false;
@@ -93,16 +96,21 @@ export class RunSession {
       this.job = job;
       const bundle = await this.loadBundle(job);
       this.bundle = bundle;
-      this.maxSteps = Math.max(1, bundle.limits.modelCalls);
+      // Budgets are per JOB: what earlier sessions of this job already used comes from its durable checkpoint.
+      const read = readMeterCarry(job.checkpoint);
+      if ('invalid' in read) throw new RuntimeError('CheckpointInvalid');
+      this.carried = read.carry;
+      const modelCallsLeft = bundle.limits.modelCalls - this.carried.modelCalls;
+      const wallLeft = bundle.limits.wallTimeMs - this.carried.wallTimeMs;
+      this.maxSteps = Math.max(1, modelCallsLeft);
       this.phaseTimeoutMs = Math.max(
         1,
-        Math.min(this.deps.phaseTimeoutMs ?? DEFAULT_PHASE_TIMEOUT_MS, bundle.limits.wallTimeMs),
+        Math.min(this.deps.phaseTimeoutMs ?? DEFAULT_PHASE_TIMEOUT_MS, Math.max(1, wallLeft)),
       );
-      this.wallDeadline = this.startedAt + bundle.limits.wallTimeMs;
-      this.wallTimer = setTimeout(
-        () => this.fail('WallTimeExceeded', 'wall_time'),
-        Math.max(1, bundle.limits.wallTimeMs),
-      );
+      this.wallDeadline = this.startedAt + Math.max(0, wallLeft);
+      this.wallTimer = setTimeout(() => this.fail('WallTimeExceeded', 'wall_time'), Math.max(1, wallLeft));
+      if (wallLeft <= 0) this.fail('WallTimeExceeded', 'wall_time');
+      else if (modelCallsLeft <= 0) this.fail('StepLimitReached', 'step_limit');
       await this.recordContextInputs(this.bundleContextHashes(job, bundle));
       if (this.stopping) return this.finish();
 
@@ -133,8 +141,17 @@ export class RunSession {
       } catch (error) {
         throw new RuntimeError('ModelUnavailable', { cause: error });
       }
-      const meter = new UsageMeter(bundle.limits, selection.pricing, this.deps.requirePricing ?? false);
+      const meter = new UsageMeter(
+        bundle.limits,
+        selection.pricing,
+        this.deps.requirePricing ?? false,
+        this.carried,
+      );
       this.meter = meter;
+      // Refuse to start a model call when the job's cumulative totals already reach a limit.
+      const refusal = meter.exhausted();
+      if (!refusal.ok)
+        this.fail(refusal.code, refusal.code === 'TokenBudgetExceeded' ? 'token_budget' : 'cost_budget');
       this.provenance = {
         spec: selection.spec,
         adapterInjected: selection.textAdapter !== undefined,
@@ -170,6 +187,13 @@ export class RunSession {
         },
         clientToolAllowlist: this.deps.clientToolAllowlist ?? [],
         stateTools: this.deps.modelStateTools ?? true,
+        ...(this.deps.chatMiddleware?.length
+          ? {
+              middleware: guardMiddleware(this.deps.chatMiddleware, (hook, error) =>
+                this.deps.hooks?.onHookError?.(`chatMiddleware:${hook}`, error),
+              ),
+            }
+          : {}),
       });
       if (this.stopping) return this.finish();
 
@@ -348,6 +372,7 @@ export class RunSession {
             outcome,
             elapsedMs: Date.now() - started,
             ...(this.inner?.identity ? { model: this.inner.identity } : {}),
+            ...(this.meter ? { meter: this.currentCarry() } : {}),
           });
           if (verdict === 'stop') this.stopRequested = true;
         } catch (error) {
@@ -391,6 +416,11 @@ export class RunSession {
   private requestWait(status: WaitStatus): void {
     this.wait ??= status;
     this.stopRequested = true;
+  }
+
+  /** The job's cumulative usage now: earlier sessions plus this one. */
+  private currentCarry(): MeterCarry {
+    return (this.meter as UsageMeter).carry(this.carried.wallTimeMs + (Date.now() - this.startedAt));
   }
 
   private fail(code: RuntimeErrorCode | string, end: RunEnd): void {
@@ -596,6 +626,15 @@ export class RunSession {
         this.deps.hooks?.onSecurityEvent?.({ kind: 'tools_abandoned', count: abandonedTools });
       }
     }
+    if (this.meter) {
+      // Persist the cumulative totals while the lease is still held, so a takeover (or a resume after a yield) starts
+      // from them. Losing this write only loses the usage since the last phase checkpoint.
+      try {
+        await this.deps.hooks?.onMeter?.(this.currentCarry());
+      } catch (error) {
+        this.deps.hooks?.onHookError?.('onMeter', error);
+      }
+    }
     if (abandonedTools === 0) {
       try {
         const outcome = await releaseLease(this.deps.jobs, this.binding.actor, this.binding.lease, {
@@ -625,7 +664,7 @@ export class RunSession {
         ? { narrative: { sha256: this.narrative.digest('hex'), length: this.narrativeLength } }
         : {}),
       ...(abandonedTools > 0 ? { abandonedTools } : {}),
-      ...(this.meter ? { metered: this.meter.summary() } : {}),
+      ...(this.meter ? { metered: this.meter.summary(), meterCarry: this.currentCarry() } : {}),
       ...(this.provenance
         ? {
             provenance: {

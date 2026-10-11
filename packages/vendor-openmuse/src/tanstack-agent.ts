@@ -8,6 +8,7 @@ import { type BaseEvent, EventType, type RunAgentInput } from '@ag-ui/core';
 import { BuiltInAgent, convertInputToTanStackAI, type ToolDefinition } from '@copilotkit/runtime/v2';
 import {
   type AnyTextAdapter,
+  type ChatMiddleware,
   chat,
   isContentPartArray,
   maxIterations,
@@ -53,6 +54,11 @@ export type TanStackAgentOptions = {
   clientToolAllowlist?: readonly string[];
   /** M6: offer AGUISendStateSnapshot / AGUISendStateDelta (upstream behavior). Default true. */
   stateTools?: boolean;
+  /**
+   * M15: TanStack AI chat middleware for observability (e.g. the OpenTelemetry GenAI span middleware). It observes the
+   * loop; it is trusted host code, never client input, and is passed to `chat()` unchanged. Default none.
+   */
+  middleware?: readonly ChatMiddleware[];
 };
 
 /**
@@ -104,6 +110,8 @@ export class TanStackAgent {
           ],
           agentLoopStrategy: (state) =>
             maxIterations(options.maxSteps)(state) && (options.shouldContinue?.() ?? true),
+          // M15: host-supplied observability middleware only.
+          ...(options.middleware?.length ? { middleware: [...options.middleware] } : {}),
           abortController,
           threadId: input.threadId,
           runId: input.runId,

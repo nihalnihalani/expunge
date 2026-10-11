@@ -208,7 +208,7 @@ describeLive('worker crash, stall and takeover (child processes, real replica se
     expect(s.projection.map((e) => e.kind)).toEqual(['job_started', 'job_failed']);
   }, 90_000);
 
-  it('KNOWN GAP: crash after the terminal transition and before its projection event leaves the job terminal and the terminal event never emitted', async () => {
+  it('crash after the terminal transition and before its projection event: the job is terminal, and the next worker repairs the stream once (no duplicate)', async () => {
     const a = start('worker-a', 'run', [{ point: 'before-projection', action: 'kill', nth: 2 }]);
     expect((await a.waitForExit()).signal).toBe('SIGKILL');
     const crashed = await state();
@@ -220,13 +220,24 @@ describeLive('worker crash, stall and takeover (child processes, real replica se
     const b = start('worker-b');
     await b.waitForExit();
     expect(b.result()?.outcome).toBe('terminal'); // a terminal job is not re-run
+    expect(b.events.find((e) => e.event === 'repaired')).toMatchObject({ count: 1 }); // the startup sweep repaired it
     const s = await state();
     expect([s.effects, s.applied]).toEqual([1, 1]);
-    expect(s.projection.map((e) => e.kind)).toEqual(['job_started']); // nothing re-emits job_failed
+    expect(s.projection.map((e) => e.kind)).toEqual(['job_started', 'job_failed']);
+    expect(s.projection.at(-1)?.eventId).toBe(`${jobId}:failed:1`); // the deterministic id of the lost event
+    contiguous(s.projection);
     expect(s.job.status).toBe('failed');
+
+    // Idempotent: a further worker finds the terminal event present and appends nothing.
+    const c = start('worker-c');
+    await c.waitForExit();
+    expect(c.events.find((e) => e.event === 'repaired')).toMatchObject({ count: 0 });
+    const again = await state();
+    expect(again.projection.filter((e) => e.kind === 'job_failed')).toHaveLength(1);
+    expect(again.projection.map((e) => e.sequence)).toEqual(s.projection.map((e) => e.sequence));
   }, 90_000);
 
-  it('lease expiry and takeover: a frozen worker (SIGSTOP) loses the job; its late job and effect writes are fenced out, but its late terminal projection event is not (KNOWN GAP)', async () => {
+  it('lease expiry and takeover: a frozen worker (SIGSTOP) loses the job; its late job, effect and terminal projection writes are all fenced out', async () => {
     const a = start('worker-a', 'run', [{ point: 'tool-start', action: 'stop' }]);
     await a.waitForPoint('tool-start');
     await sleep(100); // the process is now stopped: no renewals, no writes
@@ -250,17 +261,12 @@ describeLive('worker crash, stall and takeover (child processes, real replica se
     }
     expect([afterA.effects, afterA.receipts, afterA.applied, afterA.revision]).toEqual([1, 1, 1, 1]);
     expect(afterA.job).toEqual(afterB.job); // status, lease and checkpoint untouched by the late worker
-    // KNOWN GAP: the job record and the effect are fenced, but projection appends are not. The resumed worker (fence 1)
-    // appends its own terminal event after the takeover, so the sanitized stream ends up with a second job_failed event
-    // (event id `<job>:failed:1`) next to the real one (`<job>:failed:2`), from a worker that no longer holds the lease.
-    const late = afterA.projection.filter((e) => !afterB.projection.some((x) => x.eventId === e.eventId));
-    expect(late).toHaveLength(1);
-    expect(late[0]).toMatchObject({ kind: 'job_failed', eventId: `${jobId}:failed:1` });
-    expect(late[0]!.payload).toMatchObject({
-      code: 'internal_error',
-      message: 'already_terminal',
-      retryable: false,
-    });
+    // The projection append is fenced too: the resumed worker (fence 1) is refused (StaleFence) and the stream still
+    // holds exactly the takeover's events, so the zombie's late job_failed (`<job>:failed:1`) never appears.
+    expect(afterA.projection.map((e) => e.eventId)).toEqual(afterB.projection.map((e) => e.eventId));
+    expect(afterA.projection.filter((e) => e.kind === 'job_failed')).toHaveLength(1);
+    expect(afterA.projection.some((e) => e.eventId === `${jobId}:failed:1`)).toBe(false);
+    expect(afterA.projection.at(-1)).toMatchObject({ kind: 'job_failed', eventId: `${jobId}:failed:2` });
     expect(a.result()).toMatchObject({ outcome: 'failed', reason: 'already_terminal' });
     contiguous(afterA.projection);
   }, 90_000);

@@ -1,6 +1,7 @@
 import { EventType } from '@ag-ui/core';
-import type { ActorContext, Job, JobKind, JsonValue, ScopeKey } from '@expunge/contracts';
+import type { ActorContext, Job, JobKind, JobStatus, JsonValue, ScopeKey } from '@expunge/contracts';
 import type { ProjectionEventInput } from '@expunge/mongo';
+import type { CarrierHeaders } from '@expunge/observability';
 import {
   ExpungeExecutionAgent,
   errorCode,
@@ -14,9 +15,12 @@ import {
   type ToolProvider,
 } from '@expunge/runtime';
 import type { ProviderEnv } from '@expunge/vendor-openmuse';
+import type { ClientSession } from 'mongodb';
 import type { Subscription } from 'rxjs';
 import type { WorkerConfig } from './config.js';
 import { decideTerminal, projectionFailureCode, terminalCheckpoint, type ReceiptFact } from './terminal.js';
+import type { CommittedReader } from './committed.js';
+import type { EpisodeHandle, OutcomeFacts, Telemetry } from './telemetry.js';
 import type { WakeCommand, WakeTarget } from './wake.js';
 
 /** `JobRepository` (packages/mongo/src/jobs.ts) satisfies this structurally; wiring.ts checks it at compile time. */
@@ -27,6 +31,14 @@ export interface DispatchJobs extends JobPort {
   recordContextInputs(actor: ActorContext, lease: LeaseBinding, hashes: string[]): Promise<string[]>;
   /** Graceful release by the lease owner: running -> queued, lease ended, no fence bump. */
   release(actor: ActorContext, lease: LeaseBinding): Promise<void>;
+  /** `JobRepository.finish` also accepts the caller's transaction, which lets a telemetry intent commit with the state. */
+  finish(
+    actor: ActorContext,
+    lease: LeaseBinding,
+    status: Extract<JobStatus, 'succeeded' | 'failed' | 'cancelled'>,
+    outputRefs: string[],
+    session?: ClientSession,
+  ): Promise<void>;
   /** Job ids this principal could claim now (queued, or running with an expired lease). Used to recover from crashed workers. */
   listClaimable(
     key: ScopeKey,
@@ -49,6 +61,22 @@ export interface JobResolver {
  */
 export interface ProjectionSink {
   append(key: ScopeKey, event: ProjectionEventInput): Promise<unknown>;
+  /**
+   * Append that commits only while `holder` still owns the job (same owner and fence), checked in the same
+   * transaction as the insert. A resumed zombie worker is refused with a `StaleFence` error. Absent: unfenced appends.
+   */
+  appendFenced?(
+    key: ScopeKey,
+    event: ProjectionEventInput,
+    holder: { actor: ActorContext; lease: LeaseBinding },
+  ): Promise<unknown>;
+  /** True when the job's stream already holds a terminal event (job_failed or a status change to a terminal state). */
+  hasTerminal?(key: ScopeKey, jobId: string): Promise<boolean>;
+}
+
+/** Recently finished jobs of the worker's scope, for repairing terminal projections lost to a crash. */
+export interface TerminalSweep {
+  listRecentTerminal(key: ScopeKey, limit: number): Promise<Job[]>;
 }
 
 export type LogEntry = { level: 'info' | 'warn' | 'error'; message: string; jobId?: string; code?: string };
@@ -68,7 +96,14 @@ export type JobOutcome =
   | 'released'
   | 'unfinalized';
 
-export type JobRunResult = { jobId: string; outcome: JobOutcome; stats?: RunStats; reason?: string };
+export type JobRunResult = {
+  jobId: string;
+  outcome: JobOutcome;
+  stats?: RunStats;
+  reason?: string;
+  /** The committed completion receipt this run's ending was decided on, when one exists. */
+  receiptId?: string;
+};
 
 export type DispatcherDeps = {
   jobs: DispatchJobs;
@@ -80,6 +115,12 @@ export type DispatcherDeps = {
   config: WorkerConfig;
   env?: ProviderEnv;
   projection?: ProjectionSink;
+  /** Enables the startup repair of terminal projections lost on a crash (needs `projection`). */
+  terminalSweep?: TerminalSweep;
+  /** Raindrop episodes. Optional and best effort: it never changes how a job runs or ends. */
+  telemetry?: Telemetry;
+  /** Confirms a success at read concern majority before it is reported to Raindrop; absent means unconfirmed reports. */
+  committed?: CommittedReader;
   log?: (entry: LogEntry) => void;
   onResult?: (result: JobRunResult) => void;
 };
@@ -95,17 +136,102 @@ type FinalizeInput = {
   stats: RunStats;
   writer: CheckpointWriter;
   renewalFailed: boolean;
+  episode?: EpisodeHandle;
+  /** Set when the telemetry intent already committed together with the job's terminal state. */
+  telemetryRecorded: { value: boolean };
 };
+
+/** An error from the telemetry half of an atomic finish, so it can be told apart from the job layer's own. */
+class TelemetryFailure extends Error {
+  constructor(readonly original: unknown) {
+    super('TelemetryFailure');
+    this.name = 'TelemetryFailure';
+  }
+}
+
+const statusEvent = (
+  jobId: string,
+  runId: string,
+  attempt: number,
+  to: 'succeeded' | 'cancelled' | 'queued' | WaitState,
+  reason: string,
+  from: 'running' | 'queued' = 'running',
+): ProjectionEventInput => ({
+  eventId: `${jobId}:status:${attempt}:${to}`,
+  jobId,
+  runId,
+  artifactIds: [],
+  kind: 'job_status_changed',
+  payload: { from, to, reason },
+});
+
+const failedEvent = (jobId: string, runId: string, attempt: number, reason: string): ProjectionEventInput => {
+  const code = projectionFailureCode(reason);
+  return {
+    eventId: `${jobId}:failed:${attempt}`,
+    jobId,
+    runId,
+    artifactIds: [],
+    kind: 'job_failed',
+    payload: {
+      code,
+      retryable: code === 'provider_error' || code === 'lease_lost',
+      phase: null,
+      message: reason.slice(0, 200),
+    },
+  };
+};
+
+/**
+ * The terminal event a finished job should have in its stream, rebuilt from committed state only. The reason of a
+ * failure comes from the terminal checkpoint the worker wrote before finishing, so a rebuilt event is byte-identical
+ * to the original and a duplicate append is a no-op.
+ */
+export function terminalEventFor(job: Job): ProjectionEventInput | null {
+  const { _id: jobId, attempt } = job;
+  const runId = job.binding.runId;
+  // The prior status is a committed fact only as far as the row shows it: a job that was ever claimed had been running;
+  // one that never was (attempt 0, cancelled while queued) had been queued.
+  const from = attempt > 0 ? 'running' : 'queued';
+  switch (job.status) {
+    case 'succeeded':
+      return statusEvent(jobId, runId, attempt, 'succeeded', 'completion receipt committed', from);
+    case 'cancelled':
+      return statusEvent(jobId, runId, attempt, 'cancelled', 'cancellation requested', from);
+    case 'failed': {
+      const decision = (job.checkpoint as { terminal?: { decision?: { reason?: unknown } } } | null)?.terminal
+        ?.decision;
+      // No recorded reason is said so; the closed failure vocabulary maps it to internal_error, the message does not pretend.
+      const reason = typeof decision?.reason === 'string' ? decision.reason : 'reason_unrecorded';
+      return failedEvent(jobId, runId, attempt, reason);
+    }
+    default:
+      return null;
+  }
+}
+
+const scopeOf = (actor: ActorContext): ScopeKey => ({
+  tenantId: actor.tenantId,
+  env: actor.env,
+  scopeId: actor.scopeId,
+});
+const MAX_CARRIERS = 256;
+/** Telemetry faults are named by their class (never by message): `errorCode` would flatten them to a generic code. */
+const faultName = (error: unknown): string => (error instanceof Error ? error.name : 'UnknownError');
 
 /** Serializes checkpoint writes for one lease and merges state so every write is a complete snapshot. */
 class CheckpointWriter {
-  private state: Record<string, JsonValue> = { v: 1 };
+  private state: Record<string, JsonValue>;
   private chain: Promise<void> = Promise.resolve();
   constructor(
     private readonly jobs: DispatchJobs,
     private readonly actor: ActorContext,
     private readonly lease: LeaseBinding,
-  ) {}
+    /** The cumulative meter an earlier session committed (checkpoint.meter): kept in every snapshot, never reset. */
+    priorMeter?: JsonValue,
+  ) {
+    this.state = { v: 1, ...(priorMeter !== undefined ? { meter: priorMeter } : {}) };
+  }
   update(patch: Record<string, JsonValue>): Promise<void> {
     this.state = { ...this.state, ...patch };
     const snapshot = this.state;
@@ -114,6 +240,15 @@ class CheckpointWriter {
     return write;
   }
   replace(value: JsonValue): Promise<void> {
+    // A full replacement (the terminal checkpoint) must not drop the job's meter either.
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      !('meter' in value) &&
+      'meter' in this.state
+    )
+      value = { ...value, meter: this.state.meter as JsonValue };
     const write = this.chain.then(() => this.jobs.checkpoint(this.actor, this.lease, value));
     this.chain = write.catch(() => undefined);
     return write;
@@ -132,11 +267,22 @@ export class Dispatcher implements WakeTarget {
   private stopping = false;
   private polling = false;
   private pollTimer?: ReturnType<typeof setInterval>;
+  /** Authenticated trace carriers from wakes, kept only until the job's run begins. */
+  private readonly carriers = new Map<string, CarrierHeaders>();
 
   constructor(private readonly deps: DispatcherDeps) {}
 
-  wake(command: WakeCommand): boolean {
-    return this.enqueue(command.jobId);
+  wake(command: WakeCommand, carrier?: CarrierHeaders | null): boolean {
+    const fresh = !this.queue.includes(command.jobId) && !this.running.has(command.jobId);
+    const accepted = this.enqueue(command.jobId);
+    if (accepted && fresh && carrier) {
+      this.carriers.set(command.jobId, carrier);
+      if (this.carriers.size > MAX_CARRIERS) {
+        const oldest = this.carriers.keys().next().value;
+        if (oldest !== undefined) this.carriers.delete(oldest);
+      }
+    }
+    return accepted;
   }
 
   /** True when a wake would be queued (not stopping, queue not full). Checked before a command id is recorded. */
@@ -255,7 +401,10 @@ export class Dispatcher implements WakeTarget {
     )
       return { jobId, outcome: 'out_of_scope' };
     if (stored.kind !== 'cleanup') return { jobId, outcome: 'unsupported_kind' };
-    if (['succeeded', 'failed', 'cancelled'].includes(stored.status)) return { jobId, outcome: 'terminal' };
+    if (['succeeded', 'failed', 'cancelled'].includes(stored.status)) {
+      await this.repairTerminalProjection(stored);
+      return { jobId, outcome: 'terminal' };
+    }
 
     const claimed = await jobs.claim(stored.actor, jobId, config.ownerId, config.leaseMs);
     if (!claimed) return { jobId, outcome: 'not_claimable' };
@@ -267,22 +416,41 @@ export class Dispatcher implements WakeTarget {
       await jobs.release(actor, lease).catch(() => undefined);
       return { jobId, outcome: 'released', reason: 'worker_stopping' };
     }
-    await this.project(actor, {
-      eventId: `${jobId}:started:${claimed.attempt}`,
-      jobId,
-      runId: claimed.binding.runId,
-      artifactIds: [claimed.binding.harnessHash],
-      kind: 'job_started',
-      payload: {
-        jobKind: claimed.kind,
-        harnessHash: claimed.binding.harnessHash,
-        worldId: claimed.binding.worldId,
-        scopeRevision: claimed.binding.scopeRevision,
-        attempt: claimed.attempt,
+    await this.project(
+      actor,
+      {
+        eventId: `${jobId}:started:${claimed.attempt}`,
+        jobId,
+        runId: claimed.binding.runId,
+        artifactIds: [claimed.binding.harnessHash],
+        kind: 'job_started',
+        payload: {
+          jobKind: claimed.kind,
+          harnessHash: claimed.binding.harnessHash,
+          worldId: claimed.binding.worldId,
+          scopeRevision: claimed.binding.scopeRevision,
+          attempt: claimed.attempt,
+        },
       },
-    });
+      lease,
+    );
 
-    const writer = new CheckpointWriter(jobs, actor, lease);
+    const carrier = this.carriers.get(jobId) ?? null;
+    this.carriers.delete(jobId);
+    const execute = (episode?: EpisodeHandle) => this.execute({ jobId, actor, lease, claimed }, episode);
+    return this.deps.telemetry ? this.deps.telemetry.episode(claimed, carrier, execute) : execute();
+  }
+
+  private async execute(
+    ctx: { jobId: string; actor: ActorContext; lease: LeaseBinding; claimed: Job },
+    episode?: EpisodeHandle,
+  ): Promise<JobRunResult> {
+    const { jobs, config } = this.deps;
+    const { jobId, actor, lease, claimed } = ctx;
+    // Defensive: onPhaseComplete already carries the meter, but a snapshot written before the first phase (or a
+    // replace()) must never drop what an earlier session committed.
+    const priorMeter = (claimed.checkpoint as { meter?: JsonValue } | null)?.meter;
+    const writer = new CheckpointWriter(jobs, actor, lease, priorMeter);
     const hooks: ExecutionHooks = {
       onContextInputs: async (hashes) => void (await jobs.recordContextInputs(actor, lease, hashes)),
       onPhaseComplete: async (info) => {
@@ -294,6 +462,7 @@ export class Dispatcher implements WakeTarget {
             lastOutcome: info.outcome,
             lastPhaseMs: info.elapsedMs,
             ...(info.model ? { model: info.model } : {}),
+            ...(info.meter ? { meter: info.meter as unknown as JsonValue } : {}),
           });
         } catch (error) {
           // complete_cleanup commits the receipt AND the terminal job state in one transaction, so the
@@ -306,6 +475,8 @@ export class Dispatcher implements WakeTarget {
         }
         return 'continue';
       },
+      // Cumulative job usage, written while the lease is still held so a takeover starts from the committed totals.
+      onMeter: (carry) => writer.update({ meter: carry as unknown as JsonValue }),
       onHookError: (hook, error) =>
         this.log({ level: 'warn', message: `hook ${hook} failed`, jobId, code: errorCode(error) }),
     };
@@ -314,7 +485,7 @@ export class Dispatcher implements WakeTarget {
       {
         jobs,
         artifacts: this.deps.artifacts,
-        tools: this.deps.tools,
+        tools: episode ? episode.tools(this.deps.tools) : this.deps.tools,
         models: this.deps.models,
         receipts: this.deps.receipts,
         hooks,
@@ -322,6 +493,7 @@ export class Dispatcher implements WakeTarget {
         phaseTimeoutMs: config.phaseTimeoutMs,
         requirePricing: config.requirePricing,
         toolDrainMs: config.toolDrainMs,
+        ...(episode ? { chatMiddleware: episode.chatMiddleware() } : {}),
       },
       { actor, lease },
     );
@@ -364,31 +536,36 @@ export class Dispatcher implements WakeTarget {
     }, config.renewEveryMs);
 
     let runErrorCode: string | undefined;
-    try {
-      subscription = agent
-        .run({
-          threadId: jobId,
-          runId: claimed.binding.runId,
-          state: {},
-          messages: [{ id: `${claimed.binding.runId}-begin`, role: 'user', content: BEGIN(jobId) }],
-          tools: [],
-          context: [],
-          forwardedProps: {},
-        })
-        .subscribe({
-          next: (event) => {
-            if (event.type === EventType.RUN_ERROR)
-              runErrorCode = (event as unknown as { code?: string }).code;
-          },
-          error: () => finishRun(),
-          complete: () => finishRun(),
-        });
-      await done;
-    } catch (error) {
-      runErrorCode = errorCode(error);
-    } finally {
-      subscription?.unsubscribe();
-    }
+    const runModel = async () => {
+      try {
+        subscription = agent
+          .run({
+            threadId: jobId,
+            runId: claimed.binding.runId,
+            state: {},
+            messages: [{ id: `${claimed.binding.runId}-begin`, role: 'user', content: BEGIN(jobId) }],
+            tools: [],
+            context: [],
+            forwardedProps: {},
+          })
+          .subscribe({
+            next: (event) => {
+              if (event.type === EventType.RUN_ERROR)
+                runErrorCode = (event as unknown as { code?: string }).code;
+            },
+            error: () => finishRun(),
+            complete: () => finishRun(),
+          });
+        await done;
+      } catch (error) {
+        runErrorCode = errorCode(error);
+      } finally {
+        subscription?.unsubscribe();
+      }
+    };
+    // Subscribing inside the episode's context is what parents the model and tool spans to the episode.
+    if (episode) await episode.run(runModel);
+    else await runModel();
 
     try {
       const stats: RunStats = (await agent.settled()) ?? {
@@ -399,7 +576,17 @@ export class Dispatcher implements WakeTarget {
         elapsedMs: 0,
         release: 'none',
       };
-      return await this.finalize({ jobId, actor, lease, claimed, stats, writer, renewalFailed });
+      return await this.finalize({
+        jobId,
+        actor,
+        lease,
+        claimed,
+        stats,
+        writer,
+        renewalFailed,
+        ...(episode ? { episode } : {}),
+        telemetryRecorded: { value: false },
+      });
     } finally {
       clearInterval(heartbeat);
     }
@@ -408,53 +595,182 @@ export class Dispatcher implements WakeTarget {
   private async finalize(input: FinalizeInput): Promise<JobRunResult> {
     const result = await this.finalizeState(input);
     await this.projectOutcome(input, result);
+    await this.recordEpisode(input, result);
     return result;
   }
 
-  private async project(actor: ActorContext, event: ProjectionEventInput): Promise<void> {
-    if (!this.deps.projection) return;
+  /**
+   * Telemetry after the job's committed outcome: the read-back intent (unless it already committed with the terminal
+   * state) and then the terminal Raindrop event. Both are best effort and can never change the result.
+   */
+  private async recordEpisode(input: FinalizeInput, result: JobRunResult): Promise<void> {
+    const { episode } = input;
+    const telemetry = this.deps.telemetry;
+    if (!episode || !telemetry) return;
+    let outcome = result.outcome;
+    if (outcome === 'succeeded' && this.deps.committed) {
+      // Under-claim rather than over-claim: a success that cannot be confirmed as majority-committed is `aborted`.
+      const confirmed = await this.deps.committed
+        .confirmSucceeded(input.actor, input.jobId, result.receiptId)
+        .catch(() => false);
+      if (!confirmed) {
+        outcome = 'unfinalized';
+        this.log({
+          level: 'warn',
+          message: 'success not confirmed as majority-committed; reported as aborted',
+          jobId: input.jobId,
+        });
+      }
+    }
+    const facts: OutcomeFacts = {
+      outcome,
+      stats: result.stats ?? input.stats,
+      ...(result.reason ? { reason: result.reason } : {}),
+      ...(result.receiptId ? { receiptId: result.receiptId } : {}),
+    };
+    if (!input.telemetryRecorded.value) {
+      try {
+        // Not atomic with the job transition on this path (see finishJob); the operation id makes it idempotent.
+        await telemetry.enqueue(scopeOf(input.actor), episode.intent(facts));
+      } catch (error) {
+        this.log({
+          level: 'warn',
+          message: 'telemetry intent not recorded',
+          jobId: input.jobId,
+          code: faultName(error),
+        });
+      }
+    }
+    await episode.complete(facts);
+  }
+
+  /**
+   * Ends the job. When telemetry can share a transaction, the read-back intent commits or aborts together with the
+   * terminal state. A telemetry failure inside that transaction never strands the job: the finish is retried plainly.
+   */
+  private async finishJob(
+    input: FinalizeInput,
+    status: Extract<JobStatus, 'succeeded' | 'failed' | 'cancelled'>,
+    outputRefs: string[],
+    facts: OutcomeFacts,
+  ): Promise<void> {
+    const { jobs, telemetry } = this.deps;
+    const { actor, lease, episode } = input;
+    if (episode && telemetry?.atomically) {
+      try {
+        await telemetry.atomically(async (session) => {
+          await jobs.finish(actor, lease, status, outputRefs, session);
+          try {
+            await telemetry.enqueue(scopeOf(actor), episode.intent(facts), session);
+          } catch (error) {
+            throw new TelemetryFailure(error);
+          }
+        });
+        input.telemetryRecorded.value = true;
+        return;
+      } catch (error) {
+        if (!(error instanceof TelemetryFailure)) throw error;
+        this.log({
+          level: 'warn',
+          message: 'telemetry intent could not commit with the job state; finishing without it',
+          jobId: input.jobId,
+          code: faultName(error.original),
+        });
+      }
+    }
+    await jobs.finish(actor, lease, status, outputRefs);
+  }
+
+  /**
+   * Appends one sanitized event. With a `lease` the append is fenced when the sink supports it: a worker that lost
+   * the job (a zombie resumed after takeover) cannot add events to its stream.
+   */
+  private async project(
+    actor: ActorContext,
+    event: ProjectionEventInput,
+    lease?: LeaseBinding,
+  ): Promise<void> {
+    const sink = this.deps.projection;
+    if (!sink) return;
+    const key = scopeOf(actor);
     try {
-      await this.deps.projection.append(
-        { tenantId: actor.tenantId, env: actor.env, scopeId: actor.scopeId },
-        event,
-      );
+      if (lease && sink.appendFenced) await sink.appendFenced(key, event, { actor, lease });
+      else await sink.append(key, event);
     } catch (error) {
+      const code = errorCode(error);
       this.log({
         level: 'warn',
-        message: 'projection append failed',
+        message:
+          code === 'StaleFence' ? 'projection refused: lease no longer held' : 'projection append failed',
         jobId: event.jobId,
-        code: errorCode(error),
+        code,
       });
     }
   }
 
+  /**
+   * Re-emits the terminal projection event of a job that is already terminal, from committed state only. A crash
+   * between the terminal transition and its event leaves the stream behind the job; event ids are deterministic, so
+   * this is idempotent. Never fenced: it states what is committed, it does not act for a lease.
+   */
+  async repairTerminalProjection(job: Job): Promise<boolean> {
+    const sink = this.deps.projection;
+    if (!sink) return false;
+    const event = terminalEventFor(job);
+    if (!event) return false;
+    const key = scopeOf(job.actor);
+    try {
+      if (sink.hasTerminal && (await sink.hasTerminal(key, job._id))) return false;
+      await sink.append(key, event);
+      this.log({
+        level: 'info',
+        message: 'terminal projection repaired from committed state',
+        jobId: job._id,
+      });
+      return true;
+    } catch (error) {
+      this.log({
+        level: 'warn',
+        message: 'terminal projection repair failed',
+        jobId: job._id,
+        code: errorCode(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Startup sweep: repairs the terminal projection of recently finished jobs in the worker's scope. Disclosed limits: only
+   * a bounded window of recent terminal jobs (pollBatch * 4, newest first) and only the configured scope; an older or
+   * out-of-scope job is repaired when a wake for it arrives.
+   */
+  async repairTerminalProjections(): Promise<number> {
+    const { terminalSweep, projection } = this.deps;
+    const { scope, pollBatch } = this.deps.config;
+    if (!terminalSweep || !projection || !scope) return 0;
+    let repaired = 0;
+    try {
+      for (const job of await terminalSweep.listRecentTerminal(scope, pollBatch * 4))
+        if (await this.repairTerminalProjection(job)) repaired++;
+    } catch (error) {
+      this.log({ level: 'warn', message: 'terminal projection sweep failed', code: errorCode(error) });
+    }
+    return repaired;
+  }
+
   /** Committed-state facts only; the model's stream and narrative never become projection events here. */
   private async projectOutcome(input: FinalizeInput, result: JobRunResult): Promise<void> {
-    const { jobId, actor, claimed, stats } = input;
-    const base = { jobId, runId: claimed.binding.runId, artifactIds: [] as string[] };
+    const { jobId, actor, claimed, stats, lease } = input;
     const status = (to: 'succeeded' | 'cancelled' | 'queued' | WaitState, reason: string) =>
-      this.project(actor, {
-        ...base,
-        eventId: `${jobId}:status:${claimed.attempt}:${to}`,
-        kind: 'job_status_changed',
-        payload: { from: 'running', to, reason },
-      });
+      this.project(actor, statusEvent(jobId, claimed.binding.runId, claimed.attempt, to, reason), lease);
     switch (result.outcome) {
-      case 'failed': {
-        const code = projectionFailureCode(result.reason ?? 'internal_error');
-        await this.project(actor, {
-          ...base,
-          eventId: `${jobId}:failed:${claimed.attempt}`,
-          kind: 'job_failed',
-          payload: {
-            code,
-            retryable: code === 'provider_error' || code === 'lease_lost',
-            phase: null,
-            message: (result.reason ?? 'internal_error').slice(0, 200),
-          },
-        });
+      case 'failed':
+        await this.project(
+          actor,
+          failedEvent(jobId, claimed.binding.runId, claimed.attempt, result.reason ?? 'internal_error'),
+          lease,
+        );
         return;
-      }
       case 'succeeded':
         if (result.reason === 'receipt_committed') await status('succeeded', 'completion receipt committed');
         return;
@@ -494,6 +810,8 @@ export class Dispatcher implements WakeTarget {
         this.log({ level: 'warn', message: 'receipt read failed', jobId, code: errorCode(error) });
       }
     }
+    const done = (result: JobRunResult): JobRunResult =>
+      receipt ? { ...result, receiptId: receipt.receiptId } : result;
     const action = decideTerminal({
       stats,
       stored,
@@ -536,19 +854,29 @@ export class Dispatcher implements WakeTarget {
                 ? 'lost_lease'
                 : 'aborted';
       this.log({ level: 'info', message: `job ended: ${outcome}`, jobId });
-      return { jobId, outcome, stats, reason: action.reason };
+      return done({ jobId, outcome, stats, reason: action.reason });
     }
     try {
       await writer.replace(terminalCheckpoint(stats, action));
       try {
-        await jobs.finish(actor, lease, action.status, action.outputRefs);
+        await this.finishJob(input, action.status, action.outputRefs, {
+          outcome: action.status,
+          stats,
+          reason: action.reason,
+          ...(receipt ? { receiptId: receipt.receiptId } : {}),
+        });
         this.log({ level: 'info', message: `job finished: ${action.status}`, jobId, code: action.reason });
-        return { jobId, outcome: action.status, stats, reason: action.reason };
+        return done({ jobId, outcome: action.status, stats, reason: action.reason });
       } catch (error) {
         // The repository refuses `succeeded` without a verifiable receipt; downgrade rather than strand the job.
         if (action.status === 'succeeded' && errorCode(error) === 'CompletionReceiptRequired') {
-          await jobs.finish(actor, lease, 'failed', action.outputRefs);
-          return { jobId, outcome: 'failed', stats, reason: 'CompletionReceiptRequired' };
+          await this.finishJob(input, 'failed', action.outputRefs, {
+            outcome: 'failed',
+            stats,
+            reason: 'CompletionReceiptRequired',
+            ...(receipt ? { receiptId: receipt.receiptId } : {}),
+          });
+          return done({ jobId, outcome: 'failed', stats, reason: 'CompletionReceiptRequired' });
         }
         throw error;
       }
