@@ -1,0 +1,18 @@
+Open a terminal and run these commands to start the requested interactive team lead.
+This file is a launch recipe, not a command that has been executed by this chat.
+
+cd "/Users/nihalnihalani/Desktop/Github/harness hackathon"
+
+CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
+ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5-5 \
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-5-5 \
+ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-5-5 \
+claude --model claude-opus-5-5
+
+Then paste the complete line from EXPUNGE-CLAUDE-GOAL-COMMAND.txt into that interactive Claude Code session. It reads EXPUNGE-CLAUDE-GOAL-SPEC.txt and directs Claude to create the named teammates.
+
+Confirm the effective leader/teammate models. Provider availability, managed allowlists, model hooks or forced subagent overrides can substitute a model even when a preferred ID was requested. Do not silently accept a different version. Do not use the -p headless flag for the requested native Agent Team.
+
+For an account/tool switch, ask the outgoing lead to checkpoint and hand off using section 20 of EXPUNGE-CLAUDE-GOAL-SPEC.txt. It must save the exact WIP, preserve goal criteria and stop outgoing coding continuation/writers before takeover. Keep application jobs and experiment state intact. The human signs into the new account/tool; credentials never belong in handoff files.
+
+In the new interactive Claude Code account, paste EXPUNGE-CLAUDE-RESUME-GOAL.txt after using the same model/team launch policy. In Codex, paste EXPUNGE-PORTABLE-RESUME-PROMPT.txt as a normal prompt, using the supported Codex role adapter rather than Claude slash commands. Both paths reconcile actual code and checkpoint state before continuing.

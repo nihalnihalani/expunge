@@ -1,0 +1,15 @@
+{
+  "name": "@expunge/harness-compiler",
+  "version": "0.1.0",
+  "description": "Trusted compiler for typed Expunge harness bundles: guardrail ASTs, workflow graphs, tool policy and mutation classes.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/baselines": "0.1.0",
+    "@expunge/contracts": "0.1.0"
+  },
+  "devDependencies": {
+    "mongodb": "7.7.0"
+  }
+}

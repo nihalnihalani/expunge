@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.firecrawl/
+.expunge/
+apps/operator/
+research/
+package-lock.json
+*.md

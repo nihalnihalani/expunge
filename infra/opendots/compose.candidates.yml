@@ -1,0 +1,109 @@
+# Candidate-only stack. Build the upstream computer-image target first.
+# Ordinary per-Dot computers retain apps/operator/compose.computers.yml.
+# One candidate per Compose project; use distinct ports/subnets for parallel jobs.
+services:
+  candidate-netguard:
+    build:
+      context: .
+      dockerfile: netguard.Dockerfile
+    environment:
+      PROXY_IPV4: ${EXPUNGE_PROXY_IPV4:-172.30.90.2}
+      PROXY_PORT: '4314'
+    extra_hosts:
+      - 'candidate-proxy:${EXPUNGE_PROXY_IPV4:-172.30.90.2}'
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ['/run:size=1m,mode=0755', '/tmp:size=8m,mode=1777']
+    ports:
+      - '127.0.0.1:${EXPUNGE_CANDIDATE_PORT:-4313}:4100'
+    networks:
+      candidate-private:
+        ipv4_address: ${EXPUNGE_CANDIDATE_IPV4:-172.30.90.3}
+      # Docker suppresses host port publication on a solely internal network.
+      # This dedicated ingress bridge admits loopback-published control only;
+      # namespace OUTPUT DROP still blocks every new outbound connection there.
+      candidate-control: {}
+    cpus: 0.1
+    mem_limit: 32m
+    pids_limit: 32
+    healthcheck:
+      test: ['CMD-SHELL', 'test -f /run/ready && iptables -C OUTPUT -d "$$PROXY_IPV4" -p tcp --dport "$$PROXY_PORT" -j ACCEPT && iptables -C OUTPUT -d 127.0.0.11 -j DROP']
+      interval: 2s
+      timeout: 2s
+      retries: 10
+  candidate-computer:
+    image: opendots-computer:b6932d3
+    network_mode: service:candidate-netguard
+    depends_on:
+      candidate-netguard:
+        condition: service_healthy
+    # Candidate receives its own child computer credential only. No master,
+    # supervisor, MongoDB, grader, promoter, model or telemetry keys.
+    environment:
+      PORT: '4100'
+      COMPUTER_BOT_ID: ${EXPUNGE_CANDIDATE_DOT_ID:?Set the candidate Dot ID}
+      COMPUTER_TOKEN: ${EXPUNGE_CANDIDATE_COMPUTER_TOKEN:?Set a derived child token}
+      COMPUTER_BROWSER_MODE: headless
+      WORKSPACE_DIR: /workspace
+      EGRESS_PROXY_DEFAULT: http://candidate-proxy:4314
+      http_proxy: http://candidate-proxy:4314
+      https_proxy: http://candidate-proxy:4314
+    read_only: true
+    # Source/results must be exported through the broker before replacement.
+    # Unlike ordinary Dot workspaces these candidate filesystems are disposable
+    # and quota bounded; admitted artifacts live in the trusted service.
+    tmpfs:
+      - '/workspace:size=64m,mode=0755'
+      - '/profiles:size=256m,mode=0755'
+      - '/tmp:size=512m,mode=1777'
+      - '/root/.cache:size=32m,mode=0700'
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 256
+    shm_size: 512m
+    init: true
+  candidate-proxy:
+    build:
+      context: .
+      dockerfile: proxy.Dockerfile
+    environment:
+      PORT: '4314'
+      EXPUNGE_CANDIDATE_ID: ${EXPUNGE_CANDIDATE_ID:?Set a stored candidate ID}
+      EXPUNGE_CANDIDATE_ACCESS_TOKEN: ${EXPUNGE_CANDIDATE_ACCESS_TOKEN:?Set a scoped candidate transport token}
+      EXPUNGE_CANDIDATE_BROKER_ORIGIN: ${EXPUNGE_CANDIDATE_BROKER_ORIGIN:-http://candidate-broker:4320}
+      # Its own principal. Never the operator's EXPUNGE_INTERNAL_TOKEN (read-projection principal).
+      EXPUNGE_CANDIDATE_BROKER_TOKEN: ${EXPUNGE_CANDIDATE_BROKER_TOKEN:?Set the proxy-to-broker service token}
+      # Optional hex SHA-256 of the operator token, so the proxy can refuse accidental reuse without holding it.
+      EXPUNGE_OPERATOR_TOKEN_SHA256: ${EXPUNGE_OPERATOR_TOKEN_SHA256:-}
+      # Exact method/path entries; empty defaults deny every request. B2 supplies
+      # its admitted broker/artifact routes. CONNECT/generic forwarding forbidden.
+      EXPUNGE_CANDIDATE_ALLOWED_ROUTES: ${EXPUNGE_CANDIDATE_ALLOWED_ROUTES:-[]}
+    networks:
+      candidate-private:
+        ipv4_address: ${EXPUNGE_PROXY_IPV4:-172.30.90.2}
+      broker-internal: {}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ['/tmp:size=8m,mode=1777']
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 32
+    init: true
+networks:
+  candidate-control:
+    driver: bridge
+  candidate-private:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${EXPUNGE_CANDIDATE_SUBNET:-172.30.90.0/29}
+  broker-internal:
+    internal: true
+    # Attach only the trusted candidate broker, never DB/grader/promoter.
+    name: ${EXPUNGE_BROKER_NETWORK:-expunge-candidate-broker}

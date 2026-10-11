@@ -1,0 +1,5 @@
+{
+  "paths": [],
+  "sha256": [],
+  "note": "Registry of sealed or private material withheld from checkpoint packs and commits; maintained by team-lead. Paths are repo-relative; sha256 entries withhold a file under any name."
+}

@@ -1,0 +1,29 @@
+services:
+  mongo:
+    image: mongo:8.0.15
+    entrypoint:
+      - bash
+      - -c
+      - |
+        head -c 756 /dev/urandom | base64 > /tmp/expunge-keyfile
+        chmod 400 /tmp/expunge-keyfile
+        chown mongodb:mongodb /tmp/expunge-keyfile
+        exec docker-entrypoint.sh mongod --auth --keyFile /tmp/expunge-keyfile --replSet expunge-auth --bind_ip_all
+    ports: ['127.0.0.1:27019:27017']
+    tmpfs: ['/data/db']
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - |
+          try { rs.initiate({_id:'expunge-auth',members:[{_id:0,host:'localhost:27017'}]}) } catch(e) {}
+          try { db.getSiblingDB('admin').createUser({user:'expunge-test-admin',pwd:'local-tests-only',roles:['root']}) } catch(e) {}
+          db.getSiblingDB('admin').auth('expunge-test-admin','local-tests-only');
+          if(rs.status().ok !== 1) throw Error('not ready');
+      interval: 2s
+      timeout: 5s
+      retries: 40
+# The published password is deliberately for this ephemeral localhost-only test
+# principal. Never use this test configuration for a deployed database.
