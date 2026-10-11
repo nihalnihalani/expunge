@@ -2,12 +2,22 @@
 // Exit 0 = defect reproduced (shortcut earns usefulCompletion on >= 90% of worlds), 1 = not reproduced, 2 = error.
 // Run: npx tsx docs/review/repro/fx-shape-shortcut.repro.ts
 import { randomBytes } from 'node:crypto';
-import { COLLECTION_IDS, FAMILIES, createWorldSpec, valuesAtPath, type VisibleWorld } from '@expunge/fixtures';
+import {
+  COLLECTION_IDS,
+  FAMILIES,
+  createWorldSpec,
+  valuesAtPath,
+  type VisibleWorld,
+} from '@expunge/fixtures';
 import { buildSealedSplitPlan, generateSealedFixture } from '@expunge/fixtures/sealed';
 import { applyReferenceAction, gradeWorld } from '@expunge/grader';
 
 /** Visible facts only: the registry's identity/reference field values per document. No subject tokens used. */
-function signature(world: VisibleWorld, collectionId: string, doc: (typeof world.collections.customers)[number]) {
+function signature(
+  world: VisibleWorld,
+  collectionId: string,
+  doc: (typeof world.collections.customers)[number],
+) {
   const field = (id: string) => world.scope.fields.find((f) => f.fieldId === id);
   const ident = field(`${collectionId}.identity_binding`);
   const ref = field(`${collectionId}.record_reference`);
@@ -32,19 +42,30 @@ function shortcut(world: VisibleWorld): { world: VisibleWorld; picked: number } 
     }
     const docs = world.collections[collectionId];
     const counts = new Map<string, number>();
-    for (const d of docs) counts.set(signature(world, collectionId, d), (counts.get(signature(world, collectionId, d)) ?? 0) + 1);
+    for (const d of docs)
+      counts.set(signature(world, collectionId, d), (counts.get(signature(world, collectionId, d)) ?? 0) + 1);
     const mode = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0];
-    for (const d of docs) if (signature(world, collectionId, d) !== mode) picked.push({ collectionId, id: d._id });
+    for (const d of docs)
+      if (signature(world, collectionId, d) !== mode) picked.push({ collectionId, id: d._id });
   }
   // Exact bindings = the subject customer's own visible identity values + picked record IDs (no graph walk).
   const subject = world.collections.customers.find((d) => d._id === world.subjectHandle)!;
   const identity = subject.data.identity as { id: string; email: string };
-  const bindings = [identity.id, identity.email, ...(subject.data.aliases as string[]), ...picked.map((p) => p.id)];
+  const bindings = [
+    identity.id,
+    identity.email,
+    ...(subject.data.aliases as string[]),
+    ...picked.map((p) => p.id),
+  ];
   for (const p of picked) {
     const doc = result.collections[p.collectionId].find((d) => d._id === p.id)!;
     applyReferenceAction(
       result,
-      { address: { collectionId: p.collectionId, recordId: p.id, recordIdBsonType: 'string' }, effect: doc.eligibility.effect, expectedRevision: doc._rev },
+      {
+        address: { collectionId: p.collectionId, recordId: p.id, recordIdBsonType: 'string' },
+        effect: doc.eligibility.effect,
+        expectedRevision: doc._rev,
+      },
       bindings,
     );
   }

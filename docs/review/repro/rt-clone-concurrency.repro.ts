@@ -3,7 +3,8 @@
 // the same job under the same lease fence at the same time. Uses the runtime's own deterministic test fakes.
 // Exit 0 = reproduced (two concurrent model loops for one lease), 1 = not reproduced, 2 = error.
 // Run: npx tsx docs/review/repro/rt-clone-concurrency.repro.ts
-import { ExpungeExecutionAgent, FakeChatModel, fakeHang } from '../../../packages/runtime/src/index.js';
+import { ExpungeExecutionAgent } from '../../../packages/runtime/src/index.js';
+import { FakeChatModel, fakeHang } from '../../../packages/runtime/src/testing/fake-chat-model.js';
 import {
   ACTOR,
   FakeArtifactReader,
@@ -33,7 +34,10 @@ try {
   let secondStarted = false;
   let refused = '';
   try {
-    const second = original.clone().run(runInput({ runId: 'run-2' })).subscribe();
+    const second = original
+      .clone()
+      .run(runInput({ runId: 'run-2' }))
+      .subscribe();
     await waitFor(() => fake.calls.length === 2, 1500);
     secondStarted = true;
     second.unsubscribe();
@@ -42,7 +46,9 @@ try {
   }
   first.unsubscribe();
   await original.settled();
-  console.log(`model calls in flight for lease ${LEASE.jobId}/fence ${LEASE.fence}: ${fake.calls.length}${refused ? `; clone refused: ${refused}` : ''}`);
+  console.log(
+    `model calls in flight for lease ${LEASE.jobId}/fence ${LEASE.fence}: ${fake.calls.length}${refused ? `; clone refused: ${refused}` : ''}`,
+  );
   console.log(secondStarted ? 'REPRODUCED' : 'NOT REPRODUCED');
   process.exit(secondStarted ? 0 : 1);
 } catch (error) {
