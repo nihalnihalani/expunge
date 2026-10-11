@@ -189,8 +189,14 @@ export class OutboxDispatcher {
 
     try {
       if (payload.type === 'event' && !row.attained.ingest_accepted) {
-        // Fail closed: when the suppression list cannot be read the event is not sent either (the row is retried).
-        const suppressed = await this.deps.suppression.suppressedUserIds(this.deps.providerOrganizationId);
+        // Fail closed: when the suppression list cannot be read the event is HELD (not sent, not dead-lettered) and
+        // retried later, exactly like a suppressed id. An unreadable list is never read as an empty one.
+        let suppressed: ReadonlySet<string>;
+        try {
+          suppressed = await this.deps.suppression.suppressedUserIds(this.deps.providerOrganizationId);
+        } catch {
+          return await this.block(row, 'SuppressionUnavailable');
+        }
         if (suppressed.has(payload.userId)) return await this.block(row, 'ExportSuppressed');
       }
       // 1. Send (HTTP kinds only). An sdk_event was produced live by the worker's SDK; there is nothing to send.

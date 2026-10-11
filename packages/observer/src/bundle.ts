@@ -65,7 +65,8 @@ export type BundleErrorCode =
   | 'InvalidConfidence'
   | 'EmptySources'
   | 'ControlOverBudget'
-  | 'QuarantinedObservation';
+  | 'QuarantinedObservation'
+  | 'SplitMismatch';
 
 export class BundleError extends Error {
   constructor(

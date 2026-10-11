@@ -4,3 +4,6 @@ export * from './mcp.js';
 export * from './outbox-dispatcher.js';
 export * from './query-client.js';
 export * from './scan.js';
+export * from './process.js';
+export * from './run-bundle.js';
+export { main as evidenceMain } from './main.js';
