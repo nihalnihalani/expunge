@@ -30,7 +30,7 @@ The setup principal is used only by `npm run setup:mongo` from an operator machi
 
 ## Raindrop
 
-`RAINDROP_API_KEY` (write), `RAINDROP_QUERY_API_KEY` (read, separate key), `RAINDROP_PROJECT_ID`, `RAINDROP_ORGANIZATION_ID` (user deletion is organization-wide).
+`RAINDROP_API_KEY` (write), `RAINDROP_QUERY_API_KEY` (read, separate key), `RAINDROP_PROJECT_ID`, `RAINDROP_ORGANIZATION_ID` (reserved for the D3 erasure protocol, whose deletion requests are organization-wide; no code reads it yet); optional `RAINDROP_INGEST_URL` and `RAINDROP_QUERY_URL` endpoint overrides. Missing keys are reported by name only; the live Raindrop suite skips without them and fails under `EXPUNGE_REQUIRE_LIVE_TESTS=1`.
 
 ## Docker computer host and candidate sandbox (server-only)
 

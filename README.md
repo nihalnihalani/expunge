@@ -21,6 +21,11 @@ See `docs/FEATURE-MATRIX.md` for per-feature state, `WHAT_IS_REAL.md` for claims
 | `infra/opendots` | Computer host topology and the candidate egress-restricted overlay. |
 | `docs/expunge` | Contracts, data model, acceptance protocol, source map. |
 | `docs/continuity` | Project state, task export, ownership (for resuming the build on any engine). |
+| `packages/governance` | Owner authority floor, owner policy, policy evaluator, decision ledger, live floor fence. |
+| `packages/harness-compiler`, `packages/evolution` | Trusted compiler of typed harness bundles (three-valued guardrails, Mongo/TypeScript parity, rejection catalog); evidence-cited proposals, critic, as-of decision replay with score-only and wrong-incident controls. |
+| `packages/observability`, `packages/observer` | Raindrop tracing with a transactional telemetry outbox; observer read-back, crash-safe cursor, evidence bundles with a leak guard (live calls need keys). |
+| `packages/baselines` | W0 and expert-static harness bundles and the disclosed primitive vocabulary. |
+| `docs/review` | Devil's-advocate findings and reproduction scripts (each repro exits 1 when the defect is fixed). |
 
 ## Quickstart (local, no credentials)
 
@@ -31,7 +36,7 @@ npm run lint
 npx vitest run
 ```
 
-Mongo protocol tests against a local replica set:
+Every live-service suite skips without its connection string and fails under `EXPUNGE_REQUIRE_LIVE_TESTS=1`, so a skip can never pass as a success. Mongo protocol tests against a local replica set (protocol proof, not Atlas proof):
 
 ```bash
 docker compose -f packages/mongo/test/docker-compose.yml up -d
@@ -44,6 +49,20 @@ Operator (setup-only without keys):
 npm ci --prefix apps/operator --workspaces=false
 node apps/operator/scripts/run-from-root.mjs dev
 ```
+
+Authenticated RBAC lane (local, separate replica set with users):
+
+```bash
+docker compose -f packages/mongo/test/auth-docker-compose.yml up -d
+```
+
+then set `MONGODB_RBAC_TEST_URI` as described in `docs/MONGO.md` and run the same suites with `EXPUNGE_REQUIRE_LIVE_TESTS=1`.
+
+Node: `>=24.13.1 <25.0.0 || >=25.4.0` (`.nvmrc` says 24.13.1). Earlier 24.x and 25.x builds throw inside `util.inspect` when a ZodError is logged (nodejs/node#60717); the operator carries a never-throwing console wrapper as mitigation.
+
+## How the build is run
+
+The repository is built by a lead with named role agents (Mongo authority, runtime and Raindrop, RSI evolution, UI/UX, two independent verifiers, a devil's advocate and a commit steward that is the only Git writer). Every commit is a reviewed packet: the owner freezes its paths, a verifier runs the matrix on a hash-pinned checkpoint, the steward stages exactly those paths, regenerates the lockfile from the staged tree when a workspace is added, proves `npm ci` and `npm run typecheck` on a scratch export of the staged index, commits, pushes and appends a row to `COMMIT-LEDGER.md`. See `docs/continuity/OWNERSHIP.md`.
 
 ## Configuration
 

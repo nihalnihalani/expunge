@@ -2,7 +2,7 @@
 
 States: **NOT_STARTED** (no code), **IMPLEMENTED** (code exists, no independent verification), **LOCALLY_VERIFIED** (verifier ran deterministic or local-service checks on the current tree), **LIVE_VERIFIED** (verifier ran it against the invited Atlas sandbox, the real model provider or Raindrop and recorded run IDs), **BLOCKED** (cannot progress without an external input named in the row). A row moves state only when the verifier records the evidence in `VERIFICATION.md`; owners cannot self-promote a row.
 
-Updated 2026-10-11 11:00 UTC by team-lead. Git HEAD: 506b73e (baseline fe12b51 + ledger), pushed to origin/main.
+Updated 2026-10-11 12:05 UTC by team-lead. Git HEAD: c45be9b (20 commits), pushed to origin/main; PKT-10, PKT-12, PKT-13, PKT-14 in verification or the steward's queue.
 
 | # | Feature (spec section) | Owner | State | Evidence pointer | Blocker |
 |---|---|---|---|---|---|
@@ -15,18 +15,18 @@ Updated 2026-10-11 11:00 UTC by team-lead. Git HEAD: 506b73e (baseline fe12b51 +
 | 7 | Exact and hybrid (Search/Vector) lesson retrieval with authoritative re-read (6) | mongodb-authority | NOT_STARTED | | Atlas Search/Vector availability on the invited sandbox |
 | 8 | Synthetic worlds, structural families, sealed manifests, split commitments (10) | rsi-evolution | LOCALLY_VERIFIED | as row 2; isomorphic decoy chains, shape canary, instance-scoped ids, salted split commitments | |
 | 9 | Independent grader and reference-solver admission (10) | rsi-evolution | LOCALLY_VERIFIED | as row 2; publicGradeReport withholds manifest hashes; shape_leak quarantine | second independent solver planned (C3) |
-| 10 | Typed worker tools inspect/resolve/discover/preview/apply/verify/complete (7) | runtime-raindrop (domain gateway, B1) | NOT_STARTED | | |
+| 10 | Typed worker tools inspect/resolve/discover/preview/apply/verify/complete (7) | mongodb-authority (B1) | IMPLEMENTED in part (governance: authority floor, owner policy, policy evaluator, decision ledger, live floor fence verified 18/18 at checkpoint e6f7526f; domain tools in progress) | | |
 | 11 | Durable worker, OpenMuse helper port, ExpungeExecutionAgent clone/cancel semantics (4, 7) | runtime-raindrop | LOCALLY_VERIFIED | VERIFICATION.md addendum at e126f3e6: 126 passed / 7 skipped, 132 with replica set; rt-* repros not reproduced | Live provider smoke BLOCKED: provider key missing |
 | 12 | OpenBot candidate sandbox: egress default-deny, broker transport, plugin execution (4, 9) | runtime-raindrop (+ infra overlay from A1) | IMPLEMENTED (overlay only; live isolation probe recorded in infra/opendots/BUILD-A1.md) | infra/opendots | Pinned image build and real candidate action pending |
-| 13 | OpenDots operator: setup/readiness, cleanup, workbench, evidence, candidate, evaluation, approval, receipt, lineage, campaigns, privacy screens (13) | ui-ux-improver | IMPLEMENTED (server half: routes, schemas, readiness, principals; client not started) | operator 328/328 at matrix; DESIGN.md, docs/ui | CopilotKit Intelligence key for any real conversation |
+| 13 | OpenDots operator: setup/readiness, cleanup, workbench, evidence, candidate, evaluation, approval, receipt, lineage, campaigns, privacy screens (13) | ui-ux-improver | IMPLEMENTED in part (server half in baseline; S1 readiness + shell + projection agent verified, commit pending PKT-10; S2 workbench in progress) | verifier checkpoint d9f6feba: 390/390, build 0, browser 108/0, 16 screenshots under docs/ui/screens/s1 | CopilotKit Intelligence key for any real conversation |
 | 14 | Review tool registered via client HITL hook and DotAgent allowlist; reconnect from snapshot plus sequence (12, 13) | ui-ux-improver | NOT_STARTED | | |
-| 15 | Raindrop worker/improver tracing, outbox states, observer read-back, diagnostics dispatch (8) | runtime-raindrop | NOT_STARTED | | Raindrop write and query keys missing |
-| 16 | Evidence-linked typed proposals across four surfaces; compiler rejects unsafe edits; as-of replay (9) | rsi-evolution | NOT_STARTED | | |
-| 17 | Fresh paired admission, gate report, approval descriptor, promotion, rollback end to end (10) | rsi-evolution | NOT_STARTED | | |
-| 18 | Hider curriculum with reference-solver admission (11) | rsi-evolution | NOT_STARTED | | |
-| 19 | Fresh-base I0/I1 meta experiment with controls (11) | rsi-evolution | NOT_STARTED | | Model budget |
-| 20 | Privacy lineage: retraction closure, artifact byte checks, external deletion lifecycle (12) | runtime-raindrop | NOT_STARTED | | Raindrop organization scope |
-| 21 | Reliability: crash, takeover, race, containment tests (15) | verifier | NOT_STARTED | | |
-| 22 | Preregistered benchmark and meta protocol executed and reported (16) | verifier + rsi-evolution | NOT_STARTED | | Provider budget, Atlas sandbox |
-| 23 | Production packaging, runbooks, CI, deployment rehearsal (18) | team-lead + runtime-raindrop | NOT_STARTED | | Deployment target authorization |
+| 15 | Raindrop worker/improver tracing, outbox states, observer read-back, diagnostics dispatch (8) | runtime-raindrop | IMPLEMENTED (verification in progress, PKT-14) | owner: 95 passed + 1 skipped with replica set; Mongo protocol 13/13 under EXPUNGE_REQUIRE_LIVE_TESTS=1; live Raindrop suite never executed, fails by name without keys | Raindrop write and query keys missing (root .env) |
+| 16 | Evidence-linked typed proposals across four surfaces; compiler rejects unsafe edits; as-of replay (9) | rsi-evolution | LOCALLY_VERIFIED (commits 4eb6d5d, cd821d6) | compiler 204/2 skipped, parity 135/135, catalog 62/62; evolution 298/2 skipped at cf40f999; DA-5a E1/E2 follow-up C2-3 open | real-provider proposal awaits credentials |
+| 17 | Fresh paired admission, gate report, approval descriptor, promotion, rollback end to end (10) | rsi-evolution | IN_PROGRESS (C3 dispatched 11:25Z) |  |  |
+| 18 | Hider curriculum with reference-solver admission (11) | rsi-evolution | BRIEFED (docs/continuity/briefs/D1-hider-adversary.md) |  |  |
+| 19 | Fresh-base I0/I1 meta experiment with controls (11) | rsi-evolution | BRIEFED (D2-meta-improver.md) |  | Model budget |
+| 20 | Privacy lineage: retraction closure, artifact byte checks, external deletion lifecycle (12) | runtime-raindrop | BRIEFED (D3-privacy-eligibility.md) |  | Raindrop organization scope |
+| 21 | Reliability: crash, takeover, race, containment tests (15) | verifier | BRIEFED (E1-reliability-races.md; harness skeleton under V-3) |  |  |
+| 22 | Preregistered benchmark and meta protocol executed and reported (16) | verifier + rsi-evolution | BRIEFED (E2-benchmark-preregistration.md) |  | Provider budget, Atlas sandbox |
+| 23 | Production packaging, runbooks, CI, deployment rehearsal (18) | team-lead + runtime-raindrop | BRIEFED (E3-deploy-demo-submission.md) |  | Deployment target authorization; public hostname; Atlas sandbox |
 | 24 | Continuity: checkpoint manifests, HANDOFF, restore verification (20) | verifier | LOCALLY_VERIFIED | checkpoints 20261011T101215Z-98d5f03d and 20261011T102508Z-e23be882 complete; test:continuity 27/27; stale-narrative and writer-lock scenarios | Claude to Codex handoff drill pending |

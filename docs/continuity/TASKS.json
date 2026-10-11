@@ -1,5 +1,5 @@
 {
-  "exportedAt": "2026-10-11T11:15:00Z",
+  "exportedAt": "2026-10-11T12:52:00Z",
   "canonicalTracker": "claude-mem work_state list 'expunge-build' (lead-maintained); this file is a sanitized mirror",
   "engine": "claude-code-desktop-named-subagents",
   "leadEffectiveModel": "claude-fable-5-1",
@@ -149,15 +149,15 @@
       "id": "C2",
       "title": "Compiler, replay, evolver",
       "owner": "rsi-evolution",
-      "status": "doing",
-      "evidence": "C2-1 compiler packet verified at checkpoint 0f466519 (204 passed / 2 skipped; live parity 74/74); replay and evolver in progress"
+      "status": "done",
+      "evidence": "C2-1 4eb6d5d; C2-2 cd821d6; C2-3 fixes in verification (PKT-19)"
     },
     {
       "id": "CS-1",
       "title": "Baseline commit",
       "owner": "commit-steward",
-      "status": "doing",
-      "note": "awaiting GO RUNTIME LANES result then COMMIT CS-1 APPROVED"
+      "status": "done",
+      "evidence": "fe12b51 baseline + 506b73e ledger, pushed"
     },
     {
       "id": "B1",
@@ -171,14 +171,16 @@
       "title": "Raindrop tracing, outbox, observer, evidence bundles",
       "owner": "runtime-raindrop",
       "status": "doing",
-      "brief": "docs/continuity/briefs/C1-raindrop-evidence.md"
+      "brief": "docs/continuity/briefs/C1-raindrop-evidence.md",
+      "evidence": "C1a verified (PKT-14 approved); C1c DA-6 fixes next (O1 to O8, explicit propagator, agent_diagnostic payload); then C1b worker integration"
     },
     {
       "id": "C3",
       "title": "Fresh paired admission, approval descriptors, promotion, rollback",
       "owner": "rsi-evolution",
-      "status": "todo",
-      "brief": "docs/continuity/briefs/C3-admission-promotion.md"
+      "status": "doing",
+      "brief": "docs/continuity/briefs/C3-admission-promotion.md",
+      "evidence": "dispatched 11:25Z; packages/gate and packages/deployment; second reference solver, HMAC-keyed ids, GateReport.computedClass, approval descriptor via ApprovalRepository.issue, campaign runner"
     },
     {
       "id": "B2-2",
@@ -198,8 +200,9 @@
       "id": "DA-5",
       "title": "Gateway review by reading plus negative-test specification (no exploit scripts)",
       "owner": "devils-advocate",
-      "status": "todo",
-      "dependsOn": ["B1"]
+      "status": "doing",
+      "dependsOn": ["B1"],
+      "evidence": "dispatched 12:32Z on packages/domain working tree"
     },
     {
       "id": "V-3",
@@ -211,8 +214,176 @@
       "id": "PKT-5",
       "title": "Commit packet C2-1 compiler",
       "owner": "commit-steward",
+      "status": "done",
+      "evidence": "4eb6d5d + ledger 52c3b86, pushed"
+    },
+    {
+      "id": "PKT-6",
+      "title": "Commit packet B1-0 mongo WorldKey",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "ae59942 + ledger 7e7e19d (checkpoint 67b789d4; live lane 306/0)"
+    },
+    {
+      "id": "PKT-7",
+      "title": "Commit packet lead docs",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "f70d81f + ledger d183898 (checkpoint 948d66c0)"
+    },
+    {
+      "id": "PKT-8",
+      "title": "Commit packet B1-1 governance (new workspace; lock regenerated from staged tree)",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "c663bfd + ledger e69eb02 (checkpoint e6f7526f; live 18/18; lock diff 2 added / 0 removed / 0 changed; npm ci exit 0 in scratch export)"
+    },
+    {
+      "id": "PKT-9",
+      "title": "Commit packet C2-2 evolution (new workspace; lock regenerated)",
+      "owner": "commit-steward",
       "status": "doing",
-      "evidence": "checkpoint 0f466519"
+      "evidence": "verifier green at checkpoint cf40f999; 20 pathspecs approved 11:31Z"
+    },
+    {
+      "id": "PKT-10",
+      "title": "Commit packet B3-S1 operator readiness, shell, projection agent, screenshots",
+      "owner": "verifier then commit-steward",
+      "status": "done",
+      "evidence": "f17fd61 + a104f90 (checkpoint d9f6feba; 390/390; build 0; browser 108/0)"
+    },
+    {
+      "id": "DA-5a",
+      "title": "Governance and evolution review by reading; negative test specs",
+      "owner": "devils-advocate",
+      "status": "done",
+      "depends": "PKT-8 landed; PKT-9 verified",
+      "evidence": "7fe7762; dispositions to owners"
+    },
+    {
+      "id": "PKT-11",
+      "title": "Hotfix: dangling edges export; HEAD-green gate introduced",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "5e229c9 + c45be9b; gate before exit 2 / after exit 0"
+    },
+    {
+      "id": "PKT-12",
+      "title": "Commit packet mongo completeIncomplete + campaign_keys",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "88a75a3 + 4172564 (checkpoint 9b77b25b; live 329/0/0; verifier-2)"
+    },
+    {
+      "id": "PKT-13",
+      "title": "Commit packet DA-5a review",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "7fe7762 + 9d48ebb"
+    },
+    {
+      "id": "PKT-18",
+      "title": "Commit packet DA-6 review",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "109e2dc + ecfbb5c"
+    },
+    {
+      "id": "PKT-14",
+      "title": "Commit packet C1a observability + observer (two workspaces; lock +132 entries incl. 126 third-party via raindrop-ai; audit 7 -> 38 accepted with rationale)",
+      "owner": "commit-steward",
+      "status": "doing",
+      "evidence": "verifier checkpoint 86e41ce5; approved 12:40Z"
+    },
+    {
+      "id": "PKT-17",
+      "title": "Commit packet operator S2 (54 paths)",
+      "owner": "verifier then commit-steward",
+      "status": "doing",
+      "evidence": "manifest 12:48Z; owner 429 tests, browser 108/0 + 190/0"
+    },
+    {
+      "id": "PKT-19",
+      "title": "Commit packet C2-3 evolution fixes (DA-5a E1 to E4; 16 files)",
+      "owner": "verifier-2 then commit-steward",
+      "status": "doing",
+      "evidence": "owner 184 passed / 2 skipped; parity lane to be re-run by verifier-2"
+    },
+    {
+      "id": "PKT-15",
+      "title": "Mongo hardening from DA-5a (G3, G5, G6-part, JobRepository.worldKey)",
+      "owner": "mongodb-authority",
+      "status": "doing"
+    },
+    {
+      "id": "PKT-16",
+      "title": "Domain gateway packet (nine tools, gateway pipeline, G1/G2/G4/G7 tests, preview route, four-token service)",
+      "owner": "mongodb-authority",
+      "status": "doing",
+      "evidence": "nine-tool export point reached 12:30Z; DA-5 reading"
+    },
+    {
+      "id": "DA-6",
+      "title": "Observer evidence integrity review by reading",
+      "owner": "devils-advocate",
+      "status": "done",
+      "evidence": "109e2dc; C1c fix packet assigned"
+    },
+    {
+      "id": "DA-7",
+      "title": "Operator client review by reading",
+      "owner": "devils-advocate",
+      "status": "todo",
+      "note": "after DA-5"
+    },
+    {
+      "id": "V-3b",
+      "title": "Restore drill (spec section 20)",
+      "owner": "verifier-2",
+      "status": "done",
+      "evidence": "checkpoint 86e41ce5 restored: 887/887 hashes, npm ci + typecheck 0 in restored tree; findings for scripts/continuity"
+    },
+    {
+      "id": "D1",
+      "title": "Hider and adversarial curriculum",
+      "owner": "rsi-evolution",
+      "status": "briefed",
+      "brief": "docs/continuity/briefs/D1-hider-adversary.md"
+    },
+    {
+      "id": "D2",
+      "title": "Improver evolution and fresh-base comparison",
+      "owner": "rsi-evolution",
+      "status": "briefed",
+      "brief": "docs/continuity/briefs/D2-meta-improver.md"
+    },
+    {
+      "id": "D3",
+      "title": "Provenance, erasure approvals and context eligibility",
+      "owner": "runtime-raindrop",
+      "status": "briefed",
+      "brief": "docs/continuity/briefs/D3-privacy-eligibility.md"
+    },
+    {
+      "id": "E1",
+      "title": "Failure recovery, races and containment",
+      "owner": "verifier",
+      "status": "briefed",
+      "brief": "docs/continuity/briefs/E1-reliability-races.md"
+    },
+    {
+      "id": "E2",
+      "title": "Independent benchmark and preregistration",
+      "owner": "verifier + team-lead",
+      "status": "briefed",
+      "brief": "docs/continuity/briefs/E2-benchmark-preregistration.md"
+    },
+    {
+      "id": "E3",
+      "title": "Deployment, rehearsal and submission",
+      "owner": "runtime-raindrop + ui-ux-improver + team-lead",
+      "status": "briefed",
+      "brief": "docs/continuity/briefs/E3-deploy-demo-submission.md"
     }
   ],
   "blocked": [
@@ -228,7 +399,7 @@
     }
   ],
   "git": {
-    "head": "a47d302 (after PKT-4); PKT-5 compiler approved",
+    "head": "ba41d7b = origin/main (30 commits)",
     "commits": [
       "fe12b51 baseline",
       "506b73e ledger",
@@ -237,8 +408,31 @@
       "d119446 review DA-4",
       "7cbb983 ledger",
       "191cbb4 worker B2-2",
-      "a47d302 ledger"
+      "a47d302 ledger",
+      "4eb6d5d compiler C2-1",
+      "52c3b86 ledger",
+      "ae59942 mongo B1-0",
+      "7e7e19d ledger",
+      "f70d81f lead docs",
+      "d183898 ledger",
+      "c663bfd governance B1-1",
+      "e69eb02 ledger",
+      "cd821d6 evolution C2-2",
+      "dbabd7e ledger",
+      "5e229c9 hotfix PKT-11 (dangling edges export)",
+      "c45be9b ledger",
+      "f17fd61 operator S1 PKT-10",
+      "a104f90 ledger",
+      "7fe7762 review DA-5a PKT-13",
+      "9d48ebb ledger",
+      "88a75a3 mongo PKT-12",
+      "4172564 ledger + HEAD-proof history",
+      "f9ee239 ledger format fix",
+      "109e2dc review DA-6 PKT-18",
+      "ecfbb5c ledger"
     ],
-    "remote": "https://github.com/nihalnihalani/expunge (private)"
+    "remote": "https://github.com/nihalnihalani/expunge (private)",
+    "lockRule": "a packet that adds a workspace never carries the working-tree lock; the steward regenerates package-lock.json from the staged tree in a scratch export, proves npm ci --ignore-scripts there, and restores the working-tree lock",
+    "headGreenGate": "since PKT-11: npm ci + npm run typecheck on a scratch export of the staged index before every commit; exit codes in the ledger row"
   }
 }

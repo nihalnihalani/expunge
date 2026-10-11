@@ -18,11 +18,27 @@ The team confirmed with the organizers that early work is permitted and that for
 
 Wave A foundation written 11 October 2026 before the formal kickoff: `packages/contracts`, `packages/mongo`, `packages/fixtures`, `packages/grader`, `scripts/setup-mongo.ts`, `scripts/probe-mongo.ts`, `infra/opendots/` candidate overlay, and the Expunge additions inside the operator (`src/shared/expunge.ts`, `src/server/expunge/`, `src/client/expunge/`).
 
-From the team-lead session onward (this file will be extended per commit):
+From the team-lead session onward (extended per commit; `COMMIT-LEDGER.md` is authoritative):
 
 | Commit | Task IDs | New functionality |
 |---|---|---|
-| (pending CS-1) | P0-2, P0-3 | root lint/format tooling, continuity skeleton, report-gate hook |
+| fe12b51 | CS-1 (P0, A2-R, A3-R, B2-1, U-0, V-1, DA-1 to DA-3) | Baseline of 470 files: tooling, continuity, contracts, mongo, fixtures, grader, baselines, worker, runtime, OpenMuse port, candidate overlay, operator server half, design docs |
+| e165d48 | PKT-2 A2-R | Mongo hardening, scope-bound claim polling, grants re-derived from the gate report |
+| d119446 | PKT-3 DA-4 | Authority re-review report, reseeded live fixtures, lint-clean reproductions |
+| 191cbb4 | PKT-4 B2-2 | Worker testing subpath, run provenance, untrusted-narrative labels, metering, durable wake dedupe, crash-recovery polling, projection events; candidate proxy token |
+| 4eb6d5d | PKT-5 C2-1 | Trusted harness compiler: three-valued guardrails, Mongo/TypeScript parity, workflow and policy analysis, patch-exact edits, mutation classes, shortcut scans |
+| ae59942 | PKT-6 B1-0 | WorldKey-bound world access, single-update owner-policy effects, decision ledger inputs, gateway step-log collections |
+| f70d81f | PKT-7 | Continuity and planning docs, environment reference, contract additions |
+| c663bfd | PKT-8 B1-1 | Governance: authority floor, owner policy, policy evaluator on decide(), decision ledger, live floor fence |
+| cd821d6 | PKT-9 C2-2 | As-of decision replay, evidence-cited evolver with score-only and wrong-incident controls, 61-code rejection catalog |
+| 5e229c9 | PKT-11 | Hotfix for a dangling export that broke typecheck at HEAD; HEAD-green gate introduced |
+| f17fd61 | PKT-10 B3-S1 | Operator readiness view, lazy Expunge client shell with hash routes, model-free projection agent, contract-parity and telemetry tests, screenshots |
+| 7fe7762 | PKT-13 DA-5a | Governance and evolution review with negative test specifications |
+| 88a75a3 | PKT-12 | Honest incomplete receipts (completeIncomplete), campaign_keys private collection with strict validator |
+| 109e2dc | PKT-18 DA-6 | Observer and evidence-bundle review with negative test specifications |
+| ba41d7b | PKT-14 C1a | Raindrop tracing with transactional telemetry outbox, observer read-back, crash-safe cursor, evidence bundles with leak guard, MCP capture (live calls need keys) |
+
+Each row has a ledger commit after it (`docs: record PKT-n commit in COMMIT-LEDGER`) with the verifier checkpoint id and the gate exit codes.
 
 ## How to read the repository
 
