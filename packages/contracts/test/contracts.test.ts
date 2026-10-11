@@ -21,6 +21,8 @@ export { validBundle };
 
 describe('canonical structural authority', () => {
   it('matches RFC8785 number and property ordering vector', () => {
+    // RFC 8785 test vector: the literal below is deliberately longer than a double can hold.
+    // eslint-disable-next-line no-loss-of-precision
     expect(canonicalJson({ numbers: [333333333.33333329, 1e30, 4.5, 2e-3, 1e-27], z: 1, a: 2 })).toBe(
       '{"a":2,"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27],"z":1}',
     );
@@ -32,6 +34,8 @@ describe('canonical structural authority', () => {
       { a: undefined },
       NaN,
       Infinity,
+      // A hole in an array is the case under test.
+      // eslint-disable-next-line no-sparse-arrays
       [, 1],
       {
         toJSON() {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MongoClient, ObjectId, Long } from 'mongodb';
+import { ObjectId, Long } from 'mongodb';
 import {
   atlasRoleManifests,
   bsonPreimageHash,

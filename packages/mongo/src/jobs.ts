@@ -8,6 +8,7 @@ import {
   type JobStatus,
   type JsonValue,
   type RunBinding,
+  type ScopeKey,
 } from '@expunge/contracts';
 import { fail, requirePrincipal, type MongoService, type Principal } from './client.js';
 import { ProvenanceRepository } from './provenance.js';
@@ -137,10 +138,14 @@ export class JobRepository {
     return job;
   }
   /**
-   * Job ids this principal could claim now: queued, or running with an expired lease, not cancel-requested, of a
-   * kind this principal works. Ordered by priority then age. A poller uses it to reclaim jobs whose worker died.
+   * Job ids in `key`'s scope that this principal could claim now: queued, or running with an expired lease, not
+   * cancel-requested, of a kind this principal works. Ordered by priority then age. A poller uses it to reclaim
+   * jobs whose worker died; the scope is a trusted binding of the poller, never a request value.
    */
-  async listClaimable(limit = 25): Promise<Array<{ jobId: string; kind: JobKind; priority: number }>> {
+  async listClaimable(
+    key: ScopeKey,
+    limit = 25,
+  ): Promise<Array<{ jobId: string; kind: JobKind; priority: number }>> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('InvalidClaimableLimit');
     const kinds = (Object.keys(JOB_KIND_PRINCIPALS) as JobKind[]).filter(
       (kind) =>
@@ -150,6 +155,9 @@ export class JobRepository {
     const rows = await this.collection
       .find(
         {
+          'actor.tenantId': key.tenantId,
+          'actor.env': key.env,
+          'actor.scopeId': key.scopeId,
           kind: { $in: kinds },
           cancellationRequested: false,
           $or: [{ status: 'queued' }, { status: 'running', $expr: { $lte: ['$lease.until', '$$NOW'] } }],

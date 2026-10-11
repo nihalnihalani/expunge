@@ -11,7 +11,7 @@ import {
   type DomainAddress,
   type ScopeRegistry,
 } from '@expunge/contracts';
-import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
+import { fail, requirePrincipal, type MongoService } from './client.js';
 import { AuthorityRepository } from './authority.js';
 import { DecisionRepository, deriveDecisionId } from './decisions.js';
 import { canonicalAddress, nodeKey } from './hashes.js';
@@ -161,7 +161,7 @@ export class EffectRepository {
       fail('IdempotencyConflict');
     const saved = await this.receipts.findOne({ _id: effect.receiptId }, { session });
     if (!saved) fail('CommittedReceiptMissing');
-    const { _id: ignored, ...receipt } = saved;
+    const { _id: _ignored, ...receipt } = saved;
     return receipt;
   }
   async commitEffect(input: EffectCommitInput): Promise<ActionReceipt> {
@@ -259,7 +259,7 @@ export class EffectRepository {
       if (!saved) return null;
       if (!sameScope(actor, saved.actor) || saved.actor.actorId !== actor.actorId)
         fail('UnauthorizedReceipt');
-      const { _id, actor: storedActor, createdAt, ...payload } = saved;
+      const { _id: _ignored, actor: _actor, createdAt: _createdAt, ...payload } = saved;
       if (contentHash(payload, 'completion-receipt') !== contentHash(receipt, 'completion-receipt'))
         fail('ReceiptIdConflict');
       return payload;
