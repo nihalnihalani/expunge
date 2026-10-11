@@ -8,6 +8,7 @@ export default defineConfig({
       'packages/domain/test/service-config-pure.test.ts',
       'packages/runtime/test/model-error.test.ts',
       'packages/runtime/test/meter.test.ts',
+      'packages/vendor-openmuse/test/attempt-recorder.test.ts',
       'apps/worker/test/foreign-credentials.test.ts',
       'apps/worker/test/config.test.ts',
       'apps/worker/test/provider-retries.test.ts',

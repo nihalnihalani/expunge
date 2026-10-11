@@ -1,3 +1,5 @@
+import { boundedErrorRecords, hasRequestFailureVeto, structuredStatus } from '@expunge/vendor-openmuse';
+
 /**
  * Which side of the model boundary an inner run error is on, from STRUCTURED fields only (HTTP status, error code, error
  * name), never from message text: a message can echo the candidate's own prompt, so reading it could let a candidate steer
@@ -16,16 +18,6 @@
 export type ModelFailureCode = 'ModelUnavailable' | 'ModelRunFailed';
 
 const UNAVAILABLE_STATUS = new Set([401, 403, 404, 429]);
-const TIMEOUT_STATUS = 408;
-const TIMEOUT_CODES = new Set([
-  'timeout',
-  'ETIMEDOUT',
-  'ECONNABORTED',
-  'UND_ERR_CONNECT_TIMEOUT',
-  'UND_ERR_HEADERS_TIMEOUT',
-  'UND_ERR_BODY_TIMEOUT',
-]);
-const TIMEOUT_NAMES = new Set(['APIConnectionTimeoutError']);
 const UNAVAILABLE_CODES = new Set([
   'ECONNRESET',
   'ECONNREFUSED',
@@ -47,35 +39,28 @@ const UNAVAILABLE_CODES = new Set([
 ]);
 const UNAVAILABLE_NAMES = new Set(['MissingProviderCredentialError', 'APIConnectionError', 'FetchError']);
 
-const statusOf = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isInteger(value)) return value;
-  if (typeof value === 'string' && /^\d{3}$/.test(value)) return Number(value);
-  return undefined;
-};
 const unavailableStatus = (status: number): boolean => status >= 500 || UNAVAILABLE_STATUS.has(status);
 
-/** One structured record: a thrown error, or the `{ code }` of a RUN_ERROR event. */
+/** One record after the complete bounded chain has passed the behaviour veto. Explicit HTTP status precedes names/codes. */
 function classifyRecord(record: Record<string, unknown>): ModelFailureCode | null {
   const name = typeof record.name === 'string' ? record.name : '';
   const code = typeof record.code === 'string' ? record.code : '';
-  const status = statusOf(record.status) ?? statusOf(record.statusCode) ?? statusOf(record.code);
-  // Timeouts first: never provider-side, whatever else the record says.
-  if (TIMEOUT_NAMES.has(name) || TIMEOUT_CODES.has(code) || status === TIMEOUT_STATUS)
-    return 'ModelRunFailed';
-  if (UNAVAILABLE_NAMES.has(name)) return 'ModelUnavailable';
+  const status =
+    structuredStatus(record.status) ?? structuredStatus(record.statusCode) ?? structuredStatus(record.code);
   if (status !== undefined && status >= 400 && status <= 599)
     return unavailableStatus(status) ? 'ModelUnavailable' : 'ModelRunFailed';
+  if (UNAVAILABLE_NAMES.has(name)) return 'ModelUnavailable';
   if (UNAVAILABLE_CODES.has(code)) return 'ModelUnavailable';
   return null;
 }
 
 /** Classifies a thrown value or a RUN_ERROR-shaped object, following `cause` a few levels. */
 export function classifyModelFailure(error: unknown): ModelFailureCode {
-  let current: unknown = error;
-  for (let depth = 0; depth < 4 && typeof current === 'object' && current !== null; depth++) {
-    const verdict = classifyRecord(current as Record<string, unknown>);
+  const records = boundedErrorRecords(error);
+  if (records.some(hasRequestFailureVeto)) return 'ModelRunFailed';
+  for (const record of records) {
+    const verdict = classifyRecord(record);
     if (verdict) return verdict;
-    current = (current as { cause?: unknown }).cause;
   }
   return 'ModelRunFailed';
 }
