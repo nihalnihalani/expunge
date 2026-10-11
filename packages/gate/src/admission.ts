@@ -248,7 +248,13 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDecision {
   }
 
   // --- the behavioural rule, over pairs that are not excluded ---------------------------------------------------
-  const scored = rows.filter((row) => !row.parent.harnessDefect && !row.candidate.harnessDefect);
+  // A pair is scored only if both arms taught us something about their harness. A harness defect or an infrastructure
+  // failure in EITHER arm (below the INVALID-INFRA threshold too) takes the pair out of the score: otherwise a parent
+  // arm that never started would count as a parent failure and hand its child a free success.
+  const scored = rows.filter(
+    (row) =>
+      !row.parent.harnessDefect && !row.candidate.harnessDefect && !row.parent.infra && !row.candidate.infra,
+  );
   const summary = summarize(scored);
   if (summary.triggerGain < ADMISSION_RULE.requiredTriggerGain) reasons.add('trigger_gain_insufficient');
   if (summary.protectedRegressedWorlds > 0) reasons.add('protected_regression');
@@ -256,7 +262,9 @@ export function evaluateAdmission(input: AdmissionInput): AdmissionDecision {
   if (validation && validation.candidateSuccesses < validation.parentSuccesses)
     reasons.add('validation_decline');
   if (!validation) reasons.add('trial_pair_incomplete');
-  const candidates = scored.map((row) => row.candidate);
+  // The score uses `scored` only. Safety and cost are judged over EVERY candidate arm, infra-ended ones included: damage
+  // done before an arm ended with an infrastructure code is still damage.
+  const candidates = rows.map((row) => row.candidate);
   // Collateral change to a record the cleanup never touched, or a broken preserved field, is a preservation violation.
   if (candidates.some((arm) => arm.metrics.unrelatedRecordChanges > 0 || arm.preservationViolations > 0))
     reasons.add('preservation_violation');

@@ -15,6 +15,7 @@ import {
 } from '../src/index.js';
 import { ScriptedEpisodePort } from '../src/testing/index.js';
 import { describeLive } from '../../mongo/test/support.js';
+import { PROVIDER_STAMP, jobRecorder } from './job-rows.js';
 import { RUNTIME_HASH, fullPlan, gateView, openGate, rulePort, uniqueChild, type Gate } from './support.js';
 
 let gate: Gate;
@@ -112,16 +113,15 @@ describeLive('DA-8 findings (real replica set)', () => {
 
   it('D8-2: a worker that attests another runtime is rejected, a missing attestation holds, a mix rejects', async () => {
     const other = 'e'.repeat(64);
-    const swap = rulePort(gate, 'claim_without_work', 'solve', { runtimeHash: other });
-    const none = rulePort(gate, 'claim_without_work', 'solve', { runtimeHash: undefined });
     let k = 0;
-    const mixed = rulePort(gate, 'claim_without_work', 'solve', {
-      runtimeHash: () => (k++ === 3 ? other : RUNTIME_HASH),
-    });
+    const attested = (value: (r: unknown) => string | null) =>
+      rulePort(gate, 'claim_without_work', 'solve', {
+        recordJob: jobRecorder(gate.env.service, (request) => ({ runtimeHash: value(request) })),
+      });
     const expectations: Array<[ScriptedEpisodePort, string, string]> = [
-      [swap, 'reject', 'runtime_hash_mismatch'],
-      [none, 'hold', 'runtime_unattested'],
-      [mixed, 'reject', 'runtime_hash_mismatch'],
+      [attested(() => other), 'reject', 'runtime_hash_mismatch'],
+      [attested(() => null), 'hold', 'runtime_unattested'],
+      [attested(() => (k++ === 3 ? other : RUNTIME_HASH)), 'reject', 'runtime_hash_mismatch'],
     ];
     for (const [port, verdict, reason] of expectations) {
       const id = next();
@@ -131,6 +131,136 @@ describeLive('DA-8 findings (real replica set)', () => {
       expect(out.reasonCodes).toContain(reason);
     }
   }, 240_000);
+
+  it('F-1: evidence is what the stored job says; a port that declares committed evidence is not believed', async () => {
+    const stamp = (over: Record<string, unknown>) => ({ ...PROVIDER_STAMP, ...over });
+    const cases: Array<[string, ScriptedEpisodePort]> = [
+      ['no job row at all', rulePort(gate, 'claim_without_work', 'solve', { recordJob: undefined })],
+      [
+        'a fake adapter stamped',
+        rulePort(gate, 'claim_without_work', 'solve', {
+          recordJob: jobRecorder(gate.env.service, { model: [stamp({ source: 'fake' })] }),
+        }),
+      ],
+      [
+        'no stamp',
+        rulePort(gate, 'claim_without_work', 'solve', {
+          recordJob: jobRecorder(gate.env.service, { model: undefined }),
+        }),
+      ],
+      [
+        'the wrong model',
+        rulePort(gate, 'claim_without_work', 'solve', {
+          recordJob: jobRecorder(gate.env.service, { model: [stamp({ modelId: 'other' })] }),
+        }),
+      ],
+      [
+        'an overridden endpoint',
+        rulePort(gate, 'claim_without_work', 'solve', {
+          recordJob: jobRecorder(gate.env.service, {
+            model: [stamp({ endpoint: 'overridden', endpointHostHash: 'a'.repeat(64) })],
+          }),
+        }),
+      ],
+      [
+        'no stamp for the final fence',
+        rulePort(gate, 'claim_without_work', 'solve', {
+          recordJob: jobRecorder(gate.env.service, { model: [stamp({ fence: 7 })] }),
+        }),
+      ],
+    ];
+    for (const [label, port] of cases) {
+      const id = next();
+      await gate.freezeCampaign(id, {}, port);
+      const out = await gate.run(await fresh(), id, port);
+      expect(out.verdict, label).toBe('hold');
+      expect(out.reasonCodes, label).toContain('fake_evidence');
+      expect(out.report, label).toBeNull();
+    }
+  }, 360_000);
+
+  it('F1-a: parent arms with no stored job are infrastructure and hold, never behavioural failures', async () => {
+    const id = next();
+    const port = rulePort(gate, 'claim_without_work', 'solve', {
+      recordJob: async (request, result, jobId) => {
+        if (request.bundleHash !== gate.parentHash)
+          await jobRecorder(gate.env.service)(request, result, jobId);
+      },
+    });
+    await gate.freezeCampaign(id, {}, port);
+    const out = await gate.run(await fresh(), id, port);
+    expect(out.verdict).toBe('hold');
+    expect(out.reasonCodes).toContain('fake_evidence');
+    expect(out.rows.every((row) => row.parent.infra && !row.candidate.infra)).toBe(true);
+    expect(out.reasonCodes).toContain('infra_invalid');
+    expect(out.report).toBeNull();
+  }, 120_000);
+
+  it('F1-a: a port that reports failed for a job stored as succeeded is a status_mismatch hold', async () => {
+    const id = next();
+    const port = rulePort(gate, 'claim_without_work', 'fail', {
+      recordJob: jobRecorder(gate.env.service, { status: 'succeeded' }),
+    });
+    await gate.freezeCampaign(id, {}, port);
+    const out = await gate.run(await fresh(), id, port);
+    expect(out.verdict).toBe('hold');
+    expect(out.reasonCodes).toContain('fake_evidence');
+    const arms = out.rows.map((row) => row.candidate);
+    expect(arms.every((arm) => arm.evidenceReasons.includes('status_mismatch'))).toBe(true);
+    expect(out.report).toBeNull();
+  }, 120_000);
+
+  it('F1-a-prime: parent arms that never started are not parent failures; an identical child is not admitted', async () => {
+    const id = next();
+    const skipped = new Set<string>();
+    let k = 0;
+    const port = rulePort(
+      gate,
+      (request) => {
+        if (k++ < 2) {
+          skipped.add(request.runId);
+          return 'fail';
+        }
+        return 'solve';
+      },
+      'solve',
+      {
+        recordJob: async (request, result, jobId) => {
+          if (!skipped.has(request.runId)) await jobRecorder(gate.env.service)(request, result, jobId);
+        },
+      },
+    );
+    await gate.freezeCampaign(id, {}, port);
+    const out = await gate.run(await fresh(), id, port);
+    expect(out.verdict).not.toBe('admit');
+    expect(out.verdict).toBe('reject');
+    expect(out.reasonCodes).toContain('trigger_gain_insufficient');
+    expect(out.reasonCodes).not.toContain('infra_invalid');
+    expect(out.rows.filter((row) => row.parent.infra)).toHaveLength(2);
+    expect(out.decision.summary.triggerGain).toBe(0);
+  }, 120_000);
+
+  it('F1-a-double-prime: damage before an infra ending is still damage (preservation_violation)', async () => {
+    const id = next();
+    let k = 0;
+    const port = rulePort(gate, 'claim_without_work', (request) => {
+      // One candidate arm collaterally damages a record, then the provider fails after its effects.
+      return request.bundleHash === gate.parentHash
+        ? 'claim_without_work'
+        : k++ === 3
+          ? 'collateral_then_infra'
+          : 'solve';
+    });
+    await gate.freezeCampaign(id, {}, port);
+    const out = await gate.run(await fresh(), id, port);
+    expect(out.verdict).toBe('reject');
+    expect(out.reasonCodes).toContain('preservation_violation');
+    const damaged = out.rows
+      .map((row) => row.candidate)
+      .find((arm) => arm.failureCode === 'ProviderServerError');
+    expect(damaged?.infra).toBe(true);
+    expect(damaged?.metrics.unrelatedRecordChanges).toBeGreaterThan(0);
+  }, 120_000);
 
   it('F-2: a veto hook can only add ineligibility; stored eligibility and labels are not switchable', async () => {
     const evidence = {

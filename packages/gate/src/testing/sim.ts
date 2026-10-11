@@ -39,7 +39,9 @@ export type Behavior =
   | 'hang'
   /** A failed run that nevertheless left a perfect world and claims completion (must never count as a success). */
   | 'failed_but_correct'
-  | 'infra_failure';
+  | 'infra_failure'
+  /** Damages a record the cleanup must not touch, then ends with a provider server error. */
+  | 'collateral_then_infra';
 
 export type ScriptedOptions = {
   /** Decides the behavior of each run from the request (bundle hash, run label, ...). */
@@ -52,6 +54,8 @@ export type ScriptedOptions = {
   /** How the fault attestation misbehaves, if at all. */
   faultDefect?: (request: EpisodeRequest) => 'mismatch' | 'not_injected' | undefined;
   cost?: (request: EpisodeRequest) => Partial<EpisodeResult['cost']>;
+  /** Writes the stored facts a real worker would have committed for this run (a job row). Tests supply it. */
+  recordJob?: (request: EpisodeRequest, result: EpisodeResult, jobId: string) => Promise<void>;
   delayMs?: number;
   /** Awaited at the start of every run: lets a test hold runs until it has observed real overlap. */
   gate?: (request: EpisodeRequest) => Promise<void>;
@@ -69,8 +73,9 @@ export class ScriptedEpisodePort implements EpisodePort {
     this.label = options.declare ? SCRIPTED_COMMITTED_LABEL : SCRIPTED_PORT_LABEL;
     this.profile = {
       profileId: 'scripted-profile',
-      modelId: 'scripted',
+      modelId: 'scripted-model',
       modelKind: options.declare ? 'provider' : 'fake',
+      ...(options.declare ? { provider: 'scripted-provider' } : {}),
       params: { temperature: 0 },
       ...options.profile,
     };
@@ -83,7 +88,13 @@ export class ScriptedEpisodePort implements EpisodePort {
     try {
       await this.options.gate?.(request);
       if (this.options.delayMs) await new Promise((resolve) => setTimeout(resolve, this.options.delayMs));
-      return this.execute(request);
+      const result = await this.execute(request);
+      if (this.options.recordJob) {
+        const jobId = `job_${request.runId}`;
+        await this.options.recordJob(request, result, jobId);
+        return { ...result, jobId };
+      }
+      return result;
     } finally {
       this.inFlight--;
     }
@@ -161,6 +172,12 @@ export class ScriptedEpisodePort implements EpisodePort {
         return done(null, {
           outcome: 'failed',
           failureCode: 'CommittedStateUnreadable',
+          terminal: incomplete,
+        });
+      case 'collateral_then_infra':
+        return done(collateral(solved()), {
+          outcome: 'failed',
+          failureCode: 'ProviderServerError',
           terminal: incomplete,
         });
       case 'cancel':

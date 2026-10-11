@@ -4,6 +4,7 @@ import type { GradeReport } from '@expunge/grader';
 import { ADMISSION_RULE } from './admission.js';
 import type { Derivation } from '@expunge/fixtures/sealed';
 import type { Labeler } from './labels.js';
+import type { JobEvidenceReader } from './job-evidence.js';
 import { faultPlanKey, runArm, type ArmTask } from './trials.js';
 import {
   GATE_SPLITS,
@@ -74,6 +75,7 @@ export type CampaignArgs = {
   concurrency?: number;
   graceMs?: number;
   signal?: AbortSignal;
+  evidence?: JobEvidenceReader;
 };
 
 /** A bounded pool. Order of results follows the order of tasks; the work itself overlaps up to `limit`. */
@@ -119,7 +121,14 @@ export async function runCampaign(args: CampaignArgs): Promise<CampaignRun> {
       graceMs: args.graceMs ?? DEFAULT_GRACE_MS,
     };
     const out = await runArm(
-      { port: args.port, derivation: args.derivation, label: args.label, signal, baseScope: args.baseScope },
+      {
+        port: args.port,
+        derivation: args.derivation,
+        label: args.label,
+        signal,
+        baseScope: args.baseScope,
+        ...(args.evidence ? { evidence: args.evidence } : {}),
+      },
       task,
     );
     return { pair, arm, out };

@@ -22,6 +22,7 @@ import {
   type GateConfig,
   type GateOutcome,
 } from '../src/index.js';
+import { jobRecorder } from './job-rows.js';
 import { ScriptedEpisodePort, type Behavior, type ScriptedOptions } from '../src/testing/index.js';
 
 export const RUNTIME_HASH = 'c'.repeat(64);
@@ -126,7 +127,7 @@ export async function openGate(label: string): Promise<Gate> {
 
 /** A port that declares committed evidence (rule tests only) and behaves per bundle: parent vs child. */
 export function rulePort(
-  gate: Pick<Gate, 'parentHash'>,
+  gate: Pick<Gate, 'parentHash' | 'env'>,
   parentBehavior: Behavior | ((r: Parameters<ScriptedOptions['behavior']>[0]) => Behavior),
   childBehavior: Behavior | ((r: Parameters<ScriptedOptions['behavior']>[0]) => Behavior),
   extra: Partial<ScriptedOptions> = {},
@@ -140,6 +141,7 @@ export function rulePort(
         : pick(childBehavior, request as never),
     declare: { kind: 'worker', modelKind: 'provider', evidence: 'committed' },
     runtimeHash: RUNTIME_HASH,
+    recordJob: jobRecorder(gate.env.service),
     ...extra,
   });
 }

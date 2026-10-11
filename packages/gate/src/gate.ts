@@ -32,6 +32,7 @@ import { assertPlanShape, runCampaign, type CampaignRun } from './campaign.js';
 import { ClaimStore, candidateKeyOf, childProjectionOf, reportIdOf, type ClaimTicket } from './claims.js';
 import { FreezeStore, budgetHashOf, profileHashOf, type CampaignFreeze } from './freeze.js';
 import { CampaignKeyStore, campaignCrypto } from './keys.js';
+import { MongoJobEvidence } from './job-evidence.js';
 import { PublicTrialRows } from './public-rows.js';
 import { buildGateReport, type AdmittedUnder, type ControlRow, type GateControls } from './report.js';
 import { GateStore } from './store.js';
@@ -234,6 +235,7 @@ export async function runGate(config: GateConfig): Promise<GateOutcome> {
       budget: config.budget,
       profile: config.port.profile,
       baseScope: config.baseScope,
+      evidence: new MongoJobEvidence(grader),
       ...(config.concurrency ? { concurrency: config.concurrency } : {}),
       ...(config.graceMs ? { graceMs: config.graceMs } : {}),
       ...(config.signal ? { signal: config.signal } : {}),

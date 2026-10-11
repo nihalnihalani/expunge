@@ -4,6 +4,7 @@ import type { Derivation, GatePlanEntry, SealedFixture } from '@expunge/fixtures
 import { generateSealedFixture } from '@expunge/fixtures/sealed';
 import { faultPlanHash } from '@expunge/domain';
 import type { Labeler } from './labels.js';
+import { verifyArm, type ArmFacts, type JobEvidenceReader } from './job-evidence.js';
 import {
   INFRA_FAILURE_CODES,
   NON_RESULT_OUTCOMES,
@@ -38,6 +39,8 @@ export type ArmContext = {
   label: Labeler;
   signal: AbortSignal;
   baseScope: Pick<ScopeKey, 'tenantId' | 'env'>;
+  /** Reads stored job rows. Absent means no arm can be verified, so every run is fake evidence (fail closed). */
+  evidence?: JobEvidenceReader;
 };
 
 const safeCode = (value: unknown): string =>
@@ -180,11 +183,39 @@ export async function runArm(context: ArmContext, task: ArmTask): Promise<ArmOut
     retryFailures: report.retryFailures,
     cost: report.cost,
   };
-  const attested =
-    result && typeof result.runtimeHash === 'string' && /^[a-f0-9]{64}$/.test(result.runtimeHash)
-      ? result.runtimeHash
-      : null;
-  const infra = failureCode !== null && INFRA_FAILURE_CODES.includes(failureCode);
+  // Evidence comes from the stored job row, read here with the grader's own principal, never from the port's word.
+  let facts: ArmFacts | null = null;
+  if (result?.jobId) {
+    const record = context.evidence
+      ? await context.evidence.read(instanceScope, result.jobId).catch(() => ({ job: null, stamps: null }))
+      : { job: null, stamps: null };
+    facts = verifyArm(
+      record,
+      { runId: labels.runId, worldId: fixture.world.worldId, bundleHash: task.bundleHash, outcome },
+      task.profile,
+    );
+  }
+  const attested = facts?.runtimeHash ?? null;
+  // A run that returned but has no stored job (none started, or the row is missing) taught us nothing about the arm: it
+  // is infrastructure, never a behavioral failure. A run the gate cut off or that threw keeps its own failure code.
+  const noJob = result !== null && (facts === null || facts.reasons.includes('job_missing'));
+  // Evidence: a stored job must verify. A failed, cancelled or timed-out arm with no job is a failure row, not evidence;
+  // an arm that claims to have run (completed, incomplete, refused) with no job is fake evidence.
+  const evidenceKind: TrialArm['evidence'] = noJob
+    ? nonResult
+      ? 'committed'
+      : 'fake'
+    : facts
+      ? facts.verified
+        ? 'committed'
+        : 'fake'
+      : nonResult
+        ? 'committed'
+        : 'fake';
+  // A port that threw, or a run the gate had to cut off, returned nothing we can judge a harness by: also infrastructure.
+  // (A campaign cancelled on purpose is not.)
+  const noResult = result === null && outcome !== 'cancelled';
+  const infra = noJob || noResult || (failureCode !== null && INFRA_FAILURE_CODES.includes(failureCode));
   const arm: TrialArm = {
     arm: task.arm,
     runId: labels.runId,
@@ -195,7 +226,8 @@ export async function runArm(context: ArmContext, task: ArmTask): Promise<ArmOut
     falseCompletion: report.falseCompletion,
     hadResult: result !== null,
     attestedRuntimeHash: attested,
-    evidence: result?.evidence === 'committed' ? 'committed' : 'fake',
+    evidence: evidenceKind,
+    evidenceReasons: facts?.reasons ?? (nonResult ? [] : ['job_not_started']),
     infra,
     harnessDefect: result ? defectOf(result, faults, instanceScope, fixture.world.worldId) : null,
     worldUnread: readback === null,

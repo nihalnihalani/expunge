@@ -4,9 +4,8 @@
  * each bundle's workflow. That makes this protocol evidence for the wiring and the grading join, not model evidence;
  * the profile says `fake`, so a campaign over this port is only ever held.
  *
- * KNOWN GAP (MA-F1, MA-F2, mongodb-authority): the LocalLaneHost shim below and the setup-backed `installAuthority` stand in
- * for a campaign-permit-aware ProvenanceRepository.permitted and a restricted authority installer. No gate source path
- * depends on either; delete both here when they land.
+ * KNOWN GAP (MA-F2, mongodb-authority): the setup-backed `installAuthority` stands in for a restricted authority
+ * installer. No gate source path depends on it; delete it here when it lands.
  *
  * Covers training fixtures only (no fault plan): a scripted model cannot do the retry reasoning faulted families need.
  */
@@ -45,11 +44,13 @@ import {
   GraderEpisodeHost,
   MongoEpisodePort,
   budgetHashOf,
+  MongoJobEvidence,
+  modelStampsOf,
+  verifyArm,
   campaignCrypto,
   childProjectionOf,
   profileHashOf,
   type EpisodeRequest,
-  type SeededInstance,
 } from '../src/index.js';
 import { EVALUATOR_HASH } from '@expunge/grader';
 import { FIXTURE_GENERATOR_HASH } from '@expunge/fixtures';
@@ -66,30 +67,6 @@ const infra = {
   sourceEligibilityPolicyHash: ELIGIBILITY_POLICY_HASH,
 };
 let env: LiveEnvironment;
-/**
- * LOCAL-LANE SHIM, not product behavior. ProvenanceRepository.permitted ignores campaign permits (reported to
- * mongodb-authority), so the run's context-input check needs an eligibility row; the old host wrote it as setup.
- * Remove when `permitted` consults campaign_artifact_permits in a campaign scope.
- */
-class LocalLaneHost extends GraderEpisodeHost {
-  async pinBundle(instance: SeededInstance, bundle: HarnessBundle, bundleHash: string): Promise<void> {
-    await super.pinBundle(instance, bundle, bundleHash);
-    await env.service.control
-      .collection('artifact_eligibility')
-      .insertOne({
-        tenantId: instance.actor.tenantId,
-        env: instance.actor.env,
-        scopeId: instance.actor.scopeId,
-        artifactHash: bundleHash,
-        state: 'permitted',
-        policyHash: ELIGIBILITY_POLICY_HASH,
-        reasonCode: 'source_retracted',
-        sourceIds: [],
-        updatedAt: new Date(),
-      } as never)
-      .catch(() => undefined);
-  }
-}
 const als = new AsyncLocalStorage<{ kind: 'w0' | 'child'; applies: number }>();
 
 function script(kind: 'w0' | 'child', applies: number): FakeTurn[] {
@@ -157,7 +134,7 @@ describeLive('MongoEpisodePort over the real worker and domain gateway (FAKE mod
     const jobs = new JobRepository(executor);
     const projections = new ProjectionRepository(executor);
     const runner = new WorkerEpisodeRunner({
-      host: new LocalLaneHost({ grader, subjects: domain.store }),
+      host: new GraderEpisodeHost({ grader, subjects: domain.store }),
       evidence: new MongoEpisodeEvidence(env.service),
       baseTools: createDomainToolWiring(executor).provider,
       workerFactory: ({ tools, onResult, session }) => {
@@ -263,5 +240,33 @@ describeLive('MongoEpisodePort over the real worker and domain gateway (FAKE mod
       expect(rows.every((row) => row.harnessHash === outcomes[arm]!.hash)).toBe(true);
     }
     expect(outcomes.candidate!.useful).toBe(true);
+    // D8-8 / DA-11 F-1: the stored job says a FAKE adapter ran. A profile that DECLARES a provider model, as the port's
+    // caller may, does not change that: the gate reads the stamp the worker committed and holds it as fake evidence.
+    const reader = new MongoJobEvidence(grader);
+    for (const arm of ['parent', 'candidate'] as const) {
+      const row = await reader.read({ ...BASE_SCOPE, scopeId: outcomes[arm]!.scope }, outcomes[arm]!.jobId);
+      const stamps = modelStampsOf(row.stamps);
+      expect(stamps.length).toBeGreaterThan(0);
+      expect(stamps.every((stamp) => stamp.source === 'fake')).toBe(true);
+      const claimsProvider = {
+        profileId: 'declared-provider',
+        modelId: stamps[0]!.modelId,
+        modelKind: 'provider' as const,
+        provider: stamps[0]!.provider,
+        params: {},
+      };
+      const facts = verifyArm(
+        row,
+        {
+          runId: row.job!.binding.runId,
+          worldId: row.job!.binding.worldId,
+          bundleHash: outcomes[arm]!.hash,
+          outcome: 'completed',
+        },
+        claimsProvider,
+      );
+      expect(facts.verified).toBe(false);
+      expect(facts.reasons).toContain('model_not_provider');
+    }
   }, 180_000);
 });
