@@ -8,3 +8,4 @@ export * from './outbox.js';
 export * from './sanitize.js';
 export * from './tools.js';
 export * from './tracing.js';
+export * from './guard-file.js';
