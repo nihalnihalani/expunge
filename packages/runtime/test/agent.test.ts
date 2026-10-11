@@ -768,7 +768,11 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
         expect((events.at(-1) as unknown as { code: string }).code).toBeDefined();
         return (events.at(-1) as unknown as { code: string }).code;
       };
-      for (const code of ['503', '500', '429', '401', '403', 'ECONNRESET', 'rate_limit_exceeded'])
+      for (const code of ['503', '500', 'server_error', 'overloaded_error'])
+        expect(await codeOf({ message: 'x', code }), code).toBe('ProviderServerError');
+      for (const code of ['429', 'rate_limit_exceeded'])
+        expect(await codeOf({ message: 'x', code }), code).toBe('ProviderRateLimited');
+      for (const code of ['401', '403', 'ECONNRESET'])
         expect(await codeOf({ message: 'x', code }), code).toBe('ModelUnavailable');
       for (const code of ['400', '413', '422', '408', 'timeout', 'ETIMEDOUT'])
         expect(await codeOf({ message: 'x', code }), code).toBe('ModelRunFailed');
@@ -811,7 +815,7 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
         const events = await collect(agent.run(runInput()));
         return (events.at(-1) as unknown as { code: string }).code;
       };
-      expect(await verdictFor(Object.assign(new Error('boom'), { status: 503 }))).toBe('ModelUnavailable');
+      expect(await verdictFor(Object.assign(new Error('boom'), { status: 503 }))).toBe('ProviderServerError');
       expect(await verdictFor(Object.assign(new Error('503 outage'), { status: 400 }))).toBe(
         'ModelRunFailed',
       );

@@ -3,19 +3,25 @@
  * name), never from message text: a message can echo the candidate's own prompt, so reading it could let a candidate steer
  * the classification.
  *
- *  - `ModelUnavailable` (infrastructure; the provider, the network or the worker's own credential): HTTP 429 (only after the
- *    SDK's bounded retries, see MODEL_RETRY_POLICY), 5xx, 401, 403 and 404 (the worker's key or model configuration, never
- *    something a candidate controls), connection-level network codes, provider overload / rate-limit / outage codes, and a
- *    missing credential.
+ *  - Infrastructure (the provider, the network or the worker's own credential), in three distinct codes the gate counts
+ *    separately:
+ *      `ProviderRateLimited`: HTTP 429 (only after the SDK's bounded retries, see MODEL_RETRY_POLICY) and the structured
+ *        rate-limit codes (`rate_limit_exceeded`, `rate_limit_error`, `insufficient_quota`).
+ *      `ProviderServerError`: HTTP 5xx and the structured server-side codes (`overloaded_error`, `server_error`,
+ *        `service_unavailable`).
+ *      `ModelUnavailable`: 401, 403 and 404 (the worker's key or model configuration, never something a candidate controls),
+ *        connection-level network codes, an authentication or permission error code, and a missing credential.
  *  - `ModelRunFailed` (everything else): other 4xx such as a request the provider rejected, any TIMEOUT (HTTP 408, a
  *    timeout code or name: the runtime's phase watchdog fires before the SDK's own timeout, so a timeout that still arrives
  *    is not provider evidence and must not turn a candidate's slow, huge-prompt call into "infrastructure"), and any error
  *    whose structured fields say nothing. Unknown stays here on purpose: counting an unclassified failure as infrastructure
  *    would excuse a candidate's own failures.
  */
-export type ModelFailureCode = 'ModelUnavailable' | 'ModelRunFailed';
+export type ModelFailureCode =
+  'ModelUnavailable' | 'ProviderServerError' | 'ProviderRateLimited' | 'ModelRunFailed';
 
-const UNAVAILABLE_STATUS = new Set([401, 403, 404, 429]);
+const UNAVAILABLE_STATUS = new Set([401, 403, 404]);
+const RATE_LIMIT_STATUS = 429;
 const TIMEOUT_STATUS = 408;
 const TIMEOUT_CODES = new Set([
   'timeout',
@@ -35,16 +41,12 @@ const UNAVAILABLE_CODES = new Set([
   'EHOSTUNREACH',
   'ENETUNREACH',
   'UND_ERR_SOCKET',
-  'rate_limit_exceeded',
-  'rate_limit_error',
-  'insufficient_quota',
-  'overloaded_error',
-  'server_error',
-  'service_unavailable',
   'invalid_api_key',
   'authentication_error',
   'permission_error',
 ]);
+const RATE_LIMIT_CODES = new Set(['rate_limit_exceeded', 'rate_limit_error', 'insufficient_quota']);
+const SERVER_ERROR_CODES = new Set(['overloaded_error', 'server_error', 'service_unavailable']);
 const UNAVAILABLE_NAMES = new Set(['MissingProviderCredentialError', 'APIConnectionError', 'FetchError']);
 
 const statusOf = (value: unknown): number | undefined => {
@@ -52,7 +54,6 @@ const statusOf = (value: unknown): number | undefined => {
   if (typeof value === 'string' && /^\d{3}$/.test(value)) return Number(value);
   return undefined;
 };
-const unavailableStatus = (status: number): boolean => status >= 500 || UNAVAILABLE_STATUS.has(status);
 
 /** One structured record: a thrown error, or the `{ code }` of a RUN_ERROR event. */
 function classifyRecord(record: Record<string, unknown>): ModelFailureCode | null {
@@ -63,8 +64,13 @@ function classifyRecord(record: Record<string, unknown>): ModelFailureCode | nul
   if (TIMEOUT_NAMES.has(name) || TIMEOUT_CODES.has(code) || status === TIMEOUT_STATUS)
     return 'ModelRunFailed';
   if (UNAVAILABLE_NAMES.has(name)) return 'ModelUnavailable';
-  if (status !== undefined && status >= 400 && status <= 599)
-    return unavailableStatus(status) ? 'ModelUnavailable' : 'ModelRunFailed';
+  if (status !== undefined && status >= 400 && status <= 599) {
+    if (status >= 500) return 'ProviderServerError';
+    if (status === RATE_LIMIT_STATUS) return 'ProviderRateLimited';
+    return UNAVAILABLE_STATUS.has(status) ? 'ModelUnavailable' : 'ModelRunFailed';
+  }
+  if (RATE_LIMIT_CODES.has(code)) return 'ProviderRateLimited';
+  if (SERVER_ERROR_CODES.has(code)) return 'ProviderServerError';
   if (UNAVAILABLE_CODES.has(code)) return 'ModelUnavailable';
   return null;
 }
