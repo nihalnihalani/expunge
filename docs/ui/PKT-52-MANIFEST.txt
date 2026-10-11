@@ -1,0 +1,18 @@
+# PKT-52 manifest (Privacy view), 2026-10-11T16:03:46Z; HEAD 355cd31 (PKT-40 and PKT-45 landed) stacked with the PKT-46, 49, 52, 53, 56 manifests in that order, S5 held tab patch applied; node 24.13.1. Build id of the stack up to and including this packet: d995813cbe67e82bdb10f43fe4eac285e251512ce5e81255832f0873bb53d163. Evidence (screenshots, results-s*.json) comes from the full stack through PKT-56, build id f7191af190b98436a8348cf006b99869c050cb2bec17efcec21801a34c1c0964. Closure chip state and label both follow progress.closureComplete (test fails if forced). Erasure patch must land with the contracts change.
+bc5bc5c45a3534f781001b76f13d610a3eaf277651a0e395a8bd9a787a59a4c7  apps/operator/src/client/expunge/views/PrivacyView.tsx
+f93e92880381c9b5bab85c34fe8ccc55df4898faa1e18e111848ee1c592df59f  apps/operator/tests/browser/s7.mjs
+f03b0eddd42b64c16be652ef4dc1eaeb8e1c8473b9e12b735f4a6329a3c94c8d  apps/operator/tests/expunge-privacy.test.tsx
+a45e16efc74744e2ab30ac68c6ed571b8fe7db53952812902c3ef9de8960c59e  apps/operator/tests/fixtures/ext/55-privacy.ts
+2586f1500d11e84937879dfdf3f648a0365ddb9d28ccae2f517b211517a25920  docs/ui/S7-held-erasure-states.patch
+292010ad24b8e3b79ea6265fe3f867c1a603c545587e3d8019e190a6e05327ab  docs/ui/screens/s7/results-s7.json
+fca3ab0610d128603f67883717c009a59ad9b246d373cd4e811ff2aadebcb7a6  docs/ui/screens/s7/s7-privacy-1024-dark.png
+96ec55b173347567d25846fbbade1645ca844b0e6871f540977620caac637188  docs/ui/screens/s7/s7-privacy-1024-light.png
+bc75b41e0d451de8a22bea5e4d67d86efbd49b74be6aeb6665d3e1372769d357  docs/ui/screens/s7/s7-privacy-1440-dark.png
+d5198304a8819c37162178dd0997aa2d47d61b1966141bb81fa4302888a4b8e9  docs/ui/screens/s7/s7-privacy-1440-light.png
+d2129937bf8b11635eed25bb150916673c147cd0e28b7c8cbe034e2f6be3c0eb  docs/ui/screens/s7/s7-privacy-390-dark.png
+863e7bdbd5d35f6a9e41bdd0c88fdf91f5d0e99f2c057b370069a14bf20d52af  docs/ui/screens/s7/s7-privacy-390-light.png
+6397d0778cc6813ea487b77d1ebf0d2cfc4983fcfa5e4f66a9413127f05d2852  docs/ui/screens/s7/s7-privacy-768-dark.png
+899d7eeba1d69daffe232a071d0a90f04c6bc78ab35f32a53d37e9fd050a1649  docs/ui/screens/s7/s7-privacy-768-light.png
+35aa7b35d140b5b169479b467ab7a4b914baa0875dc5841615b4e2d952d0a767  docs/ui/screens/s7/s7-privacy-complete-1440-light.png
+21bf91b33aa3ec72a1641ae9f6e3e20fd8c0eb3fd6f9a0cb676cfa59991d1846  docs/ui/screens/s7/s7-privacy-failclosed-1440-light.png
+e54c18c599d659b7b25c27761153e9a965c76d7b1aee925adfc5eb9d4f81dce6  docs/ui/screens/s7/s7-privacy-nocompletiontime-1440-light.png
