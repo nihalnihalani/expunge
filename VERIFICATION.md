@@ -629,6 +629,87 @@ An earlier live attempt without `directConnection=true` failed with ECONNREFUSED
 
 **PKT-25 (P3, deployment): not started.** Remaining: export `x3` (P1+P2+P3), lock regeneration for `packages/deployment` (its manifest gained `@expunge/harness-compiler`), `npm ci`, typecheck, the four-package fast and live lanes (owner: about 225 passed live), `npx tsx packages/deployment/scripts/c3-evidence.ts` against the live set (record admitted report id and digest, rejected reason codes, promotion pointer move, pinned run's deny row, race log), and the mutation check `pin honouring a caller hash`.
 
+## V-3 results (verifier, claude-sonnet-5-5, Node 24.13.1, 2026-10-11 13:04Z to 13:15Z)
+
+All runs on Node v24.13.1 (`export PATH="$HOME/.nvm/versions/node/v24.13.1/bin:$PATH"`). My replica set: compose project `verifier-mongo`, `mongo:8.0.15`, `--replSet expunge-local`, `127.0.0.1:27118`, restarted at 13:05Z (`MONGODB_TEST_URI='mongodb://127.0.0.1:27118/?directConnection=true'`). Every live run below sets `EXPUNGE_REQUIRE_LIVE_TESTS=1`, so a skipped live suite would have failed instead of passing silently. Stand-ins are labeled FAKE inside the tests; nothing here is evidence about Atlas, a model provider, Raindrop or Intelligence (no `.env`, so those lanes stay BLOCKED).
+
+### HEAD proofs (row 4 and row 5)
+
+Procedure as before: `git archive <sha> | tar -x` into a fresh scratch directory, no overlay, `npm ci --ignore-scripts --no-audit --no-fund`, then the commands in the table. Default lane means `env -u MONGODB_TEST_URI -u EXPUNGE_REQUIRE_LIVE_TESTS npx vitest run`.
+
+| HEAD | npm ci | tsc | eslint | prettier --check | vitest default lane | `npm run test:continuity` | `npm audit --omit=dev` |
+|---|---|---|---|---|---|---|---|
+| `a4af80c54b165f4f917383d7467ad2d34ace3b8b` (13:04Z; the HEAD team-lead named) | exit 0, 659 packages | exit 0 | exit 0, 0 errors, 31 warnings (all `no-explicit-any`) | **exit 0**, all files formatted | exit 0: 58 files passed, 17 skipped (75); **739 passed / 0 failed / 280 skipped** (1019 total) | not run on this HEAD | not run on this HEAD |
+| `2efd82751aef334bcb409e7ab9c8e072b5ffe41e` (13:11Z; HEAD had moved by two docs commits and the PKT-31 hook change: `.claude/settings.json`, `scripts/hooks/subagent-report-gate.mjs`, `docs/continuity/*`, `COMMIT-LEDGER.md`) | exit 0, 659 packages | exit 0 | exit 0, 0 errors, 31 warnings | **exit 1: two files fail the format gate, `docs/continuity/TASKS.json` (team-lead) and `scripts/hooks/subagent-report-gate.mjs` (PKT-31, hook owner)**; both are new at this HEAD, a4af80c was clean | exit 0: same 58/17/75; **739 / 0 / 280** | exit 0: **42 passed, 0 failed, 0 skipped** | exit 1 (advisories present): moderate 33, high 5, low 0, critical 0, **total 38**, unchanged from rows 1 to 3 |
+
+The 280 skips are all environment-gated and sum exactly: 2 `packages/governance/test/ledger.integration`, 2 `packages/harness-compiler/test/live-parity` (`describe.skipIf(!uri)`: `MONGODB_TEST_URI` unset); the replica-set suites in `packages/mongo/test/` (authority 24, dispatch 8, hardening 50, integration 9, projection 9, promotion 46, provenance 16, rbac 68, record-effects 7, scope 11 = 248), `packages/observer/test/mongo.integration` 14 and `apps/worker/test/dispatch.integration` 11 (all need `MONGODB_TEST_URI`); `packages/observer/test/raindrop-live` 1 and `raindrop-contract-probe` 1 (`RAINDROP_API_KEY`, `RAINDROP_QUERY_API_KEY`, `RAINDROP_PROJECT_ID` unset); `apps/worker/test/live-provider` 1 (model provider keys and worker readiness unset). 2+2+248+14+11+1+1+1 = 280. No `MONGODB_*` variable was set in that shell (`env | grep -c '^MONGODB_'` gave 0).
+
+**Finding F5 (format gate red at the current HEAD, routed to team-lead and the PKT-31 author):** `npm run format:check` fails at `2efd827` on `docs/continuity/TASKS.json` and `scripts/hooks/subagent-report-gate.mjs`. `npx prettier --write` on those two paths clears it; neither is mine to edit.
+
+### Reliability and containment results, re-run now
+
+Run on the working tree (HEAD `2efd827` plus other lanes' uncommitted work), one `npx vitest run <file>` per row. These files are untracked, so rows 1 to 5 and 7 also pass against the HEAD export plus an overlay of `tests/reliability/` (E1 shown in its own row below).
+
+| Suite | File | Exit | Result | Time (UTC) |
+|---|---|---|---|---|
+| Wake endpoint probes over real TCP (FakeWakeTarget, READY readiness stand-in) | `tests/reliability/wake-endpoint.test.ts` | 0 | **79 / 79** | 13:06:40 |
+| Durable wake `commandId` replay across a worker restart (product `MongoWakeCommandStore` on my replica set) | `tests/reliability/wake-durable.live.test.ts` | 0 | **6 / 6** | 13:06:45 |
+| Netguard active egress and containment (running candidate stack, probe container with all capabilities dropped) | `tests/reliability/netguard.live.test.ts` | 0 | **12 / 12** | 13:06:47 |
+| Candidate proxy routing (product `createCandidateProxy`, FAKE broker transport) | `tests/reliability/candidate-proxy-routing.test.ts` | 0 | **34 / 34** | 13:07:59 |
+| Resume-token failure on the projection stream consumer | `tests/reliability/resume-token.live.test.ts` | 0 | **7 / 7** (includes the `KNOWN GAP` corrupt-token cases, which pass by pinning the defect) | 13:08:27 |
+| WorldKey brand | `tests/reliability/worldkey-brand.test.ts` | 0 | **4 / 4** | 13:08:34 |
+| E1 worker faults (child processes, SIGKILL and SIGSTOP, product Dispatcher on my replica set) | `tests/reliability/e1-worker-faults.live.test.ts` | see below | see below | 13:07:59 to 13:12 |
+
+**E1 in three runs, and why the numbers differ.**
+
+1. Scratch export of HEAD `a4af80c` plus `tests/reliability/` overlaid: exit 0, **8 / 8**.
+2. Working tree, first run at 13:07:59Z: exit 1, **4 failed / 4 passed**. Two failures show contiguous-stream counts of `+0` where `1` was expected, one is `worker-a exited before reaching after-commit-before-ack` (code 0). These came from the child processes loading `apps/worker/src/dispatch.ts` while runtime-raindrop was editing it. I could not reproduce it: the isolated `-t "stall after the commit"` run and two full re-runs did not show these four failures. I treat run 2 as a mid-edit race and not as a finding about the product. I also made the driver's "exited before reaching a point" error carry the child's events, so a recurrence is diagnosable.
+3. Working tree, two full re-runs at 13:10 and 13:11Z: both exit 1, **7 passed / 1 failed**, the same single failure each time: `KNOWN GAP: crash after the terminal transition and before its projection event leaves the job terminal and the terminal event never emitted` now sees `['job_started', 'job_failed']` where the test pins `['job_started']`. Cause: the uncommitted `apps/worker/src/dispatch.ts` (held C1b) adds `terminalEventFor`, `repairTerminalProjection` and a startup `terminalSweep` that rebuild a lost terminal event from committed state. The WIP therefore closes finding F2; the test still pins the HEAD behavior and is correct for HEAD. I will flip that test to assert "exactly one `job_failed`, contiguous stream" in the same packet as C1b, not before, so that the committed pair stays green.
+
+### Findings from the V-3 probes, with routing
+
+| # | Finding | Evidence | State | Routed to |
+|---|---|---|---|---|
+| F1 | **Zombie late `job_failed` is not fenced.** A worker frozen with SIGSTOP loses the lease, a second worker takes over; the first worker's late job and effect writes are fenced out (`StaleFence`), but when it resumes it still appends a terminal `job_failed` projection event. The sanitized stream can then carry a terminal event from a worker that no longer owns the job | `e1-worker-faults.live.test.ts` "lease expiry and takeover ... (KNOWN GAP)", passes by asserting the late event is present; reproduced on HEAD `a4af80c` and on the working tree | OPEN at HEAD and in the WIP | runtime-raindrop (dispatch.ts / projection append must check the lease fence before append; mongodb-authority for a fenced `ProjectionRepository.append` if the fix belongs in the repository) |
+| F2 | **Crash between the terminal transition and its projection event loses the terminal projection.** The job is committed `failed`; the stream stays at `job_started`; a takeover treats the job as terminal and never emits it | same file, "KNOWN GAP: crash after the terminal transition ..."; pins the defect at HEAD | OPEN at HEAD; **fixed in the uncommitted WIP** (`terminalEventFor`, `terminalSweep`), which makes the test above go red by design | runtime-raindrop: include the flipped test in the C1b packet; verifier re-proves the repair after the packet is forwarded |
+| F3 | **A corrupt stored resume token crashes the consumer on every restart.** `ProjectionStreamConsumer.consume()` rejects with the server error and the `stream_offsets` record stays, so recovery never happens. Server codes 286 and 280 (lost history) are handled; a malformed token is not | `resume-token.live.test.ts`, `it.each` "KNOWN GAP: a corrupt stored token (%s) is not recovered ..."; reproduced on my replica set. The local mongod cannot produce error 286 (needs a 990 MB oplog); that branch is checked by reading the code only | OPEN | runtime-raindrop owns the consumer fix (treat any non-resumable token error as invalid: backfill and delete the offset); ui-ux-improver's projection controller should not assume the stream never rejects |
+| F4 | **Leak-guard bypass** found during the V-3 probes | covered by C1c (PKT-21, commit `217a55a`); its bypass cases are in `packages/observability/test/unsafe-paths.test.ts` and `packages/observer/test/c1c.test.ts` | CLOSED at HEAD | none |
+| F5 | Format gate red at `2efd827` | see HEAD proofs | OPEN | team-lead, PKT-31 author |
+| F6 | Parseable but ancient resume token is accepted and the consumer re-reads from the start of the oplog (events come again). Delivery is at-least-once: a crash between handler and offset write redelivers an event | `resume-token.live.test.ts` cases 2 and 3 | by design, documented; consumers must be idempotent on `eventId` | ui-ux-improver (the projection reducer must tolerate a repeated event; I have not checked that it does) |
+
+Not covered, said plainly: Atlas-side behavior, model-provider and Raindrop behavior, the candidate stack on any non-local network, and oplog truncation (error 286) on a real oplog.
+
+### Packet: verifier / V-3 reliability harness (12 new files under `tests/reliability/`)
+
+Manifest (all untracked, none touched by any other lane): `tests/reliability/{candidate-proxy-routing.test.ts, candidate-proxy.d.ts, e1-worker-faults.live.test.ts, netguard.live.test.ts, resume-token.live.test.ts, support.ts, wake-durable.live.test.ts, wake-endpoint.test.ts}`, `tests/reliability/fault/{driver.ts, protocol.ts, worker-child.ts}`, `tests/reliability/probes/netguard-in-namespace.mjs`. Checkpoint **`20261011T131317Z-520c241b`** (`complete=true`, base `2efd827`, taken 13:13:17Z): the 12 packet paths and `VERIFICATION.md` all MATCH in the worktree check (15 of 15 under `tests/reliability/` plus `VERIFICATION.md`; the only CHANGED or MISSING entries in the whole checkpoint are other lanes' `packages/domain/test/{tmp-debug,zz-scratch-measure.integration}.test.ts`, `packages/gate/test/store.integration.test.ts` and `packages/observer/src/outbox-dispatcher.ts`). `VERIFICATION.md` is inside this checkpoint's manifest (hash recorded, 1 entry), so the earlier classifier gap does not reproduce at this base: root `*.md` files are approved by `ROOT_FILE_RE`.
+
+Every import in the packet resolves inside the packet or at HEAD: scratch export of `2efd827`, the 12 files copied over it, `diff -rq` against a pure HEAD export shows exactly those 12 paths and nothing else. No product code, no dependency, no lockfile change.
+
+| Check | Command | Exit | Result |
+|---|---|---|---|
+| Install | `npm ci --ignore-scripts --no-audit --no-fund` | 0 | 659 packages |
+| Typecheck | `npm run typecheck` | 0 | 0 errors (the working tree currently shows 1 error in another lane's `packages/domain/test/tmp-debug.test.ts`; not in the packet, not at HEAD) |
+| Lint, format | `npx eslint tests/reliability`; `npx prettier --check tests/reliability` | 0, 0 | clean |
+| Default lane, no URI | `env -u MONGODB_TEST_URI -u EXPUNGE_REQUIRE_LIVE_TESTS npx vitest run tests/reliability` | 0 | 7 files (4 passed, 3 skipped); **129 passed / 0 failed / 21 skipped**; the skipped suites are the three live ones, each titled with its reason |
+| Live lane | `MONGODB_TEST_URI=<27118> EXPUNGE_REQUIRE_LIVE_TESTS=1 npx vitest run tests/reliability` | 0 | 7 files passed; **150 passed / 0 failed / 0 skipped**, against committed code only (E1 included: 8 / 8) |
+| Denial path: required-live without services | `env -u MONGODB_TEST_URI EXPUNGE_REQUIRE_LIVE_TESTS=1 EXPUNGE_NETGUARD_CONTAINER=nonexistent npx vitest run tests/reliability` | 1 | 5 failed, each saying the service is not available but live suites are required; a missing service cannot pass as a skip |
+
+Two things team-lead should know before accepting: (1) at the committed tree these tests pin three open defects as `KNOWN GAP` (F1, F2, F3 above); passing means the defect is still present. (2) When the held C1b dispatch change lands, the F2 test goes red by design and has to be flipped in that same packet (see V-3 results).
+
+### Claude-to-Codex handoff drill (spec section 20), run 2026-10-11 13:19Z
+
+Script: `scripts/continuity/drill.mjs` (new, verifier-owned; `node scripts/continuity/drill.mjs [--keep]`). It builds disposable synthetic git checkouts under the OS temp directory, drives the real `checkpoint.mjs`, `verify-checkpoint.mjs` and `restore-checkpoint.mjs` as separate processes, and removes everything afterwards (0 `expunge-drill-*` directories left). It never touches the project repository. Difference from the 42 in-process tests under `scripts/continuity/test`: the interrupted write is a real SIGKILL of the checkpoint process and the old writer is a real live process. Three consecutive runs: **DRILL OK, 11 / 11 scenarios, exit 0** (Node 24.13.1). `eslint` and `prettier --check` on `scripts/continuity` exit 0; `npm run test:continuity` still 42 / 42.
+
+| Scenario | Result |
+|---|---|
+| 1 Disposable synthetic checkout restore (staged, unstaged, untracked, binary and deleted WIP) | checkpoint exit 0; dry-run writes nothing; `--apply` reproduces content, the binary bytes, the deletion and the staged/unstaged split; a second apply reports ALREADY_APPLIED; `verify` of the restored tree against the pack exits 0 with CHANGED 0 and MISSING 0 |
+| 2 Stale narrative versus newer code | restore onto a target holding newer edits is refused (exit 5 or 6) with no partial write; with `--force-review` newer files are still never overwritten; `verify` against a source edited after the checkpoint reports CHANGED and exits non-zero |
+| 3 Mismatched base | restore onto a target one commit ahead exits 4 and leaves the target byte-identical |
+| 4 Interrupted write | SIGKILL of the checkpoint process after its temp directory appeared (400 files of 200 kB): `LATEST` still names the previous checkpoint, its manifest is byte-identical, no final directory exists for the killed one, and the next checkpoint succeeds (the dead process's lock is recovered) and verifies with `--pack-only` |
+| 5 Old-writer lock | a lock file naming a live pid blocks restore with exit 7 `ACTIVE_WRITER_LOCK` under no flag, `--apply` and `--apply --force-review`, writes nothing and is never removed; after the holder is killed and reaped the lock is reported "not running; left in place" and restore applies (exit 0) |
+
+Drill pitfall found and fixed in the drill, not in the tool: a killed but unreaped child is a zombie and still counts as a live pid, so step 5b first waits for the exit event. Finding about the tool's policy, behaving as designed: an unrecognised root-level file (a stray `bin.dat`) makes the snapshot `complete: false` (exit 3, LATEST not updated), so a new account cannot silently lose a root-level file. Not covered: restore onto a UNBORN target and the sealed-material rules are covered by the in-process tests, not by this script.
+
 ## BLOCKED live checks
 
 All of these need the root `.env`, which does not exist. Variable NAMES are taken from `.env.example`; no values were read or exist to read.
@@ -895,3 +976,125 @@ Content checks:
 | DA test ids | I mapped the id as the first token of the nearest describe or test name. Vitest runtime cases (it.each rows counted separately), all passing: **O1 40** (34 in `leak.test.ts`, 6 in `bundle.test.ts`), **O2 11** (10 `c1c`, 1 `mongo.integration`), **O3 3**, **O4 4**, **O5 4**, **O6 4**, **O7 9** (`unsafe-paths` 2, `bundle` 4, `leak` 3). Source-level `it(`/`it.each(` definitions: O1 17, O2 5, O3 3, O4 4, O5 4, O6 4, O7 9. **O9** is not a test-name prefix: it is the header of `raindrop-contract-probe.test.ts` ("DA-6 O9") and shows as 1 skipped test without keys. I could not reproduce the owner's per-id numbers (O1 11, O2 7, O3 4, O4 6, O5 4, O6 5, O7 9); only O5 and O7 agree. O1 11 equals the number of definitions in `leak.test.ts` alone. No id is uncovered; the discrepancy is in counting, not coverage |
 
 Observations, none blocking: (1) The changes to `observeEvent`, `assertNoLeak`, `BundleInput`, `ObserverRunner` and `OutboxDispatcher` are breaking inside the observer package; the held C1b files in the working tree already typecheck against them (working-tree `tsc` 0), and the committed tree has no other caller. (2) `package-lock.json` must come with this commit (one added line in the `packages/observability` workspace entry, text above); it is team-lead-owned, so I made no edit. (3) The 29 lint warnings are all in tests.
+
+### PKT-31 hook gate (verifier-2, claude-sonnet-5-5, Node 24.13.1)
+
+Files (sha256 match the packet): `.claude/settings.json` b49feb9e...8154, `scripts/hooks/subagent-report-gate.mjs` 1823adc0...50a6. Result: **GREEN**.
+
+| Check | Command / input | Exit | Result |
+|---|---|---|---|
+| Settings valid JSON | `JSON.parse` of `.claude/settings.json` | 0 | valid; `SubagentStop` and `TaskCompleted` both run the gate |
+| TaskCompleted, transcript last assistant text lacks footer | synthetic payload + JSONL | 2 | stderr names the missing fields |
+| TaskCompleted, full footer | same, with EFFECTIVE_MODEL/OWNED_PATHS/CHECKS+exit code/STATUS | 0 | pass |
+| Missing transcript file / no `transcript_path` / corrupt JSONL | three payloads | 2, 2, 2 | no evidence blocks, as intended |
+| Malformed stdin (`not json{`) | stdin | 0 | never wedges |
+| `stop_hook_active: true` | with a footerless transcript | 0 | loop guard works |
+| SubagentStop unchanged | no footer / full footer / Explore exempt / short question | 2 / 0 / 0 / 0 | same as HEAD; diff vs HEAD touches only the transcript fallback |
+| Secret scan | grep for key/token/secret/URI patterns, both files | 1 (no hits) | clean |
+| `npm ci --ignore-scripts --no-audit --no-fund` on HEAD a4af80c export, unpiped | | **0** | captured (the prep gap) |
+
+Observations, non-blocking: (1) empty stdin exits 2 (`'{}'` fallback, same as HEAD), not 0; a real hook always sends JSON. (2) A corrupt line anywhere before the last assistant text returns empty and so exits 2; reverse scan only hits lines after it, so only a corrupt trailing line matters.
+
+### PKT-32 expert baseline visits (verifier-2, claude-sonnet-5-5, Node 24.13.1)
+
+Files (sha256 match): `packages/baselines/src/index.ts` 8d20582e...48f0, `packages/baselines/test/baselines.test.ts` 7e6e2a56...4442, over a scratch export of HEAD 2efd827. Result: **GREEN**.
+
+| Check | Command | Exit | Result |
+|---|---|---|---|
+| Install | `npm ci --ignore-scripts --no-audit --no-fund` | 0 | |
+| Typecheck | `npm run typecheck` | 0 | |
+| Default lane | `npx vitest run packages/{baselines,harness-compiler,evolution,governance,contracts,fixtures,grader} apps` | 0 | 34 files (30 passed, 4 skipped), 409 passed / 16 skipped |
+| Replica lane | same with `MONGODB_TEST_URI=mongodb://127.0.0.1:27218/?replicaSet=expunge-local&directConnection=true` | 0 | 34 files (32 passed, 2 skipped), 422 passed / 3 skipped |
+| Baselines alone | `npx vitest run packages/baselines` | 0 | 12 passed |
+| Mutant: preview maxVisits back to 1 | scratch only | 1 | 2 fail: the visit-sum test and the new two-round walk |
+
+Content: visit sum 1+1+3+2+2+2+1 = 12. The new test walks inspect, resolve, discover, preview, apply, verify(verification_failed), discover, preview, apply, verify(success), complete over real edges within each maxVisits. `packages/gate`, `packages/deployment`, `packages/adversary` and `packages/domain` do not exist at 2efd827, so they were not run. No test pins the old expert bundle hash (tests use `testHashes`; no committed hash literal for the expert bundle). Only `docs/review/DA-2-stable-surfaces.md` lists file hashes of `packages/baselines/src/index.ts` and the test (bcdc60ea..., 91b51bae...); that is an already-stale historical file inventory, and both files differ from it before this packet.
+
+### PKT-33 C1b + DG4 worker half + V-3 a/b (verifier-2, claude-sonnet-5-5, Node 24.13.1)
+
+Checkpoint `.expunge/checkpoints/20261011T131342Z-b6b148fc` (stable, pack re-read matched). Scratch export of HEAD 2efd827 + exactly the 24 packet paths (hashes below). Result: **GREEN**, with two test-sensitivity observations and a lock caveat.
+
+Hashes (sha256): apps/worker/package.json 33cc7382...8122; src/committed.ts 94e7a636...9013; telemetry.ts 22888 0a8...0f546 (228880a8506745562faabb7a972053f7b3de315e2c70a93301e99e4d1900f546); dispatch.ts ee43745f...e163; index.ts c60905cd...cea8; readiness.ts a0ec3cae...cb6; terminal.ts 1da5be12...ca3; wake.ts 87b31697...fffd1; wiring.ts b118dea3...1173; tests dispatch e52d7eff...e1d0 (e52d7eff4622f348babe161394867a2a51bd41ce384ec59be48858fa3ea3e0d1), telemetry 005af4c1...dc83, telemetry.integration 3545b2e7...852b, projection.integration 3b36249c...1e55; runtime errors 73fc255a...a51d, meter 4f975587...1027, ports e99c40f5...9789, session 03e1650c...e03e, middleware-guard 95f4a6be...fbc0, tests agent fa171223...f73, usage e89cfadd...0a33f10; vendor-openmuse THIRD_PARTY.md e4701869...d46a, src/index.ts 2d95b67b...667b, tanstack-agent.ts e9b3cbb5...7e56, test 189d7200...5376 (full list in the lead report; all re-hashed after mutants: no drift).
+
+| Check | Command | Exit | Result |
+|---|---|---|---|
+| Lock regenerated | `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` | 0 | adds `@expunge/observability` 0.1.0 and `mongodb` 7.7.0 to the apps/worker workspace entry. Caveat: this npm also churns `peer`/`dev` flags and drops 26 `node_modules/vitest/node_modules/@esbuild/*` optional-platform entries; steward should hand-apply only the 2 added lines, or regenerate under the lock's original npm |
+| Install | `npm ci --ignore-scripts --no-audit --no-fund` | 0 | |
+| Typecheck | `npm run typecheck` | 0 | 0 errors |
+| Default lane | `npx vitest run apps/worker packages/runtime packages/vendor-openmuse packages/observability packages/observer` | 0 | 35 files (28 passed, 7 skipped); 352 passed / 34 skipped |
+| Replica lane (27218) | same with MONGODB_TEST_URI | 0 | 35 files (32 passed, 3 skipped); **383 passed / 3 skipped**, equals the owner |
+| Live flag | `EXPUNGE_REQUIRE_LIVE_TESTS=1 MONGODB_TEST_URI=... vitest run apps/worker` | 1 | 82 passed / 1 failed / 1 skipped; the failure is `live-provider.test.ts`, message `BLOCKED: live provider smoke not runnable (Set EXPUNGE_MODEL_PROVIDER ... API_KEY ...)`. Blocked on the human, not faked |
+| Mutant: drop `lease.fence` from the projection fence filter (wiring.ts:93) | projection.integration | 0 | **still 2 passed** |
+| Mutant: drop `lease.ownerId` only | same | 0 | still 2 passed |
+| Mutant: drop both | same | 1 | the zombie test fails (StaleFence not raised) |
+| Mutant: `CheckpointWriter` seeding of the prior meter removed (dispatch.ts:228) | dispatch.test | 0 | still 31 passed (the session re-emits its carry through `onMeter`, so the writer seed is redundant) |
+| Mutant: session ignores the checkpoint carry (session.ts:102) | dispatch.test + packages/runtime | 1 | 7 fail (1 dispatch takeover test, 6 `usage.test.ts` DG4 tests) |
+
+Content checks: FAKE labels present (`worker telemetry (real Raindrop SDK and TanStack loop; labeled FAKE ingestion server, outbox and model)`, `DA-5 DG4 worker half (FAKE store, FAKE model)`, `V-3 (b) FAKE store and sink`); the integration lanes are `describeLive` (real Mongo, local replica set). The zombie is refused with `StaleFence` and writes nothing (`projection_events` count 0 for the zombie id); a late write from the old fence is also refused after the new holder finishes. Terminal repair runs once and a second sweep repairs 0 (idempotent) for succeeded, cancelled and failed jobs. A takeover carries the meter (budgets per job). mongodb 7.7.0 equals `packages/mongo/package.json` (one driver version).
+
+Observations: (1) The fence filter is redundant in the only test: the zombie differs in both ownerId and fence, so either condition alone catches it; no test covers the same worker id re-claiming with a higher fence, which is the case only the fence filter guards. Suggest a test with the same ownerId on both claims. (2) The writer-seed meter path is untested in isolation; the real carry guard is in `session.ts` and is well covered.
+
+PKT-33 full sha256 list (authoritative; supersedes the abbreviated forms above):
+
+```
+33cc73828b86817204a5711a02b629433dfbcf130c743cda458cc1ca85628122  apps/worker/package.json
+94e7a6369d2c95bd71962024d459f67b0097c935a18110330d83f50e3dae9013  apps/worker/src/committed.ts
+228880a8506745562faabb7a972053f7b3de315e2c70a93301e99e4d1900f546  apps/worker/src/telemetry.ts
+ee43745fac1c24fa8b3be35516b434f0e0d3130ddc8cf316aa2e3bf730b4e163  apps/worker/src/dispatch.ts
+c60905cd65ec1aa6d5dd5de1a817150a98a411f994c728075f226f30fc2fcea8  apps/worker/src/index.ts
+a0ec3caee62c8d570c7a0d35ec8dbcc16a8ed41c51a8e66401081bf17bf72cb6  apps/worker/src/readiness.ts
+1da5be12401d1a0325a26fadba1e33cca6fc917ad9e089281357f10ddb196ca3  apps/worker/src/terminal.ts
+87b31697da6935b93abd4446556230c0d7e084a52f266e2515be87c24dffd1f9  apps/worker/src/wake.ts
+b118dea3d40aa50ceb433652b6fd4963033ce122751a3ea6aa940e8414091173  apps/worker/src/wiring.ts
+e52d7eff4622f348babe161394867a2a51bd41ce384ec59be48858fa3ea3e0d1  apps/worker/test/dispatch.test.ts
+005af4c19c8118a3e8b52d8d3ba03f6a6c879793dfc52e6059a9ef379a77dc83  apps/worker/test/telemetry.test.ts
+3545b2e710f9d8e373049b2e6a739ef3389ca9afecd016a58801cf9ccb43852b  apps/worker/test/telemetry.integration.test.ts
+3b36249ca6ef12fa3ee8c11b0b1b3c9aab93296e8dc6a8d507a8c6b82f4e1e55  apps/worker/test/projection.integration.test.ts
+73fc255aa537b214b0e24ba007ae50f0f38027a023d7f462270b215a864e9a51  packages/runtime/src/errors.ts
+4f9755870c2c3e3e83a312badc3b40eff2a619898f2d81698e33e81bbdd91027  packages/runtime/src/meter.ts
+e99c40f5d72b4f53eb66d079799dab77d00055b616fa0a79b091fa8026899789  packages/runtime/src/ports.ts
+03e1650cbaec4f3364a56056ade068dcab059498724ba68cbb04ffe5f2a9bebb  packages/runtime/src/session.ts
+95f4a6bea8ede34a8dc764034d54b0522a759fe483d04493fd3a973d1633fbc0  packages/runtime/src/middleware-guard.ts
+fa1712238d512a058e3ea72126003171ab8aadee9d0bb4e89853a298e0634f73  packages/runtime/test/agent.test.ts
+e89cfadd772bfc4d75215ea4f313c7f95d3d4020d1e3c70f627fc95c0bf33a10  packages/runtime/test/usage.test.ts
+e4701869f9f3eebc19e57a06795a06c33116abd3ba5124e74a74cf1a7fd4d46a  packages/vendor-openmuse/THIRD_PARTY.md
+2d95b67b15fc65be829adcc7988a4230629819057c9997911c70b24137bd667b  packages/vendor-openmuse/src/index.ts
+e9b3cbb58bd4a164896dd2e5fa521342070f44a79a4b8dc76807ff9ccafe7e56  packages/vendor-openmuse/src/tanstack-agent.ts
+189d72008c869d0e9472a488072344bed9376fa5519ead5eccaf1657a9a56a0c  packages/vendor-openmuse/test/tanstack-agent.test.ts
+```
+
+### PKT-36 cross-verification of verifier's reliability tests (verifier-2, claude-sonnet-5-5, Node 24.13.1)
+
+12 paths under `tests/reliability/` pinned in checkpoint `20261011T131317Z-520c241b`; all 12 sha256 equal the checkpoint manifest and the working tree. Scratch export of HEAD 2efd827 + the 12 files. Result: **GREEN**, with one forward-looking note.
+
+| Check | Command | Exit | Result |
+|---|---|---|---|
+| Install / typecheck | `npm ci --ignore-scripts --no-audit --no-fund`; `npm run typecheck` | 0 / 0 | |
+| Lint / format | `npx eslint tests/reliability`; `npx prettier --check tests/reliability` | 0 / 0 | no warnings, all files formatted |
+| Default lane | `npx vitest run tests/reliability` | 0 | 7 files (4 passed, 3 skipped); **129 passed / 21 skipped** (equals verifier). Whole default suite: 61 files passed / 20 skipped, 864 passed / 301 skipped |
+| Live lane | `MONGODB_TEST_URI=<27218> EXPUNGE_REQUIRE_LIVE_TESTS=1 npx vitest run tests/reliability` | 0 | 7 files, **150 / 150 passed**, 0 skipped (equals verifier; netguard and candidate-proxy ran against the running expunge-a1 containers) |
+| Denial: required-live, no services | `env -u MONGODB_TEST_URI EXPUNGE_REQUIRE_LIVE_TESTS=1 EXPUNGE_NETGUARD_CONTAINER=nonexistent npx vitest run tests/reliability` | 1 | 5 tests fail, each "X is not available but live suites are required" (3 MONGODB_TEST_URI, netguard stack, neighbor container); a missing service fails, it does not skip. Without the flag the suites skip with a titled reason |
+| Overlay of PKT-33 | same E1 file on HEAD + PKT-33 | 1 | 7 pass, 1 fails: `KNOWN GAP: crash after the terminal transition...` now sees `['job_started','job_failed']` because PKT-33's terminal repair re-emits the event |
+
+KNOWN GAP cases (3 groups) assert the current HEAD behaviour and are named as gaps, not as passes of a fix: E1 crash-before-projection (job terminal, terminal event never emitted, asserted `['job_started']`), E1 zombie late terminal projection (second `job_failed` with event id `<job>:failed:1`, asserted exactly one late event, plus the fenced job and effect), resume-token corrupt stored token (server error code asserted, offset record stays, every restart fails the same). The resume-token lost-history branch is a code-path read, labelled so.
+
+Forward note: when PKT-33 commits, the first E1 KNOWN GAP test must be flipped to assert the repair (and renamed); the zombie-projection gap still passed with PKT-33 in this E1 child (it does not wire the fenced sink), so its status needs the child to use the PKT-33 sink before it can be claimed closed.
+
+### PKT-34 D3 privacy + observer suppression (verifier-2, claude-sonnet-5-5, Node 24.13.1)
+
+Scratch export of HEAD 877f6b5 + 19 files (17 under `packages/privacy/`, `packages/observer/src/outbox-dispatcher.ts`, `packages/observer/test/suppression.test.ts`). Result: **GREEN**, with a prettier finding and mutant survivors explained below.
+
+| Check | Command | Exit | Result |
+|---|---|---|---|
+| Lock regenerated | `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` | 0 | adds the `packages/privacy` workspace entry and the `node_modules/@expunge/privacy` link; same npm churn as PKT-33 (peer/dev flags, 26 vitest nested @esbuild platform entries dropped): the steward should apply only the privacy entries |
+| Install / typecheck | `npm ci --ignore-scripts --no-audit --no-fund`; `npm run typecheck` | 0 / 0 | |
+| ESLint | `npx eslint packages/privacy packages/observer` | 0 | 0 errors, 7 warnings (test `any`) |
+| Prettier | `npx prettier --check packages/privacy packages/observer` | **1** | `packages/privacy/test/erasure.live.test.ts` and `packages/privacy/test/mongo.integration.test.ts` are not formatted; the repo has `format:check`, so run `prettier --write` on those two before commit |
+| Packet lane, replica 27218 | `MONGODB_TEST_URI=<27218> npx vitest run packages/privacy packages/observer` | 0 | 17 files (14 passed, 3 skipped); **157 passed / 3 skipped**. The owner's 231 / 3 is a wider scope; the 3 skips are the live Raindrop suites |
+| Wider, default | `npx vitest run packages/{privacy,observer,contracts,observability,mongo}` | 0 | 39 files (24 passed, 15 skipped), 278 passed / 277 skipped |
+| Wider, replica | same with the URI | 0 | 39 files (35 passed, 4 skipped), **484 passed / 71 skipped** |
+| Required-live flag, no keys | `EXPUNGE_REQUIRE_LIVE_TESTS=1 MONGODB_TEST_URI=... vitest run packages/privacy packages/observer` | 1 | 3 fail, each naming the missing variables (`RAINDROP_*`, `EXPUNGE_ALLOW_LIVE_ERASURE`): BLOCKED on the human, not faked |
+
+Content: (a) persisted-frontier restart is proved in `mongo.integration.test.ts` on a real replica set: a 250-child retraction stopped after one closure step is fail-closed with `provenance_closures` status `open`, nothing under the source is retrievable, and a FRESH runner and repository finish it (251 discovered, all `source_deleted`, one closure row). (b) fail closed on an unreadable suppression list: the dispatcher rethrows and sends nothing (fake ingest has 0 events). (c) DELETE only cancels: `cancelPendingSubject` is allowed only while the job is `pending`, keeps the data, never produces `completed`, and a job whose every subject is cancelled becomes `cancelled`; `completed` requires the provider status and `completed_at`. FAKE labels are present (`FAKE Raindrop`, `FAKE provider`, `FAKE Raindrop deletion endpoint`). Retention boundary never claims deletion.
+
+Mutants (scratch only, restored; dispatcher and erasure hashes b7df7beb / 3e969506 unchanged afterwards): drop the gate -> 3 fail; fail-open on read error -> 1 fails; allow cancel in any state -> 2 fail; cancelled subjects still suppressed -> 1 fails; accept `completed` without `completed_at` -> 1 fails; allow a second submit -> 1 fails; overdue ignores status -> 1 fails. Survivors: (1) gate applied to every payload kind (drop the `type === 'event'` check) -> 4 pass: non-event payloads carry no `userId`, so the check is harmless, near-equivalent. (2) `suppressedUserIds` ignoring the `active` flag -> 25 pass: `store.listSuppressing` already filters released jobs (covered by the store test 'suppresses only jobs under active suppression'), so the service check is redundant defence in depth. An attempted `fullyErased` mutant did not apply (pattern miss) and is not claimed.
