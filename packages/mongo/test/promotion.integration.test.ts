@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { JsonValue, MutationClass } from '@expunge/contracts';
+import type { MutationClass } from '@expunge/contracts';
 import {
   ApprovalRepository,
   ArtifactRepository,
@@ -8,12 +8,14 @@ import {
   CandidateRepository,
   DeploymentRepository,
   ProvenanceRepository,
+  type GrantBinding,
   type PromotionInput,
 } from '../src/index.js';
 import { validBundle } from '../../contracts/test/valid-bundle.js';
 import {
   HASH,
   actor,
+  bindingFor,
   describeLive,
   insertGateReport,
   issueGrant,
@@ -56,7 +58,15 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
     if (env) await env.dispose();
   }, 30000);
 
-  type Prepared = { parent: string; child: string; candidateId: string; reportId: string; digest: string };
+  type Prepared = {
+    parent: string;
+    child: string;
+    candidateId: string;
+    reportId: string;
+    digest: string;
+    /** What a grant for this candidate must say, derived from the stored gate report. */
+    binding: GrantBinding;
+  };
   /**
    * A deployed parent, a distinct child artifact, an admitting gate report carrying the gate's class and, unless
    * `proposal` is false, the proposer's candidate row (which never carries a class).
@@ -64,7 +74,7 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
   async function prepare(
     n: number,
     computedClass: MutationClass | undefined,
-    options: { parent?: string; proposal?: false | MutationClass } = {},
+    options: { parent?: string; proposal?: false | MutationClass; flips?: string[] } = {},
   ): Promise<Prepared> {
     const parent = options.parent ?? (await artifacts.insert(validBundle()))._id;
     if (!options.parent) await deployments.initialize(actor, 'worker', parent, 1);
@@ -82,6 +92,7 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
       childHash: child,
       candidateId,
       reportId,
+      ...(options.flips ? { knownAuthorityFlips: options.flips } : {}),
       ...(computedClass ? { computedClass } : {}),
     });
     if (options.proposal !== false)
@@ -93,7 +104,8 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
           ...(options.proposal ? { claimedClass: options.proposal } : {}),
         }),
       );
-    return { parent, child, candidateId, reportId, digest };
+    const binding = computedClass ? await bindingFor(env.service, reportId) : (undefined as never);
+    return { parent, child, candidateId, reportId, digest, binding };
   }
   function promotionOf(p: Prepared, extra: Partial<PromotionInput> = {}): PromotionInput {
     return {
@@ -108,8 +120,8 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
       runtimeHash: HASH,
       evaluatorHash: HASH,
       scopeRevision: 1,
-      flipSetDigest: HASH,
-      approvedDescriptor: { effect: 'reference' },
+      flipSetDigest: p.binding?.flipSetDigest ?? HASH,
+      approvedDescriptor: p.binding?.approvedDescriptor ?? {},
       reason: 'test',
       validateAuthority: deployments.authority.validator(actor),
       ...extra,
@@ -118,19 +130,20 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
   async function grantFor(
     p: Prepared,
     n: number,
-    options: { expiresAt?: Date; approvedDescriptor?: JsonValue } = {},
+    options: {
+      expiresAt?: Date;
+      overrides?: Parameters<typeof issueGrant>[1]['overrides'];
+      raw?: boolean;
+    } = {},
   ): Promise<string> {
     const grantId = `grant-${n}`;
     await issueGrant(env.service, {
       grantId,
-      candidateId: p.candidateId,
-      parentHash: p.parent,
-      childHash: p.child,
       reportId: p.reportId,
-      digest: p.digest,
       nonce: `nonce-${n}`,
-      approvedDescriptor: options.approvedDescriptor ?? { effect: 'reference' },
       ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      ...(options.overrides ? { overrides: options.overrides } : {}),
+      ...(options.raw ? { raw: true } : {}),
     });
     return grantId;
   }
@@ -196,10 +209,13 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
 
   it('matches the approved descriptor canonically, not by BSON field order', async () => {
     const p = await prepare(1, 'authority_expansion');
-    const grantId = await grantFor(p, 1, { approvedDescriptor: { alpha: 1, beta: { x: 1, y: 2 } } });
-    const receipt = await deployments.promote(
-      promotionOf(p, { grantId, approvedDescriptor: { beta: { y: 2, x: 1 }, alpha: 1 } }),
-    );
+    const descriptor = p.binding.approvedDescriptor as Record<string, unknown>;
+    const reversed = Object.fromEntries(
+      Object.entries(descriptor).reverse(),
+    ) as typeof p.binding.approvedDescriptor;
+    expect(Object.keys(reversed as object)).not.toEqual(Object.keys(descriptor));
+    const grantId = await grantFor(p, 1, { overrides: { approvedDescriptor: reversed } });
+    const receipt = await deployments.promote(promotionOf(p, { grantId, approvedDescriptor: reversed }));
     expect(receipt.consumedGrantId).toBe(grantId);
   });
 
@@ -400,6 +416,89 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
       expect((await pointer())?.activeHash).toBe(p.child);
     });
   });
+  describe('K8: a grant says only what the stored gate report says', () => {
+    const flips = ['tool:apply_cleanup_batch:added', 'limit:changedDocuments:widened'];
+    const forgeries: Array<[string, (p: Prepared) => Parameters<typeof issueGrant>[1]['overrides']]> = [
+      ['a flip-set digest that does not match the report', () => ({ flipSetDigest: 'f'.repeat(64) })],
+      [
+        'an approved descriptor that does not match the report',
+        () => ({ approvedDescriptor: { widened: true } }),
+      ],
+      [
+        'a gate report digest that does not match the stored report',
+        () => ({ gateReportDigest: 'e'.repeat(64) }),
+      ],
+      ['another child hash', () => ({ childHash: 'd'.repeat(64) })],
+      ['another parent hash', () => ({ parentHash: 'd'.repeat(64) })],
+      ['another candidate', () => ({ proposalId: 'someone-else' })],
+    ];
+
+    it.each(forgeries)('the issuer refuses a grant carrying %s', async (_label, forge) => {
+      const p = await prepare(1, 'authority_expansion', { flips });
+      await expect(grantFor(p, 1, { overrides: forge(p) })).rejects.toThrow('InvalidApprovalBinding');
+      expect(await env.service.control.collection('approvals').countDocuments()).toBe(0);
+    });
+
+    it.each(forgeries)('promotion refuses a raw-inserted grant carrying %s', async (_label, forge) => {
+      const p = await prepare(1, 'authority_expansion', { flips });
+      const grantId = await grantFor(p, 1, { overrides: forge(p), raw: true });
+      await expect(deployments.promote(promotionOf(p, { grantId }))).rejects.toThrow(
+        'ApprovalInvalidOrConsumed',
+      );
+      expect(await consumptions()).toBe(0);
+      expect((await pointer())?.revision).toBe(0);
+    });
+
+    it('derives the flip-set digest and descriptor from the report, so different flips mean different grants', async () => {
+      const plain = await prepare(1, 'authority_expansion');
+      const flipped = await prepare(2, 'authority_expansion', { parent: plain.parent, flips });
+      expect(flipped.binding.flipSetDigest).not.toBe(plain.binding.flipSetDigest);
+      expect(flipped.binding.approvedDescriptor).toMatchObject({
+        computedClass: 'authority_expansion',
+        flips: [...flips].sort(),
+      });
+      // The flip order in the report does not change the digest.
+      expect(
+        (await prepare(3, 'authority_expansion', { parent: plain.parent, flips: [...flips].reverse() }))
+          .binding.flipSetDigest,
+      ).toBe(flipped.binding.flipSetDigest);
+    });
+
+    it('refuses a request whose own flip-set or descriptor claim differs from the report, with a valid grant', async () => {
+      const p = await prepare(1, 'authority_expansion', { flips });
+      const grantId = await grantFor(p, 1);
+      await expect(deployments.promote(promotionOf(p, { grantId, flipSetDigest: HASH }))).rejects.toThrow(
+        'ApprovalInvalidOrConsumed',
+      );
+      await expect(
+        deployments.promote(promotionOf(p, { grantId, approvedDescriptor: { effect: 'anything' } })),
+      ).rejects.toThrow('ApprovalInvalidOrConsumed');
+      expect((await deployments.promote(promotionOf(p, { grantId }))).consumedGrantId).toBe(grantId);
+    });
+
+    it('refuses to issue for a missing, rejected or unclassified gate report', async () => {
+      const p = await prepare(1, 'authority_expansion');
+      await expect(grantFor(p, 1, { overrides: { gateReportId: 'no-such-report' } })).rejects.toThrow(
+        'GateReportMissing',
+      );
+      const rejected = await prepare(2, 'authority_expansion', { parent: p.parent });
+      await env.service.control
+        .collection('gate_reports')
+        .updateOne({ _id: rejected.reportId as never }, { $set: { verdict: 'reject' } });
+      await expect(grantFor(rejected, 2)).rejects.toThrow('InvalidApprovalBinding');
+    });
+
+    it('rejects a gate report edited after the grant was issued', async () => {
+      const p = await prepare(1, 'authority_expansion', { flips });
+      const grantId = await grantFor(p, 1);
+      await env.service.control
+        .collection('gate_reports')
+        .updateOne({ _id: p.reportId as never }, { $set: { knownAuthorityFlips: [] } });
+      await expect(deployments.promote(promotionOf(p, { grantId }))).rejects.toThrow('GateReportMismatch');
+      expect(await consumptions()).toBe(0);
+    });
+  });
+
   describe('D8: promotion and rollback read and fence the stored authority', () => {
     const current = { ...actor, authorizationRevision: 2 };
     const asCurrent = (p: Prepared) =>

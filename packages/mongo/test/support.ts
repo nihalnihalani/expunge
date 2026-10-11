@@ -24,9 +24,11 @@ import {
   deriveArgsDigest,
   deriveDecisionId,
   deriveEffectKey,
+  deriveGrantBinding,
   deriveTargetHash,
   setupMongo,
   type CandidateProposal,
+  type GrantBinding,
   type MongoService,
   type Principal,
   type SetupOptions,
@@ -251,6 +253,8 @@ export async function insertGateReport(
     candidateId: string;
     reportId: string;
     computedClass?: MutationClass;
+    knownAuthorityFlips?: string[];
+    verdict?: GateReport['verdict'];
   },
 ): Promise<string> {
   const report: GateReport = {
@@ -266,9 +270,9 @@ export async function insertGateReport(
     pairedTrials: [],
     trialRowsDigest: contentHash([], 'trial-rows'),
     causalControls: {},
-    knownAuthorityFlips: [],
+    knownAuthorityFlips: ids.knownAuthorityFlips ?? [],
     cost: { ...ZERO_COST },
-    verdict: 'admit',
+    verdict: ids.verdict ?? 'admit',
     reasonCodes: [],
     ...(ids.computedClass ? { computedClass: ids.computedClass } : {}),
   };
@@ -299,41 +303,60 @@ export function proposalOf(input: {
   };
 }
 
+/** The binding a grant for `reportId` must carry, derived from the stored gate report exactly as the repository does. */
+export async function bindingFor(service: MongoService, reportId: string): Promise<GrantBinding> {
+  const stored = await service.control
+    .collection<GateReport & IdDocument>('gate_reports')
+    .findOne({ _id: reportId });
+  if (!stored) throw new Error(`no gate report ${reportId}`);
+  const { _id: _ignored, ...report } = stored;
+  return deriveGrantBinding(report, contentHash(report, 'gate-report'));
+}
+
+/**
+ * Issues a grant for a stored gate report through the repository, with the binding derived from that report.
+ * `overrides` change individual fields to build a forged grant; with `raw: true` the grant is inserted without
+ * the issuer's checks, as a compromised or bypassing writer would.
+ */
 export async function issueGrant(
   service: MongoService,
   grant: {
     grantId: string;
-    candidateId: string;
-    parentHash: string;
-    childHash: string;
     reportId: string;
-    digest: string;
     nonce: string;
     expiresAt?: Date;
-    approvedDescriptor?: ApprovalGrant['approvedDescriptor'];
+    overrides?: Partial<ApprovalGrant>;
+    raw?: boolean;
   },
 ): Promise<void> {
-  await new ApprovalRepository(service).issue(actor, {
+  const binding = await bindingFor(service, grant.reportId);
+  const full: ApprovalGrant = {
     tenantId: actor.tenantId,
     env: actor.env,
     scopeId: actor.scopeId,
     target: 'worker',
     grantId: grant.grantId,
-    proposalId: grant.candidateId,
-    parentHash: grant.parentHash,
-    childHash: grant.childHash,
+    proposalId: binding.proposalId,
+    parentHash: binding.parentHash,
+    childHash: binding.childHash,
     parentRevision: 0,
-    approvedDescriptor: grant.approvedDescriptor ?? {},
+    approvedDescriptor: binding.approvedDescriptor,
     authorizationRevision: 1,
     scopeRevision: 1,
-    flipSetDigest: HASH,
-    gateReportId: grant.reportId,
-    gateReportDigest: grant.digest,
+    flipSetDigest: binding.flipSetDigest,
+    gateReportId: binding.gateReportId,
+    gateReportDigest: binding.gateReportDigest,
     approverId: actor.actorId,
     expiresAt: grant.expiresAt ?? new Date(Date.now() + 100_000),
     nonce: grant.nonce,
     createdAt: new Date(),
-  });
+    ...grant.overrides,
+  };
+  if (grant.raw) {
+    await service.control.collection<IdDocument>('approvals').insertOne({ _id: grant.grantId, ...full });
+    return;
+  }
+  await new ApprovalRepository(service).issue(actor, full);
 }
 
 /** A small valid registry for the test scope at revision 1. Fields default to none. */

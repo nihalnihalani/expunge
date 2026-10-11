@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { BSON, type Document } from 'mongodb';
 import type { FieldDescriptor, ScopeKey } from '@expunge/contracts';
 import {
@@ -24,7 +24,6 @@ import {
   HASH,
   actor,
   describeLive,
-  installAuthority,
   intent,
   openEnvironment,
   recordDecisionFor,

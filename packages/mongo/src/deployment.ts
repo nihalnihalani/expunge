@@ -13,6 +13,7 @@ import {
 } from '@expunge/contracts';
 import { ArtifactRepository } from './artifacts.js';
 import { AuthorityRepository } from './authority.js';
+import { deriveGrantBinding, sameDescriptor, type GrantBinding } from './grants.js';
 import { fail, requirePrincipal, scopeFilter, type MongoService } from './client.js';
 import { AuthorityPolicyRepository, approvalRequired } from './policy.js';
 import { ProvenanceRepository } from './provenance.js';
@@ -67,6 +68,24 @@ export class ApprovalRepository {
       fail('InvalidApprovalBinding');
     if (!(grant.expiresAt instanceof Date) || grant.expiresAt.getTime() > Date.now() + MAX_GRANT_LIFETIME_MS)
       fail('InvalidApprovalExpiry');
+    // A grant may only say what the stored gate report says: hashes, class, flips and descriptor are derived
+    // from it, never accepted from the request that builds the grant.
+    const report = await this.service.control
+      .collection<GateReport & { _id: string }>('gate_reports')
+      .findOne({ _id: grant.gateReportId });
+    if (!report) fail('GateReportMissing');
+    const { _id: _reportId, ...reportBody } = report;
+    if (report.verdict !== 'admit' || !report.computedClass) fail('InvalidApprovalBinding');
+    const expected = deriveGrantBinding(report, contentHash(reportBody, 'gate-report'));
+    if (
+      grant.proposalId !== expected.proposalId ||
+      grant.parentHash !== expected.parentHash ||
+      grant.childHash !== expected.childHash ||
+      grant.gateReportDigest !== expected.gateReportDigest ||
+      grant.flipSetDigest !== expected.flipSetDigest ||
+      !sameDescriptor(grant.approvedDescriptor, expected.approvedDescriptor)
+    )
+      fail('InvalidApprovalBinding');
     await this.service.control
       .collection<IdDocument>('approvals')
       .insertOne({ _id: grant.grantId, ...grant });
@@ -185,7 +204,14 @@ export class DeploymentRepository {
         if (tainted.has(input.childHash)) fail('ArtifactIneligible');
         const policy = await this.policies.read(key, session);
         const requiresApproval = approvalRequired(report.computedClass, policy);
-        if (requiresApproval) await this.consumeGrant(input, key, promotionId, session);
+        if (requiresApproval)
+          await this.consumeGrant(
+            input,
+            key,
+            promotionId,
+            deriveGrantBinding(report, input.gateReportDigest),
+            session,
+          );
         const pointer = await this.service.control.collection<Deployment>('deployments').findOneAndUpdate(
           {
             _id: deploymentIdentity(key),
@@ -240,9 +266,17 @@ export class DeploymentRepository {
     input: PromotionInput,
     key: DeploymentKey,
     promotionId: string,
+    expected: GrantBinding,
     session: ClientSession,
   ): Promise<void> {
     if (!input.grantId) fail('ApprovalRequired');
+    // The request's own claims must agree with what the stored gate report says; they cannot choose the binding.
+    if (
+      input.candidateId !== expected.proposalId ||
+      input.flipSetDigest !== expected.flipSetDigest ||
+      !sameDescriptor(input.approvedDescriptor, expected.approvedDescriptor)
+    )
+      fail('ApprovalInvalidOrConsumed');
     const grant = await this.service.control
       .collection<ApprovalGrant & { _id: string }>('approvals')
       .findOne({ _id: input.grantId, $expr: { $gt: ['$expiresAt', '$$NOW'] } }, { session });
@@ -252,19 +286,17 @@ export class DeploymentRepository {
       grant.env === key.env &&
       grant.scopeId === key.scopeId &&
       grant.target === key.target &&
-      grant.proposalId === input.candidateId &&
-      grant.parentHash === input.parentHash &&
-      grant.childHash === input.childHash &&
+      grant.proposalId === expected.proposalId &&
+      grant.parentHash === expected.parentHash &&
+      grant.childHash === expected.childHash &&
       grant.parentRevision === input.parentRevision &&
       grant.scopeRevision === input.scopeRevision &&
       grant.authorizationRevision === input.actor.authorizationRevision &&
-      grant.flipSetDigest === input.flipSetDigest &&
-      grant.gateReportId === input.gateReportId &&
-      grant.gateReportDigest === input.gateReportDigest &&
+      grant.flipSetDigest === expected.flipSetDigest &&
+      grant.gateReportId === expected.gateReportId &&
+      grant.gateReportDigest === expected.gateReportDigest &&
       !grant.consumedAt &&
-      // Canonical comparison: BSON field order must not decide whether a descriptor "matches".
-      contentHash(grant.approvedDescriptor, 'approved-descriptor') ===
-        contentHash(input.approvedDescriptor, 'approved-descriptor');
+      sameDescriptor(grant.approvedDescriptor, expected.approvedDescriptor);
     if (!bound) fail('ApprovalInvalidOrConsumed');
     const consumptions = this.service.control.collection<GrantConsumption>('grant_consumptions');
     if (await consumptions.findOne({ _id: input.grantId }, { session })) fail('ApprovalInvalidOrConsumed');

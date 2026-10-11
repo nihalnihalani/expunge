@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import type { Document } from 'mongodb';
-import { JobRepository, WakeCommandRepository, type MongoService } from '../src/index.js';
-import { actor, createJob, describeLive, openEnvironment, type LiveEnvironment } from './support.js';
+import { JobRepository, WakeCommandRepository, WorldRepository, type MongoService } from '../src/index.js';
+import { HASH, actor, createJob, describeLive, openEnvironment, type LiveEnvironment } from './support.js';
+
+const scope = { tenantId: actor.tenantId, env: actor.env, scopeId: actor.scopeId };
 
 describeLive(
   'trusted dispatcher support: resolve, list claimable, release, wake dedupe (real replica set)',
@@ -52,21 +54,40 @@ describeLive(
       await raw().updateOne({ _id: finished as never }, { $set: { status: 'failed' } });
       await new Promise((resolve) => setTimeout(resolve, 400));
 
-      const claimable = await jobs.listClaimable();
+      const claimable = await jobs.listClaimable(scope);
       expect(claimable.map((row) => row.jobId)).toEqual([urgent, queued, expired]);
       expect(claimable[0]).toMatchObject({ kind: 'cleanup', priority: 5 });
-      expect(await jobs.listClaimable(1)).toHaveLength(1);
+      expect(await jobs.listClaimable(scope, 1)).toHaveLength(1);
       // Another kind's principal sees none of the cleanup jobs.
-      expect(await new JobRepository(await env.as('observer')).listClaimable()).toEqual([]);
-      await expect(jobs.listClaimable(0)).rejects.toThrow('InvalidClaimableLimit');
-      await expect(jobs.listClaimable(101)).rejects.toThrow('InvalidClaimableLimit');
+      expect(await new JobRepository(await env.as('observer')).listClaimable(scope)).toEqual([]);
+      await expect(jobs.listClaimable(scope, 0)).rejects.toThrow('InvalidClaimableLimit');
+      await expect(jobs.listClaimable(scope, 101)).rejects.toThrow('InvalidClaimableLimit');
+    });
+
+    it("lists only jobs of the poller's own scope", async () => {
+      const mine = await createJob(env.service);
+      const other = { ...actor, tenantId: 'other-tenant' };
+      await new WorldRepository(env.service).create(other, 'other-world', 1);
+      await new JobRepository(env.service).create(other, {
+        jobId: 'foreign-job',
+        kind: 'cleanup',
+        binding: {
+          runId: 'r',
+          worldId: 'other-world',
+          harnessHash: HASH,
+          scopeRevision: 1,
+          workerProfileHash: HASH,
+        },
+      });
+      expect((await jobs.listClaimable(scope)).map((row) => row.jobId)).toEqual([mine]);
+      expect((await jobs.listClaimable(other)).map((row) => row.jobId)).toEqual(['foreign-job']);
     });
 
     it('reclaims a job whose worker died: list, resolve, claim with a higher fence', async () => {
       const id = await createJob(env.service);
       const first = (await jobs.claim(actor, id, 'dead-worker', 150))!;
       await new Promise((resolve) => setTimeout(resolve, 400));
-      const [candidate] = await jobs.listClaimable();
+      const [candidate] = await jobs.listClaimable(scope);
       expect(candidate?.jobId).toBe(id);
       const resolved = await jobs.resolveForDispatch(candidate!.jobId);
       const second = await jobs.claim(resolved.actor, id, 'new-worker', 10000);

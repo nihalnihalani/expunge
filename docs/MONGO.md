@@ -1,0 +1,97 @@
+# MongoDB foundation (packages/mongo)
+
+MongoDB is the authority for consequential domain and control state. This file says what the code touches, who may do
+what, and how to run the protocol tests. **Every test result below comes from a local replica set. It proves protocol
+behavior (transactions, fences, validators, unique indexes). It is not evidence about the invited Atlas deployment, Atlas
+RBAC, or Search/Vector, and none of those has been exercised: there is no root `.env`, so all live Atlas checks are BLOCKED.**
+
+```mermaid
+flowchart LR
+  subgraph W[expunge_world]
+    D[customers accounts messages events notes archives]
+    R[schema_registry identity_edges retained_invoices]
+    WR[world_revisions counter]
+    WB[world_scope_bindings]
+  end
+  subgraph C[expunge_control]
+    J[jobs decisions action_intents effects action_receipts completion_receipts]
+    A[authority_revisions authority_touches authority_policies]
+    P[artifacts candidates gate_reports deployments promotions approvals grant_consumptions]
+    V[artifact_eligibility provenance_edges provenance_closures lessons evidence]
+    E[projection_events projection_sequences stream_offsets wake_commands telemetry_outbox]
+  end
+  subgraph X[expunge_private]
+    S[fixture_specs oracle_manifests expected_poststates preservation_hashes heldout_assignments grader_results]
+  end
+  EX[domain_executor] -->|update records, advance counter, insert decisions, touch fence| D & WR & J & A
+  FB[fixture_builder] -->|registry and bindings| R & WB
+  PR[proposer] -->|insert candidates, no class| P
+  GR[grader] -->|insert gate_reports with computedClass| P & S
+  AI[approval_issuer] -->|insert grants, bump authority| P & A
+  PM[promoter] -->|CAS pointer, insert grant_consumptions| P
+  PC[privacy_controller] -->|revoke closure| V
+  OB[observer and projection_reader] --> E
+```
+
+## Principals (separate MongoClient and URI each; no fallback to setup)
+| Principal | Does | Cannot (structurally) |
+|---|---|---|
+| setup | DDL, validators, indexes, seeds authority and policy, test administration | run in any model-accessible container |
+| domain_executor | update domain records and the world counter, insert decisions, touch `authority_touches`, run cleanup jobs | write registry, bindings, `authority_revisions`, retained data, gate reports, grants |
+| fixture_builder | create worlds, registry, bindings; private manifests | grants, authority, decisions |
+| proposer | insert artifacts and candidate proposals | update anything, write a class, read private truth |
+| grader | read private truth, insert gate reports (the only source of `computedClass`) | update a report, approvals, authority |
+| approval_issuer | insert grants after checking them against the stored report; bump the authorization revision | edit or delete a grant, write reports |
+| promoter | move deployment pointers, insert `grant_consumptions`, update candidate state | update `approvals`, `authority_revisions`, policy |
+| privacy_controller / observer / projection_reader | revocation and retraction / evidence and outbox / read events | destructive domain tools, promotion |
+
+Atlas privileges are additive and collection-level. `atlasRoleManifests()` is the body to apply through the Atlas
+Administration API; driver `createRole` is used only by the local RBAC test.
+
+## Protocol rules worth knowing
+- **Approval is derived.** `promote` takes the class from the grader-written gate report and the requirement from the
+  `authority_policies` row. `authority_expansion` always needs a grant, `tightening` never, `behavioral` per policy. The
+  candidates row is a proposer's note and is never read for authorization. A grant must equal the binding derived from the
+  stored report (hashes, flip-set digest, descriptor) at issue and at spend, and is spent by inserting a unique row.
+- **Live authorization.** Effects, `complete`, `promote` and `rollback` read `authority_revisions` and conditionally write
+  `authority_touches` under the expected revision; a bump rewrites both rows in one transaction, so a stale snapshot aborts.
+  A stale run fails with `AuthorityRevisionStale`. An effect also needs a matching row in the `decisions` ledger
+  (`decisionId`), and its `effectKey`, `argsDigest` and `targetHash` are derived by the repository, not supplied.
+- **World = counter + binding.** The worker advances `world_revisions`; only setup and the fixture builder write
+  `world_scope_bindings`, and rebinding also advances the counter so an in-flight effect conflicts.
+  `JobRepository.create` requires an existing world under the actor's scope, at its scope revision, outside maintenance.
+- **Scope paths.** Registered paths live under `data.*` (plus the read-only record key `_id`). `*` compiles to a filtered
+  positional update or element `$pull`, never to a whole-array write.
+- **Provenance.** Revocation is a bounded, resumable closure persisted in `provenance_closures`. `permitted` re-derives
+  ancestry on every read and denies anything under an unresolved closure.
+- **Projection events.** Sequences are per job and contiguous from 1: the counter increment and the event insert share one
+  transaction, so an aborted transaction gives its number back. Payloads are validated against strict per-kind schemas.
+
+## Job status: what the database enforces and what the application enforces
+Six principals (executor, observer, grader, promoter, privacy_controller, fixture_builder) hold UPDATE on `jobs`, and
+collection-level RBAC cannot split fields or values. **Application-enforced** (in `JobRepository`/`EffectRepository`): which
+principal may work which job kind (`JOB_KIND_PRINCIPALS`), lease and fence conditions on every write, a cleanup job
+reaching `succeeded` only with a committed, job-bound completion receipt, and terminal cancellation. **Database-enforced:**
+the strict BSON schema, and a query validator that rejects `succeeded` with empty `outputRefs`. A raw writer that sets
+`succeeded` plus fabricated `outputRefs` is not stopped by the database (asserted as a known limitation in
+`rbac.integration.test.ts`).
+
+## Test lanes
+| Lane | Needs | Command |
+|---|---|---|
+| Fast | nothing | `npx vitest run packages/contracts packages/mongo` (live suites skip with a reason) |
+| Replica-set protocol | `MONGODB_TEST_URI` | `docker compose -f packages/mongo/test/docker-compose.yml up -d`, then `MONGODB_TEST_URI='mongodb://127.0.0.1:27018/?replicaSet=expunge-local&directConnection=true' npx vitest run packages/mongo` |
+| Local authenticated RBAC | `MONGODB_RBAC_TEST_URI` | `docker compose -f packages/mongo/test/auth-docker-compose.yml up -d`, then set `MONGODB_RBAC_TEST_URI` for 127.0.0.1:27019 (replica set `expunge-auth`, authSource `admin`) |
+
+Set `EXPUNGE_REQUIRE_LIVE_TESTS=1` for acceptance runs: a missing URI then fails the suite instead of skipping it. The RBAC
+lane runs raw-driver probes for every principal, collection and verb against `atlasRoleManifests()`, plus explicit named
+denials. The auth compose file carries a published, localhost-only placeholder credential (tmpfs, bound to 127.0.0.1); never
+use it for a deployed database. One command for the whole local run once both containers are up is the Fast command with
+both URIs and the require flag set.
+
+## Setup
+`npm run setup:mongo` installs collections, validators and indexes idempotently. With `EXPUNGE_AUTHORITY_FLOOR_HASH`
+(64 hex) plus `EXPUNGE_TENANT_ID`, `EXPUNGE_ENV`, `EXPUNGE_SCOPE_ID` it also seeds that scope's authority row and a policy
+per target; behavioral changes need approval unless `EXPUNGE_BEHAVIORAL_REQUIRES_APPROVAL` is exactly `0`. Without the
+floor hash nothing is seeded and promotion and effects fail closed. `npm run probe:mongo` reports server version, topology
+and transaction support without printing credentials.

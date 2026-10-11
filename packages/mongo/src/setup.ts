@@ -70,6 +70,11 @@ const jobActorIdentity = { 'actor.tenantId': 1, 'actor.env': 1, 'actor.scopeId':
 export const CONTROL_INDEXES: IndexEntry[] = [
   { collection: 'jobs', key: { kind: 1, status: 1, priority: -1, createdAt: 1 } },
   { collection: 'jobs', key: { status: 1, 'lease.until': 1 } },
+  // Scope-bound claimable listing: scope, then status/kind, ordered by priority and age.
+  {
+    collection: 'jobs',
+    key: { ...jobActorIdentity, status: 1, kind: 1, priority: -1, createdAt: 1 },
+  },
   // Revocation finds live jobs by pinned harness or by any recorded context input.
   { collection: 'jobs', key: { ...jobActorIdentity, 'binding.harnessHash': 1 } },
   { collection: 'jobs', key: { ...jobActorIdentity, contextInputs: 1 } },

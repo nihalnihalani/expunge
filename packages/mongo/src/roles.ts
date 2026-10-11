@@ -1,4 +1,4 @@
-import { CONTROL_COLLECTIONS, WORLD_COLLECTIONS, PRIVATE_COLLECTIONS } from './setup.js';
+import { WORLD_COLLECTIONS, PRIVATE_COLLECTIONS } from './setup.js';
 import type { Principal } from './client.js';
 export type AtlasAction = { action: string; resources: Array<{ db: string; collection: string }> };
 export type AtlasRoleManifest = { roleName: string; actions: AtlasAction[]; inheritedRoles: never[] };

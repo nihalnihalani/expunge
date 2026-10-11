@@ -57,13 +57,13 @@ export class ProjectionRepository {
         .collection<ProjectionEvent & { _id: string }>('projection_events')
         .findOne({ _id: event.eventId, ...scopeFilter(key) }, { session: active });
       if (existing) {
-        const { _id, sequence, createdAt, ...prior } = existing;
+        const { _id: _ignored, sequence: _sequence, createdAt: _createdAt, ...prior } = existing;
         if (
           contentHash(prior, 'projection-event') !==
           contentHash({ ...scopeFilter(key), ...event }, 'projection-event')
         )
           fail('EventIdConflict');
-        const { _id: ignored, ...result } = existing;
+        const { _id: _ignoredId, ...result } = existing;
         return result;
       }
       const counter = await this.service.control
@@ -156,7 +156,7 @@ export class ProjectionStreamConsumer {
           break;
         }
         if (change.operationType !== 'insert') continue;
-        const { _id: recordId, ...event } = change.fullDocument as ProjectionEvent & { _id: string };
+        const { _id: _recordId, ...event } = change.fullDocument as ProjectionEvent & { _id: string };
         await onEvent(event);
         await offsets.updateOne(
           { _id: this.consumerId },
