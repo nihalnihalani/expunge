@@ -623,7 +623,7 @@ export const CONTROL_VALIDATORS: Record<string, Document> = {
       jobId: str,
       runId: str,
       harnessHash: hash,
-      kind: en(['scope_selection', 'subject_resolution', 'discovery', 'call', 'workflow']),
+      kind: en(['scope_selection', 'subject_resolution', 'discovery', 'call', 'workflow', 'fault']),
       ordinal: integer,
       worldId: str,
       scopeRevision: integer,
@@ -785,14 +785,19 @@ export const WORLD_VALIDATORS: Record<string, Document> = {
     }),
   },
   world_scope_bindings: {
-    $jsonSchema: object({
-      _id: str,
-      ...scope,
-      worldId: str,
-      scopeRevision: integer,
-      maintenanceMode: bool,
-      updatedAt: date,
-    }),
+    $jsonSchema: object(
+      {
+        _id: str,
+        ...scope,
+        worldId: str,
+        scopeRevision: integer,
+        maintenanceMode: bool,
+        // Present only on an evaluation world built for one gate campaign.
+        campaignId: str,
+        updatedAt: date,
+      },
+      ['_id', ...Object.keys(scope), 'worldId', 'scopeRevision', 'maintenanceMode', 'updatedAt'],
+    ),
   },
 };
 export const PRIVATE_VALIDATORS: Record<string, Document> = {

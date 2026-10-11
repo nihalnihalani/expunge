@@ -136,7 +136,15 @@ export function atlasRoleManifests(
       worldRead,
       action('FIND', names.private, PRIVATE_COLLECTIONS),
       action('INSERT', names.private, ['grader_results']),
-      control('FIND', ['jobs', 'artifacts', 'artifact_eligibility', 'provenance_edges']),
+      // campaign_freezes and gate_claims: read by `JobRepository.createCampaignJob` to admit an evaluation job.
+      control('FIND', [
+        'jobs',
+        'artifacts',
+        'artifact_eligibility',
+        'provenance_edges',
+        'campaign_freezes',
+        'gate_claims',
+      ]),
       control('INSERT', [
         'public_trial_rows',
         'gate_reports',

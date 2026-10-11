@@ -86,6 +86,8 @@ const MAPPED: Record<string, [ServiceRefusal['status'], string]> = {
   StaleWorldBinding: [409, 'conflict'],
   ScanBudgetExceeded: [422, 'scan_budget_exceeded'],
   AuthorityMissing: [503, 'scope_not_authorized'],
+  // The pointer moved between the service's read and the job insert.
+  HarnessNotDeployed: [409, 'no_active_harness'],
 };
 
 /**
