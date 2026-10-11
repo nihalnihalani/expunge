@@ -1,5 +1,5 @@
 {
-  "exportedAt": "2026-10-11T12:52:00Z",
+  "exportedAt": "2026-10-11T12:33:00Z (real UTC; earlier exportedAt values before 12:11Z ran about 95 minutes ahead)",
   "canonicalTracker": "claude-mem work_state list 'expunge-build' (lead-maintained); this file is a sanitized mirror",
   "engine": "claude-code-desktop-named-subagents",
   "leadEffectiveModel": "claude-fable-5-1",
@@ -180,7 +180,7 @@
       "owner": "rsi-evolution",
       "status": "doing",
       "brief": "docs/continuity/briefs/C3-admission-promotion.md",
-      "evidence": "dispatched 11:25Z; packages/gate and packages/deployment; second reference solver, HMAC-keyed ids, GateReport.computedClass, approval descriptor via ApprovalRepository.issue, campaign runner"
+      "evidence": "three packets ready and in verification (PKT-23/24/25); P1b (privateIdSetOf, selector swap) after C1c; real episode port BLOCKED on PKT-16"
     },
     {
       "id": "B2-2",
@@ -208,7 +208,8 @@
       "id": "V-3",
       "title": "Wake endpoint and netguard live probes, E1 reliability harness, Claude-to-Codex handoff drill",
       "owner": "verifier",
-      "status": "doing"
+      "status": "doing",
+      "evidence": "restore drill done (verifier-2); continuity packet PKT-26; remaining untracked tests/reliability files (wake, netguard, candidate-proxy, E1, resume-token) offered as a V-3 packet after C3 verification"
     },
     {
       "id": "PKT-5",
@@ -292,35 +293,36 @@
       "id": "PKT-14",
       "title": "Commit packet C1a observability + observer (two workspaces; lock +132 entries incl. 126 third-party via raindrop-ai; audit 7 -> 38 accepted with rationale)",
       "owner": "commit-steward",
-      "status": "doing",
-      "evidence": "verifier checkpoint 86e41ce5; approved 12:40Z"
+      "status": "done",
+      "evidence": "ba41d7b + d0c2c53 + e4f6b51"
     },
     {
       "id": "PKT-17",
       "title": "Commit packet operator S2 (54 paths)",
       "owner": "verifier then commit-steward",
-      "status": "doing",
-      "evidence": "manifest 12:48Z; owner 429 tests, browser 108/0 + 190/0"
+      "status": "done",
+      "evidence": "1201525 + e2e1db1 (checkpoints 2db83ff8, 0337c343; 429/429 on three Node versions; browser 108/0 + 190/0); MEDIUM open: controller re-bootstrap loop, first S3 item"
     },
     {
       "id": "PKT-19",
       "title": "Commit packet C2-3 evolution fixes (DA-5a E1 to E4; 16 files)",
       "owner": "verifier-2 then commit-steward",
-      "status": "doing",
-      "evidence": "owner 184 passed / 2 skipped; parity lane to be re-run by verifier-2"
+      "status": "done",
+      "evidence": "83980b9 + 4b2b0c4 (checkpoint 80a59605; parity 136/136)"
     },
     {
       "id": "PKT-15",
       "title": "Mongo hardening from DA-5a (G3, G5, G6-part, JobRepository.worldKey)",
       "owner": "mongodb-authority",
-      "status": "doing"
+      "status": "done",
+      "evidence": "96f7b89 + d9b42b2 (checkpoint 5bf111d3; live 348/0; export 335/335)"
     },
     {
       "id": "PKT-16",
       "title": "Domain gateway packet (nine tools, gateway pipeline, G1/G2/G4/G7 tests, preview route, four-token service)",
       "owner": "mongodb-authority",
       "status": "doing",
-      "evidence": "nine-tool export point reached 12:30Z; DA-5 reading"
+      "evidence": "DA-5 must-fix set (DG1-DG8, DG11) in progress; gateway-controls spawned 12:20Z real UTC for DG3/DG4/DG6; owner estimate 3 to 4 hours; PKT-16b: ReferenceDeclaration.owner, FieldDescriptor.identity, DG9, DG14, DG17"
     },
     {
       "id": "DA-6",
@@ -333,8 +335,9 @@
       "id": "DA-7",
       "title": "Operator client review by reading",
       "owner": "devils-advocate",
-      "status": "todo",
-      "note": "after DA-5"
+      "status": "done",
+      "note": "after DA-5",
+      "evidence": "docs/review/DA-7-operator-client.md; K1, S1, T1, E1, RD3 must-fix in S3"
     },
     {
       "id": "V-3b",
@@ -347,8 +350,9 @@
       "id": "D1",
       "title": "Hider and adversarial curriculum",
       "owner": "rsi-evolution",
-      "status": "briefed",
-      "brief": "docs/continuity/briefs/D1-hider-adversary.md"
+      "status": "doing",
+      "brief": "docs/continuity/briefs/D1-hider-adversary.md",
+      "evidence": "started 12:10Z real UTC with the FAKE episode port"
     },
     {
       "id": "D2",
@@ -361,8 +365,9 @@
       "id": "D3",
       "title": "Provenance, erasure approvals and context eligibility",
       "owner": "runtime-raindrop",
-      "status": "briefed",
-      "brief": "docs/continuity/briefs/D3-privacy-eligibility.md"
+      "status": "doing",
+      "brief": "docs/continuity/briefs/D3-privacy-eligibility.md",
+      "evidence": "started 12:05Z real UTC in packages/privacy, new files only"
     },
     {
       "id": "E1",
@@ -384,6 +389,68 @@
       "owner": "runtime-raindrop + ui-ux-improver + team-lead",
       "status": "briefed",
       "brief": "docs/continuity/briefs/E3-deploy-demo-submission.md"
+    },
+    {
+      "id": "PKT-20",
+      "title": "Lead docs packet",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "7c74461 + 56b1de5"
+    },
+    {
+      "id": "PKT-21",
+      "title": "C1c DA-6 fixes, propagator pin, agent_diagnostic, additive contracts (24 files)",
+      "owner": "verifier-2 then commit-steward",
+      "status": "doing"
+    },
+    {
+      "id": "PKT-22",
+      "title": "DA-5 report + mg-live repro retarget",
+      "owner": "commit-steward",
+      "status": "done",
+      "evidence": "be26a69 + c72b69e"
+    },
+    {
+      "id": "PKT-23",
+      "title": "C3 P1 fixtures/grader keyed derivation + second solver (18 files)",
+      "owner": "verifier then commit-steward",
+      "status": "doing"
+    },
+    {
+      "id": "PKT-24",
+      "title": "C3 P2 packages/gate (18 new; workspace)",
+      "owner": "verifier then commit-steward",
+      "status": "doing"
+    },
+    {
+      "id": "PKT-25",
+      "title": "C3 P3 packages/deployment (10 new; workspace)",
+      "owner": "verifier then commit-steward",
+      "status": "doing"
+    },
+    {
+      "id": "PKT-26",
+      "title": "Verifier continuity packet (8 paths) + VERIFICATION.md snapshot",
+      "owner": "verifier-2 then commit-steward",
+      "status": "doing"
+    },
+    {
+      "id": "PKT-27",
+      "title": "DA-7 operator client review document",
+      "owner": "commit-steward",
+      "status": "doing"
+    },
+    {
+      "id": "GC-1",
+      "title": "gateway-controls: runtime workflow enforcement, per-job budgets, retry counter (controls.ts, workflow.ts, budget.ts, controls.integration tests)",
+      "owner": "gateway-controls",
+      "status": "doing"
+    },
+    {
+      "id": "DA-8",
+      "title": "Gate and deployment review by reading",
+      "owner": "devils-advocate",
+      "status": "doing"
     }
   ],
   "blocked": [
@@ -399,7 +466,7 @@
     }
   ],
   "git": {
-    "head": "ba41d7b = origin/main (30 commits)",
+    "head": "e2e1db1 = origin/main (42 commits) at export; PKT-27 landing",
     "commits": [
       "fe12b51 baseline",
       "506b73e ledger",
@@ -429,7 +496,14 @@
       "4172564 ledger + HEAD-proof history",
       "f9ee239 ledger format fix",
       "109e2dc review DA-6 PKT-18",
-      "ecfbb5c ledger"
+      "ecfbb5c ledger",
+      "cd821d6 evolution C2-2 (listed above)",
+      "83980b9 evolution C2-3",
+      "96f7b89 mongo PKT-15",
+      "be26a69 review DA-5 + mg-live",
+      "1201525 operator S2",
+      "7c74461 lead docs",
+      "ba41d7b observability+observer C1a"
     ],
     "remote": "https://github.com/nihalnihalani/expunge (private)",
     "lockRule": "a packet that adds a workspace never carries the working-tree lock; the steward regenerates package-lock.json from the staged tree in a scratch export, proves npm ci --ignore-scripts there, and restores the working-tree lock",

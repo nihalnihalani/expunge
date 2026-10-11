@@ -7,3 +7,6 @@ apps/operator/
 research/
 package-lock.json
 *.md
+
+# browser e2e result files are written by the runner with 1-space indent
+docs/ui/screens/**/results-*.json
