@@ -5,7 +5,12 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { ErasureSuppressionRepository } from '@expunge/mongo';
 import { serializeGuardFile } from '@expunge/observability';
 import { FakeRaindrop } from '../../observability/test/fake-raindrop.js';
-import { createEvidenceProcess, suppressionFromService, loadGuardFile } from '../src/index.js';
+import {
+  createEvidenceProcess,
+  createMongoExportSuppression,
+  loadGuardFile,
+  suppressionUserKey,
+} from '../src/index.js';
 import { main } from '../src/main.js';
 import { TEST_URI, describeLive, openEnvironment, scope, type LiveEnvironment } from './mongo-support.js';
 
@@ -46,24 +51,28 @@ describeLive('evidence process entry (main) wiring', () => {
     RAINDROP_QUERY_URL: fake.queryUrl,
   });
 
-  it('suppressionFromService reads active erasures with the observer principal', async () => {
+  it('createMongoExportSuppression reads active erasures with the observer principal, keyed by suppressionUserKey', async () => {
     const privacy = await env.as('privacy_controller');
     const observer = await env.as('observer');
     const repo = new ErasureSuppressionRepository(privacy);
     await repo.setActive(
-      { ...scope, providerOrganizationId: 'org-1', userKey: 'u_user_a', jobId: 'job-a' },
+      { ...scope, providerOrganizationId: 'org-1', userKey: suppressionUserKey('u_user_a'), jobId: 'job-a' },
       true,
     );
     await repo.setActive(
-      { ...scope, providerOrganizationId: 'org-1', userKey: 'u_user_b', jobId: 'job-b' },
+      { ...scope, providerOrganizationId: 'org-1', userKey: suppressionUserKey('u_user_b'), jobId: 'job-b' },
       false,
     );
     await repo.setActive(
-      { ...scope, providerOrganizationId: 'org-2', userKey: 'u_user_c', jobId: 'job-c' },
+      { ...scope, providerOrganizationId: 'org-2', userKey: suppressionUserKey('u_user_c'), jobId: 'job-c' },
       true,
     );
-    const set = await suppressionFromService(observer).suppressedUserIds('org-1');
-    expect([...set]).toEqual(['u_user_a']);
+    const set = await createMongoExportSuppression(observer).suppressedUserIds('org-1');
+    // The privacy controller writes hashed keys; the reader's membership test takes the RAW provider user id.
+    expect(set.has('u_user_a')).toBe(true);
+    expect(set.has('u_user_b')).toBe(false); // released
+    expect(set.has('u_user_c')).toBe(false); // other organization
+    expect([...set]).toEqual([suppressionUserKey('u_user_a')]);
   });
 
   it('is READY (local fake) with both sources present and a window configured', async () => {
@@ -71,7 +80,7 @@ describeLive('evidence process entry (main) wiring', () => {
     const started = createEvidenceProcess(
       baseEnv(),
       {
-        suppression: suppressionFromService(observer),
+        suppression: createMongoExportSuppression(observer),
         guard: loadGuardFile(guardPath, { scope, providerOrganizationId: 'org-1' })!,
       },
       { service: observer },
