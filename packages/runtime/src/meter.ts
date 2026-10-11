@@ -28,6 +28,8 @@ export type MeterCarry = {
   costMicrousd: number;
   unpricedCalls: number;
   wallTimeMs: number;
+  /** The provider SDK's HTTP attempts across all sessions (numbers only); absent when none were made. */
+  provider?: { attempts: number; retriedStatuses: number[]; backoffTimeout: boolean };
 };
 
 export const EMPTY_CARRY: MeterCarry = {
@@ -66,7 +68,22 @@ export function readMeterCarry(checkpoint: unknown): { carry: MeterCarry } | { i
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return { invalid: true };
     carry[field] = value;
   }
-  return { carry: { v: 1, ...carry } as MeterCarry };
+  const provider = readProviderCarry(record.provider);
+  if (provider === 'invalid') return { invalid: true };
+  return { carry: { v: 1, ...carry, ...(provider ? { provider } : {}) } as MeterCarry };
+}
+
+/** Absent is fine; present but malformed is an error, never zero (counts are evidence and must not be reset by corruption). */
+function readProviderCarry(value: unknown): MeterCarry['provider'] | 'invalid' | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object') return 'invalid';
+  const record = value as Record<string, unknown>;
+  const { attempts, retriedStatuses, backoffTimeout } = record;
+  if (typeof attempts !== 'number' || !Number.isSafeInteger(attempts) || attempts < 0) return 'invalid';
+  if (!Array.isArray(retriedStatuses) || retriedStatuses.length > 50) return 'invalid';
+  if (!retriedStatuses.every((n) => Number.isInteger(n) && n >= 100 && n <= 599)) return 'invalid';
+  if (typeof backoffTimeout !== 'boolean') return 'invalid';
+  return { attempts, retriedStatuses: retriedStatuses as number[], backoffTimeout };
 }
 
 export type MeterVerdict =

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_RETRY_POLICY } from '../src/model-retries.js';
 import { ProviderAttemptRecorder } from '../src/attempt-recorder.js';
 
 /** FAKE base fetch: answers with the next status (or throws for 'network'); nothing leaves the process. */
@@ -21,28 +20,49 @@ describe('ProviderAttemptRecorder (FAKE fetch)', () => {
     expect(recorder.snapshot()).toEqual({ attempts: 3, retriedStatuses: [429, 503], backoffTimeout: false });
   });
 
-  it('knows a retry is pending between attempts, and not after a success or a non-retriable status', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted([429, 200, 400]));
-    expect(recorder.retryPending).toBe(false);
-    await recorder.fetch('http://x');
-    expect(recorder.retryPending).toBe(true); // 429: the SDK is sleeping before its next attempt
-    await recorder.fetch('http://x');
-    expect(recorder.retryPending).toBe(false);
-    await recorder.fetch('http://x');
-    expect(recorder.retryPending).toBe(false); // 400 is never retried
+  it('the window flag is set ONLY by 429, 5xx or a connection error; 408, 409, a success and a 400 never set it', async () => {
+    for (const status of [429, 500, 502, 503, 504]) {
+      const recorder = new ProviderAttemptRecorder(scripted([status]));
+      await recorder.fetch('http://x');
+      expect(recorder.retriedSinceArm, String(status)).toBe(true);
+    }
+    for (const status of [408, 409, 200, 400, 401]) {
+      const recorder = new ProviderAttemptRecorder(scripted([status]));
+      await recorder.fetch('http://x');
+      expect(recorder.retriedSinceArm, String(status)).toBe(false);
+    }
+    const network = new ProviderAttemptRecorder(scripted(['network']));
+    await expect(network.fetch('http://x')).rejects.toThrow();
+    expect(network.retriedSinceArm).toBe(true);
   });
 
-  it('a connection error is retried by the SDK, so it leaves a retry pending', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted(['network']));
-    await expect(recorder.fetch('http://x')).rejects.toThrow();
-    expect(recorder.retryPending).toBe(true);
+  it('408 and 409 are still recorded as retried statuses (what the SDK did), just not provider evidence', async () => {
+    const recorder = new ProviderAttemptRecorder(scripted([408, 409, 200]));
+    for (let i = 0; i < 3; i++) await recorder.fetch('http://x');
+    expect(recorder.snapshot().retriedStatuses).toEqual([408, 409]);
+    expect(recorder.retriedSinceArm).toBe(false);
   });
 
-  it('after the last attempt the SDK gives up, so nothing is pending (no backoff to blame)', async () => {
-    const recorder = new ProviderAttemptRecorder(scripted([429]));
-    for (let i = 0; i < MODEL_RETRY_POLICY.attempts; i++) await recorder.fetch('http://x');
-    expect(recorder.retryPending).toBe(false);
-    expect(recorder.snapshot().attempts).toBe(MODEL_RETRY_POLICY.attempts);
+  it('the flag is per watchdog window: it survives until the next arm and then starts clean', async () => {
+    const recorder = new ProviderAttemptRecorder(scripted([429, 200]));
+    await recorder.fetch('http://x');
+    expect(recorder.retriedSinceArm).toBe(true);
+    await recorder.fetch('http://x'); // a normal reply does not clear it by itself; the runtime's re-arm does
+    expect(recorder.retriedSinceArm).toBe(true);
+    recorder.clearWindow();
+    expect(recorder.retriedSinceArm).toBe(false);
+  });
+
+  it('seeds from earlier sessions, so the totals are per job', async () => {
+    const recorder = new ProviderAttemptRecorder(scripted([503]));
+    recorder.seed({ attempts: 5, retriedStatuses: [429, 429], backoffTimeout: true });
+    await recorder.fetch('http://x');
+    expect(recorder.snapshot()).toEqual({
+      attempts: 6,
+      retriedStatuses: [429, 429, 503],
+      backoffTimeout: true,
+    });
+    expect(recorder.retriedSinceArm).toBe(true);
   });
 
   it('records the backoff timeout only when the runtime marks it, and keeps the status list bounded', async () => {

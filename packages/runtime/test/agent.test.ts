@@ -835,13 +835,22 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
         await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
         return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, count: () => count };
       }
-      const runAgainst = async (url: string, phaseTimeoutMs: number) => {
-        const r = rig({ script: [fakeText('x')], phaseTimeoutMs });
+      const runAgainst = async (
+        url: string,
+        phaseTimeoutMs: number,
+        extra: { env?: Record<string, string>; hooks?: ExecutionHooks; jobOver?: RigOptions['jobOver'] } = {},
+      ) => {
+        const r = rig({
+          script: [fakeText('x')],
+          phaseTimeoutMs,
+          ...(extra.hooks ? { hooks: extra.hooks } : {}),
+          ...(extra.jobOver ? { jobOver: extra.jobOver } : {}),
+        });
         const agent = new ExpungeExecutionAgent(
           {
             ...r.deps,
             models: new FixedModelResolver({ spec: 'openai/gpt-5' }),
-            env: { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: url },
+            env: { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: url, ...(extra.env ?? {}) },
           },
           { actor: ACTOR, lease: r.lease },
         );
@@ -870,6 +879,104 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
         const { code, stats } = await runAgainst(provider.url, 300);
         expect(code).toBe('PhaseTimeout');
         expect(stats?.providerAttempts).toEqual({ attempts: 1, retriedStatuses: [], backoffTimeout: false });
+      }, 20_000);
+
+      it('MF-4: a 429 whose retry-after is just under the budget, then a slow reply, is ModelUnavailable (the window had provider backoff)', async () => {
+        const provider = await stub((count, response) => {
+          if (count === 1) {
+            response.writeHead(429, { 'content-type': 'application/json', 'retry-after-ms': '250' });
+            response.end('{"error":{"message":"x","type":"rate_limit_error"}}');
+          } // the retried call is never answered
+        });
+        const { code, stats } = await runAgainst(provider.url, 500);
+        expect(code).toBe('ModelUnavailable');
+        expect(stats?.providerAttempts).toEqual({
+          attempts: 2,
+          retriedStatuses: [429],
+          backoffTimeout: true,
+        });
+      }, 20_000);
+
+      it('a 408 then a slow reply is PhaseTimeout: 408 is never provider evidence', async () => {
+        const provider = await stub((count, response) => {
+          if (count === 1) {
+            response.writeHead(408, { 'content-type': 'application/json', 'retry-after-ms': '50' });
+            response.end('{"error":{"message":"x","type":"e"}}');
+          }
+        });
+        const { code, stats } = await runAgainst(provider.url, 500);
+        expect(code).toBe('PhaseTimeout');
+        expect(stats?.providerAttempts).toEqual({
+          attempts: 2,
+          retriedStatuses: [408],
+          backoffTimeout: false,
+        });
+      }, 20_000);
+
+      it('a 429, then a reply that starts and re-arms the watchdog, then a stall is PhaseTimeout: the window was cleared on re-arm', async () => {
+        const provider = await stub((count, response) => {
+          if (count === 1) {
+            response.writeHead(429, { 'content-type': 'application/json', 'retry-after-ms': '30' });
+            response.end('{"error":{"message":"x","type":"rate_limit_error"}}');
+            return;
+          }
+          response.writeHead(200, { 'content-type': 'text/event-stream' });
+          const chunk = {
+            id: 'c1',
+            object: 'chat.completion.chunk',
+            created: 0,
+            model: 'm',
+            choices: [{ index: 0, delta: { role: 'assistant', content: 'hello' }, finish_reason: null }],
+          };
+          response.write(`data: ${JSON.stringify(chunk)}\n\n`); // the stream starts, then stalls
+        });
+        const { code, stats } = await runAgainst(provider.url, 600, {
+          env: { OPENAI_CHAT_COMPLETIONS: 'true' },
+        });
+        expect(code).toBe('PhaseTimeout');
+        expect(stats?.providerAttempts).toMatchObject({
+          attempts: 2,
+          retriedStatuses: [429],
+          backoffTimeout: false,
+        });
+      }, 20_000);
+
+      it('the attempt counters carry across a takeover: earlier sessions are seeded, and the new carry holds the totals', async () => {
+        const provider = await stub((_count, response) => {
+          response.writeHead(400, { 'content-type': 'application/json' });
+          response.end('{"error":{"message":"x","type":"invalid_request_error"}}');
+        });
+        const carries: Array<{
+          provider?: { attempts: number; retriedStatuses: number[]; backoffTimeout: boolean };
+        }> = [];
+        const { stats } = await runAgainst(provider.url, 5_000, {
+          hooks: { onMeter: async (carry) => void carries.push(carry) },
+          jobOver: {
+            checkpoint: {
+              v: 1,
+              meter: {
+                v: 1,
+                modelCalls: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                costMicrousd: 0,
+                unpricedCalls: 0,
+                wallTimeMs: 0,
+                provider: { attempts: 4, retriedStatuses: [429, 503], backoffTimeout: true },
+              },
+            },
+          },
+        });
+        expect(stats?.providerAttempts).toEqual({
+          attempts: 5,
+          retriedStatuses: [429, 503],
+          backoffTimeout: true,
+        });
+        expect(carries.at(-1)?.provider).toEqual({
+          attempts: 5,
+          retriedStatuses: [429, 503],
+          backoffTimeout: true,
+        });
       }, 20_000);
 
       it('a 429 retried and then answered is recorded as attempts with no backoff timeout', async () => {
