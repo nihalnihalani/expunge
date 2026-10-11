@@ -36,6 +36,7 @@ describeLive('run attestations and guard exports (local protocol lane)', () => {
     provider: 'anthropic',
     modelId: 'claude-model',
     spec: 'spec-v1',
+    runtimeHash: 'f'.repeat(64),
     endpointHostHash: HOST,
     at: new Date('2026-10-11T12:00:00.000Z'),
     ...extra,
@@ -61,6 +62,12 @@ describeLive('run attestations and guard exports (local protocol lane)', () => {
         'AttestationConflict',
       );
       await expect(attest.record(actor, lease, stamp(lease.fence + 1))).rejects.toThrow('InvalidAttestation');
+      await expect(
+        attest.record(actor, lease, stamp(lease.fence, { runtimeHash: '0'.repeat(64) })),
+      ).rejects.toThrow('AttestationConflict');
+      await expect(
+        attest.record(actor, lease, stamp(lease.fence, { runtimeHash: 'nothex' })),
+      ).rejects.toThrow('InvalidAttestation');
       await expect(attest.record(actor, lease, stamp(lease.fence, { modelId: '' }))).rejects.toThrow(
         'InvalidAttestation',
       );

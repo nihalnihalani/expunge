@@ -9,6 +9,8 @@ export type RunAttestation = {
   provider: string;
   modelId: string;
   spec: string;
+  /** Hash of the runtime this holder ran under (64 hex). Required; part of the stamp, so a differing repeat conflicts. */
+  runtimeHash: string;
   endpoint?: string;
   endpointHostHash?: string;
   at: Date;
@@ -25,6 +27,7 @@ const stampOf = (a: RunAttestation) => ({
   provider: a.provider,
   modelId: a.modelId,
   spec: a.spec,
+  runtimeHash: a.runtimeHash,
   endpoint: a.endpoint ?? null,
   endpointHostHash: a.endpointHostHash ?? null,
   at: a.at.getTime(),
@@ -61,6 +64,7 @@ export class AttestationRepository {
       !text(attestation.provider) ||
       !text(attestation.modelId) ||
       !text(attestation.spec) ||
+      !HASH.test(attestation.runtimeHash) ||
       !(attestation.at instanceof Date) ||
       Number.isNaN(attestation.at.getTime()) ||
       (attestation.endpoint !== undefined && !text(attestation.endpoint)) ||

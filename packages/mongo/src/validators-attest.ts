@@ -39,6 +39,8 @@ export const ATTEST_VALIDATORS: Record<string, Document> = {
         provider: str,
         modelId: str,
         spec: str,
+        /** Hash of the runtime the lease holder ran under; the gate compares it instead of reading the job checkpoint. */
+        runtimeHash: hash,
         endpoint: str,
         endpointHostHash: hash,
         at: date,
@@ -54,6 +56,7 @@ export const ATTEST_VALIDATORS: Record<string, Document> = {
         'provider',
         'modelId',
         'spec',
+        'runtimeHash',
         'at',
         'createdAt',
       ],

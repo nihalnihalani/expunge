@@ -14,5 +14,5 @@ image may import it (enforced by `test/import-boundary.test.ts`).
   (parent, child projection) so a second report cannot exist.
 - Failed, cancelled and timed-out arms are rows with no success and stay in the denominator.
 - The report's `computedClass` is derived from the two stored bundles and is the only classification promotion trusts.
-- `@expunge/gate/testing` holds the SCRIPTED/FAKE port. It is a stand-in for protocol tests, never evidence about the
+- The SCRIPTED/FAKE port lives under `test/scripted/` and is not part of the package: it is not exported. It is a stand-in for protocol tests, never evidence about the
   worker or a model. Real model-backed admission is BLOCKED until a provider key and a measured cost ceiling exist.
