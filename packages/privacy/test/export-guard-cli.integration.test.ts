@@ -66,6 +66,13 @@ describeLive('export-guard CLI', () => {
       providerOrganizationId: 'org-cli',
     });
     expect(guard.forbiddenLiterals).toEqual(['subject-handle-cli-1']);
+    expect(
+      parseGuardFile(readFileSync(file, 'utf8'), { scope, providerOrganizationId: 'org-cli' }).generation,
+    ).toBe(1);
+    expect(await main(env(file))).toBe(0); // a second export raises the generation
+    expect(
+      parseGuardFile(readFileSync(file, 'utf8'), { scope, providerOrganizationId: 'org-cli' }).generation,
+    ).toBe(2);
   });
   it('exits 2 without configuration and 1 for a scope with no registered subjects, writing nothing', async () => {
     expect(await main({})).toBe(2);

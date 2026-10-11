@@ -6,8 +6,17 @@ import {
   type MongoService,
 } from '@expunge/mongo';
 import { createEvidenceProcess, type EvidenceLog, type EvidenceSources } from './process.js';
+import type { ScopeKey } from '@expunge/contracts';
 import { createMongoExportSuppression } from './mongo-suppression.js';
-import { loadGuardFile, windowFromEnv } from './sources.js';
+import { GuardExportRepository } from '@expunge/mongo';
+import {
+  EvidenceSourceError,
+  guardFreshness,
+  loadGuardFileWithMeta,
+  startGuardWatch,
+  windowFromEnv,
+  type LoadedGuard,
+} from './sources.js';
 
 const log: EvidenceLog = (entry) => console.log(JSON.stringify({ at: new Date().toISOString(), ...entry }));
 
@@ -32,18 +41,28 @@ export async function main(
     service = createPrincipalService(mongoConfigFromEnv(env), 'observer');
   let sources: EvidenceSources = {};
   let window;
+  let loaded: LoadedGuard | undefined;
+  let freshness: { expected: { scope: ScopeKey; providerOrganizationId: string } } | undefined;
   try {
     const tenantId = env.EXPUNGE_TENANT_ID?.trim();
     const scopeId = env.EXPUNGE_SCOPE_ID?.trim();
     const scopeEnv = env.EXPUNGE_ENV?.trim();
     const organization = env.RAINDROP_ORGANIZATION_ID?.trim();
-    const guard =
+    const expected =
       tenantId && scopeId && scopeEnv && organization
-        ? loadGuardFile(env.EXPUNGE_LEAK_GUARD_FILE, {
+        ? {
             scope: { tenantId, env: scopeEnv as 'dev' | 'evaluation' | 'demo', scopeId },
             providerOrganizationId: organization,
-          })
+          }
         : undefined;
+    loaded = expected ? loadGuardFileWithMeta(env.EXPUNGE_LEAK_GUARD_FILE, expected) : undefined;
+    if (loaded && expected && service) {
+      // The file must be the latest export the privacy controller recorded, else the process stays BLOCKED.
+      const verdict = await guardFreshness(new GuardExportRepository(service), expected, loaded);
+      if (verdict !== 'fresh') throw new EvidenceSourceError(`EXPUNGE_LEAK_GUARD_FILE:${verdict}`);
+      freshness = { expected };
+    }
+    const guard = loaded?.guard;
     sources = {
       ...(service ? { suppression: createMongoExportSuppression(service) } : {}),
       ...(guard ? { guard } : {}),
@@ -54,8 +73,18 @@ export async function main(
     await service?.close();
     return 3;
   }
+  let haltStale: (verdict: string) => void = () => undefined;
+  const watch =
+    freshness && loaded && service
+      ? startGuardWatch({
+          check: () => guardFreshness(new GuardExportRepository(service!), freshness!.expected, loaded!),
+          intervalMs: 60_000,
+          onStale: (verdict) => haltStale(verdict),
+        })
+      : undefined;
   const started = createEvidenceProcess(env, sources, {
     log,
+    ...(watch ? { holdUnless: () => watch.isFresh() } : {}),
     ...(service ? { service } : {}),
     ...(window ? { window } : {}),
   });
@@ -67,7 +96,15 @@ export async function main(
   started.process.start({ dispatch: 5_000, scan: 30_000 });
   // The loop timers are unref'd; this referenced timer is what keeps the process alive until SIGINT/SIGTERM.
   const keepAlive = setInterval(() => undefined, 60_000);
+  // Backstop: a stale verdict from the 60 s watch stops the process (exit 3); the supervisor's restart re-reads the file.
+  haltStale = (verdict) => {
+    console.log(`BLOCKED: evidence (EXPUNGE_LEAK_GUARD_FILE:${verdict})`);
+    clearInterval(keepAlive);
+    started.process.stop();
+    void started.service.close().finally(() => process.exit(3));
+  };
   const stop = () => {
+    watch?.stop();
     clearInterval(keepAlive);
     started.process.stop();
     void started.service.close().finally(() => process.exit(0));

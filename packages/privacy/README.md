@@ -88,4 +88,4 @@ before a lesson is retained. No promise of instant vendor deletion and no unveri
 salted private-id set) with scope, provider organization, count and digest, atomically (exclusive 0600 temp file, fsync, rename; a
 symlink or looser pre-existing file at the target is replaced, not followed). A guard that may be incomplete (5000 entries or more
 in one read) is refused, as is an empty one. **The file contains subject literals in plaintext** and must be mounted read-only
-into the observer only. Not done: a Mongo generation row so the reader can detect a stale export.
+into the observer only. Each export records a rising generation in `guard_exports` BEFORE the file is written (a failed write leaves the record ahead of every file, so the observer HOLDs), and the file carries that generation.
