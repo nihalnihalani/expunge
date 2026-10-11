@@ -23,7 +23,7 @@ export type FakePart =
   /** Stream starts, then blocks until the request's AbortSignal fires. */
   | { kind: 'hang' }
   /** The provider stream fails mid-flight (surfaces as RUN_ERROR through the real converter). */
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; code?: string };
 
 export type FakeTurn = {
   parts: FakePart[];
@@ -170,7 +170,12 @@ export class FakeChatModel {
           this.hangObservedAbort = true;
           return;
         } else {
-          yield asChunk({ type: 'RUN_ERROR', message: part.message, ...common() });
+          yield asChunk({
+            type: 'RUN_ERROR',
+            message: part.message,
+            ...(part.code ? { code: part.code } : {}),
+            ...common(),
+          });
           return;
         }
       }

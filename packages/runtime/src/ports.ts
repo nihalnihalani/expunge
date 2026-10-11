@@ -221,6 +221,8 @@ export type RunStats = {
   provenance?: RunProvenance;
   /** sha256 and length of the model's final text; the narrative itself is not retained here. */
   narrative?: { sha256: string; length: number };
+  /** HTTP attempts the provider SDK made for this run and whether the phase watchdog fired during a pending retry (numbers only). */
+  providerAttempts?: { attempts: number; retriedStatuses: number[]; backoffTimeout: boolean };
   /** Tool executions still running when the drain grace expired; the lease was NOT released in that case. */
   abandonedTools?: number;
   release: 'none' | 'yielded' | 'cancelled' | 'lost';

@@ -5,7 +5,7 @@
 import type { AnyTextAdapter } from '@tanstack/ai';
 import { type AnthropicChatModel, createAnthropicChat } from '@tanstack/ai-anthropic';
 import { type OpenAIChatModel, createOpenaiChat, createOpenaiChatCompletions } from '@tanstack/ai-openai';
-import { MODEL_MAX_RETRIES } from './model-retries.js';
+import { providerClientOptions } from './model-retries.js';
 
 /**
  * An environment map. The provider selection reads only OPENAI_API_KEY, OPENAI_BASE_URL,
@@ -44,13 +44,17 @@ export function requiredCredentialVariable(spec: string): string {
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
 // @copilotkit/runtime. Each provider SDK retries transient failures up to MODEL_MAX_RETRIES times.
-export function adapter(spec: string, env: ProviderEnv = process.env): AnyTextAdapter {
+export function adapter(
+  spec: string,
+  env: ProviderEnv = process.env,
+  fetchImpl?: typeof fetch,
+): AnyTextAdapter {
   const { provider, model: id } = parseModelSpec(spec);
   switch (provider) {
     case 'openai': {
       const apiKey = env.OPENAI_API_KEY?.trim();
       if (!apiKey) throw new MissingProviderCredentialError('openai', 'OPENAI_API_KEY');
-      const config = { baseURL: env.OPENAI_BASE_URL, maxRetries: MODEL_MAX_RETRIES };
+      const config = { ...providerClientOptions(undefined, fetchImpl), baseURL: env.OPENAI_BASE_URL };
       // OpenAI-compatible endpoints that do not implement the Responses API
       // tool loop (e.g. DeepSeek) can opt into the Chat Completions wire format.
       if (env.OPENAI_CHAT_COMPLETIONS === 'true')
@@ -61,9 +65,9 @@ export function adapter(spec: string, env: ProviderEnv = process.env): AnyTextAd
       const apiKey = env.ANTHROPIC_API_KEY?.trim();
       if (!apiKey) throw new MissingProviderCredentialError('anthropic', 'ANTHROPIC_API_KEY');
       return createAnthropicChat(id as AnthropicChatModel, apiKey, {
+        ...providerClientOptions(undefined, fetchImpl),
         // The AI SDK base URL ends in /v1; the Anthropic SDK adds /v1 itself.
         baseURL: env.ANTHROPIC_BASE_URL?.replace(/\/v1\/?$/, ''),
-        maxRetries: MODEL_MAX_RETRIES,
       });
     }
     default:

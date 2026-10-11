@@ -51,7 +51,11 @@ export type EpisodeResult = {
   failureCode?: string;
   jobId?: string;
   terminal: { status: 'complete' | 'incomplete' | 'refused'; claim: 'all_targets' | 'registered_scope' };
+  /** Set with `failureCode: 'ModelUnavailable'` when the phase watchdog fired during a pending provider retry/backoff. */
+  failureDetail?: 'phase_timeout_during_provider_backoff';
   runtimeHash?: string;
+  /** What the provider SDK did for this run: HTTP attempts, retriable statuses seen, whether a backoff timed out (numbers only). */
+  providerRetries?: { attempts: number; retriedStatuses: number[]; backoffTimeout: boolean };
   receipt?: TrustedReceiptEvidence;
   retryFailures: number;
   cost: CostSummary;
@@ -140,6 +144,22 @@ const failed = (code: string, jobId?: string, over: Partial<EpisodeResult> = {})
 
 const sameLimits = (a: ResourceLimits, b: ResourceLimits) =>
   contentHash(a as never, 'resource-limits') === contentHash(b as never, 'resource-limits');
+
+/** The provider attempts the terminal checkpoint recorded, validated field by field (numbers and a boolean only). */
+export function providerRetriesOf(job: Job): EpisodeResult['providerRetries'] {
+  const recorded = (job.checkpoint as { terminal?: { providerAttempts?: unknown } } | null)?.terminal
+    ?.providerAttempts as
+    { attempts?: unknown; retriedStatuses?: unknown; backoffTimeout?: unknown } | undefined;
+  if (!recorded || typeof recorded !== 'object') return undefined;
+  const attempts = recorded.attempts;
+  if (typeof attempts !== 'number' || !Number.isSafeInteger(attempts) || attempts < 0) return undefined;
+  const statuses = Array.isArray(recorded.retriedStatuses)
+    ? recorded.retriedStatuses
+        .filter((n): n is number => Number.isInteger(n) && n >= 100 && n <= 599)
+        .slice(0, 50)
+    : [];
+  return { attempts, retriedStatuses: statuses, backoffTimeout: recorded.backoffTimeout === true };
+}
 
 /** The cumulative cost of a job from its durable checkpoint: the meter (all sessions) plus the tool-call count. */
 export function costOf(job: Job, committedBatches: number): CostSummary {
@@ -242,8 +262,11 @@ export class WorkerEpisodeRunner {
     const attestedValue = (job.checkpoint as { attestedRuntimeHash?: unknown } | null)?.attestedRuntimeHash;
     const attested =
       typeof attestedValue === 'string' && /^[0-9a-f]{64}$/.test(attestedValue) ? attestedValue : null;
+    const backoff = providerRetriesOf(job);
     const base = {
       jobId: job._id,
+      ...(backoff ? { providerRetries: backoff } : {}),
+      ...(backoff?.backoffTimeout ? { failureDetail: 'phase_timeout_during_provider_backoff' as const } : {}),
       retryFailures,
       cost: costOf(job, committed.committedBatches),
       // OBSERVED, not supplied: the worker wrote its own loaded-bytes hash into the run's checkpoint when it claimed it.

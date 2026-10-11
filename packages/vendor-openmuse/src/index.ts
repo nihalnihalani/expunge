@@ -1,3 +1,4 @@
+export * from './attempt-recorder.js';
 export * from './model-retries.js';
 export * from './provider.js';
 export * from './state-tools.js';

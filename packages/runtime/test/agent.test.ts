@@ -1,9 +1,13 @@
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { DEFAULT_PHASE_TIMEOUT_MS } from '../src/session.js';
+import { PROVIDER_CLIENT_TIMEOUT_MS } from '@expunge/vendor-openmuse';
 import { AbstractAgent } from '@ag-ui/client';
 import { EventType, type BaseEvent } from '@ag-ui/core';
 import { contentHash, type CompletionReceipt, type HarnessBundle } from '@expunge/contracts';
 import { ProtocolError } from '@expunge/mongo';
 import { defineTool, type ChatMiddleware, type ToolDefinition } from '@expunge/vendor-openmuse';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   ExpungeExecutionAgent,
@@ -755,6 +759,137 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
       const events = await collect(r.agent.run(runInput()));
       expect(JSON.stringify(events)).not.toContain('SECRET-PROVIDER-DETAIL');
       expect((events.at(-1) as unknown as { code: string }).code).toBe('ModelRunFailed');
+    });
+
+    it('splits provider-side failures (ModelUnavailable) from request-side ones (ModelRunFailed) by structured code only', async () => {
+      const codeOf = async (part: { message: string; code?: string }) => {
+        const r = rig({ script: [{ parts: [{ kind: 'error', ...part }] }] });
+        const events = await collect(r.agent.run(runInput()));
+        expect((events.at(-1) as unknown as { code: string }).code).toBeDefined();
+        return (events.at(-1) as unknown as { code: string }).code;
+      };
+      for (const code of ['503', '500', '429', '401', '403', 'ECONNRESET', 'rate_limit_exceeded'])
+        expect(await codeOf({ message: 'x', code }), code).toBe('ModelUnavailable');
+      for (const code of ['400', '413', '422', '408', 'timeout', 'ETIMEDOUT'])
+        expect(await codeOf({ message: 'x', code }), code).toBe('ModelRunFailed');
+      expect(await codeOf({ message: 'x' })).toBe('ModelRunFailed'); // no structured field: stays behaviour
+      // Message text never steers the verdict: a prompt echo that mentions an outage is still a request-side failure.
+      expect(await codeOf({ message: '503 Service Unavailable ECONNRESET rate_limit_exceeded' })).toBe(
+        'ModelRunFailed',
+      );
+    });
+
+    it('MF-1: a model call that is merely slow ends as PhaseTimeout (behaviour), never as ModelUnavailable, and the provider client timeout sits above every phase timeout', async () => {
+      const r = rig({ script: [fakeHang()], phaseTimeoutMs: 30 });
+      const events = await collect(r.agent.run(runInput()));
+      const code = (events.at(-1) as unknown as { code: string }).code;
+      expect(code).toBe('PhaseTimeout');
+      expect(code).not.toBe('ModelUnavailable');
+      expect(PROVIDER_CLIENT_TIMEOUT_MS).toBeGreaterThan(DEFAULT_PHASE_TIMEOUT_MS);
+    });
+
+    it('classifies an error the adapter stream THROWS by its structured fields too (status 503 vs 400, never the message)', async () => {
+      const verdictFor = async (thrown: Error) => {
+        const r = rig({ script: [fakeText('x')] });
+        const failing = new Proxy(r.fake.adapter, {
+          get(target, property) {
+            if (property === 'chatStream')
+              return () => ({
+                // eslint-disable-next-line require-yield
+                async *[Symbol.asyncIterator]() {
+                  throw thrown;
+                },
+              });
+            const value = Reflect.get(target, property, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+        const agent = new ExpungeExecutionAgent(
+          { ...r.deps, models: new FixedModelResolver({ spec: 'fake/fake', textAdapter: failing }) },
+          { actor: ACTOR, lease: r.lease },
+        );
+        const events = await collect(agent.run(runInput()));
+        return (events.at(-1) as unknown as { code: string }).code;
+      };
+      expect(await verdictFor(Object.assign(new Error('boom'), { status: 503 }))).toBe('ModelUnavailable');
+      expect(await verdictFor(Object.assign(new Error('503 outage'), { status: 400 }))).toBe(
+        'ModelRunFailed',
+      );
+      expect(await verdictFor(new Error('503 Service Unavailable'))).toBe('ModelRunFailed');
+    });
+
+    describe('MF-3: provider retries are recorded, and a timeout during provider backoff is infrastructure (FAKE provider server)', () => {
+      const servers: Server[] = [];
+      afterEach(async () => {
+        for (const server of servers) server.closeAllConnections();
+        await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+      });
+      /** A stand-in provider. `respond` decides each request; a handler that never answers holds the connection open. */
+      async function stub(respond: (count: number, response: import('node:http').ServerResponse) => void) {
+        let count = 0;
+        const server = createServer((request, response) => {
+          request.resume();
+          request.on('end', () => respond(++count, response));
+        });
+        servers.push(server);
+        await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+        return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, count: () => count };
+      }
+      const runAgainst = async (url: string, phaseTimeoutMs: number) => {
+        const r = rig({ script: [fakeText('x')], phaseTimeoutMs });
+        const agent = new ExpungeExecutionAgent(
+          {
+            ...r.deps,
+            models: new FixedModelResolver({ spec: 'openai/gpt-5' }),
+            env: { OPENAI_API_KEY: 'test-key', OPENAI_BASE_URL: url },
+          },
+          { actor: ACTOR, lease: r.lease },
+        );
+        const events = await collect(agent.run(runInput()));
+        return { code: (events.at(-1) as unknown as { code: string }).code, stats: await agent.settled() };
+      };
+
+      it('a 429 whose retry-after exceeds the phase budget ends as ModelUnavailable, with the attempts and statuses recorded', async () => {
+        const provider = await stub((_count, response) => {
+          response.writeHead(429, { 'content-type': 'application/json', 'retry-after-ms': '3000' });
+          response.end('{"error":{"message":"x","type":"rate_limit_error"}}');
+        });
+        const { code, stats } = await runAgainst(provider.url, 400);
+        expect(code).toBe('ModelUnavailable');
+        expect(stats?.endedBy).toBe('phase_timeout');
+        expect(stats?.providerAttempts).toEqual({
+          attempts: 1,
+          retriedStatuses: [429],
+          backoffTimeout: true,
+        });
+        expect(provider.count()).toBe(1);
+      }, 20_000);
+
+      it('a plain slow 200 (the response never starts within the budget) is still PhaseTimeout, not infrastructure', async () => {
+        const provider = await stub(() => undefined); // accepts the request and never answers
+        const { code, stats } = await runAgainst(provider.url, 300);
+        expect(code).toBe('PhaseTimeout');
+        expect(stats?.providerAttempts).toEqual({ attempts: 1, retriedStatuses: [], backoffTimeout: false });
+      }, 20_000);
+
+      it('a 429 retried and then answered is recorded as attempts with no backoff timeout', async () => {
+        const provider = await stub((count, response) => {
+          if (count === 1) {
+            response.writeHead(429, { 'content-type': 'application/json', 'retry-after-ms': '1' });
+            response.end('{"error":{"message":"x","type":"rate_limit_error"}}');
+          } else {
+            response.writeHead(400, { 'content-type': 'application/json' });
+            response.end('{"error":{"message":"x","type":"invalid_request_error"}}');
+          }
+        });
+        const { code, stats } = await runAgainst(provider.url, 5_000);
+        expect(code).toBe('ModelRunFailed'); // the second attempt reached the provider and was rejected as a bad request
+        expect(stats?.providerAttempts).toMatchObject({
+          attempts: 2,
+          retriedStatuses: [429],
+          backoffTimeout: false,
+        });
+      }, 20_000);
     });
 
     it('reports a missing provider credential as ModelUnavailable without a network call', async () => {
