@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { contentHash } from '@expunge/contracts';
 import {
   ACCEPTANCE_LIMITS,
+  appliesToTool,
   BINDING_IDS,
   FACT_CATALOG,
   FACT_IDS,
@@ -118,12 +119,13 @@ describe('baseline harness bundles', () => {
     const expert = buildExpertStaticBundle(testHashes);
     const rule = expert.guardrails.find((candidate) => candidate.ruleId === 'deny_apply_without_valid_plan')!;
     expect(rule.appliesTo).toEqual(['apply_cleanup_batch']);
-    const applies = (toolId: string): boolean => !rule.appliesTo?.length || rule.appliesTo.includes(toolId);
     for (const toolId of WORKER_TOOL_IDS)
-      expect(applies(toolId), toolId).toBe(toolId === 'apply_cleanup_batch');
+      expect(appliesToTool(rule, toolId), toolId).toBe(toolId === 'apply_cleanup_batch');
     // The predicate names a receipt binding that exists in the disclosed vocabulary.
     expect(JSON.stringify(rule.predicate)).toContain('preview_plan');
     expect(BINDING_IDS).toContain('preview_plan');
+    expect(appliesToTool({}, 'inspect_scope')).toBe(true);
+    expect(appliesToTool({ appliesTo: [] }, 'inspect_scope')).toBe(true);
   });
 
   it('discloses the fact and binding vocabulary the compiler admits (DA-2 B4)', () => {

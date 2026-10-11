@@ -172,3 +172,12 @@ export const PATCH_PATHS = {
   tool_policy: ['toolPolicy.grants', 'toolPolicy.prerequisites', 'limits.<limitKey>'],
   plugin: ['pluginArtifacts'],
 } as const;
+
+/**
+ * Whether a guardrail rule governs a call to `toolId`: a rule with no `appliesTo`, or an empty one, governs every
+ * tool call; otherwise only the listed tools. The compiler's TypeScript evaluator and its MongoDB expressions
+ * use exactly this rule.
+ */
+export function appliesToTool(rule: { appliesTo?: readonly string[] }, toolId: string): boolean {
+  return !rule.appliesTo || rule.appliesTo.length === 0 || rule.appliesTo.includes(toolId);
+}
