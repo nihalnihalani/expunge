@@ -9,6 +9,7 @@ import {
   WORLD_VALIDATORS,
   assertSupportedMongoSchema,
 } from './validators.js';
+import { GATE_CONTROL_COLLECTIONS, GATE_CONTROL_INDEXES } from './validators-extra.js';
 
 export const WORLD_COLLECTIONS = [
   'customers',
@@ -65,8 +66,7 @@ export const CONTROL_COLLECTIONS = [
   'preview_plans',
   'verification_sweeps',
   'diagnostics',
-  'campaign_freezes',
-  'gate_claims',
+  ...GATE_CONTROL_COLLECTIONS,
 ] as const;
 export const PRIVATE_COLLECTIONS = [
   'fixture_specs',
@@ -161,6 +161,7 @@ export const CONTROL_INDEXES: IndexEntry[] = [
   { collection: 'external_deletions', key: { ...identity, requestKey: 1 }, options: { unique: true } },
   { collection: 'external_deletions', key: { providerStatus: 1, dueBy: 1 } },
   { collection: 'deployment_outbox', key: { dedupeKey: 1 }, options: { unique: true } },
+  ...GATE_CONTROL_INDEXES,
 ];
 export const WORLD_INDEXES: IndexEntry[] = [
   ...WORLD_COLLECTIONS.filter((n) =>

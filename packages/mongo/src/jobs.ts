@@ -3,7 +3,6 @@ import type { ClientSession, Collection, Document, Filter } from 'mongodb';
 import {
   assertJobAccess,
   deploymentIdentity,
-  projectionHash,
   type ActorContext,
   type Deployment,
   type Job,
@@ -14,7 +13,7 @@ import {
   type ScopeKey,
 } from '@expunge/contracts';
 import { fail, requirePrincipal, scopeFilter, type MongoService, type Principal } from './client.js';
-import { ArtifactRepository } from './artifacts.js';
+import { assertCampaignHarness, assertCampaignScope, openCampaignClaim } from './campaign.js';
 import { ProvenanceRepository } from './provenance.js';
 import { WorldRepository } from './worlds.js';
 import { worldKeyOf, type WorldKey } from './worldkey.js';
@@ -139,24 +138,12 @@ export class JobRepository {
   ): Promise<Job> {
     requirePrincipal(this.service, ['grader']);
     const { campaignId, ...rest } = input;
-    const control = this.service.control;
     const worlds = new WorldRepository(this.service);
+    // An evaluation scope with no production deployment, a world built for this campaign, its freeze, its open claim.
+    await assertCampaignScope(this.service, actor);
     if ((await worlds.campaignOf(actor, rest.binding.worldId)) !== campaignId) fail('NotCampaignWorld');
-    if (!(await control.collection('campaign_freezes').findOne({ _id: campaignId as never })))
-      fail('NotCampaignWorld');
-    const claim = await control
-      .collection<{ parentHash: string; childProjectionHash: string }>('gate_claims')
-      .findOne({ campaignId, state: 'open' });
-    if (!claim) fail('HarnessNotInCampaign');
-    const hash = rest.binding.harnessHash;
-    if (hash !== claim.parentHash) {
-      const artifact = await new ArtifactRepository(this.service).read(hash).catch(() => null);
-      const isChild =
-        artifact !== null &&
-        artifact.payload.parentHash === claim.parentHash &&
-        projectionHash(artifact.payload) === claim.childProjectionHash;
-      if (!isChild) fail('HarnessNotInCampaign');
-    }
+    const claim = await openCampaignClaim(this.service, campaignId);
+    await assertCampaignHarness(this.service, claim, rest.binding.harnessHash);
     return this.insertJob(actor, rest);
   }
   private async insertJob(actor: ActorContext, input: Parameters<JobRepository['create']>[1]): Promise<Job> {

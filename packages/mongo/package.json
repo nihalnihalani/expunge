@@ -6,6 +6,7 @@
   "exports": "./src/index.ts",
   "dependencies": {
     "@expunge/contracts": "0.1.0",
+    "@expunge/harness-compiler": "0.1.0",
     "mongodb": "7.7.0"
   }
 }

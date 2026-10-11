@@ -12,7 +12,16 @@ import {
 } from '../src/index.js';
 import { projectionHash } from '@expunge/contracts';
 import { validBundle } from '../../contracts/test/valid-bundle.js';
-import { HASH, actor, deployWorker, describeLive, openEnvironment, type LiveEnvironment } from './support.js';
+import {
+  HASH,
+  actor,
+  claimRow,
+  deployWorker,
+  describeLive,
+  freezeRow,
+  openEnvironment,
+  type LiveEnvironment,
+} from './support.js';
 
 const scope = { tenantId: actor.tenantId, env: actor.env, scopeId: actor.scopeId };
 const KINDS = Object.keys(JOB_CREATOR_PRINCIPALS) as JobKind[];
@@ -186,7 +195,7 @@ describeLive(
         async function campaign(
           options: { claimState?: string; freeze?: boolean; worldCampaign?: string | null } = {},
         ) {
-          const parent = await deployWorker(env.service);
+          const parent = (await new ArtifactRepository(env.service).insert(validBundle()))._id;
           const childBundle = {
             ...validBundle(),
             parentHash: parent,
@@ -198,14 +207,15 @@ describeLive(
             ...(options.worldCampaign === null ? {} : { campaignId: options.worldCampaign ?? CAMPAIGN }),
           });
           if (options.freeze !== false)
-            await env.service.control.collection('campaign_freezes').insertOne({ _id: CAMPAIGN as never });
-          await env.service.control.collection('gate_claims').insertOne({
-            _id: 'claim-1' as never,
-            parentHash: parent,
-            childProjectionHash: projectionHash(childBundle),
-            campaignId: CAMPAIGN,
-            state: options.claimState ?? 'open',
-          });
+            await env.service.control.collection('campaign_freezes').insertOne(freezeRow(CAMPAIGN) as never);
+          await env.service.control.collection('gate_claims').insertOne(
+            claimRow({
+              campaignId: CAMPAIGN,
+              parentHash: parent,
+              childProjectionHash: projectionHash(childBundle),
+              state: (options.claimState ?? 'open') as 'open',
+            }) as never,
+          );
           return { parent, child, worldId };
         }
         const create = async (principal: Principal, worldId: string, harnessHash: string) =>
@@ -291,6 +301,33 @@ describeLive(
           await env.reset();
           const other = await campaign({ worldCampaign: 'some-other-campaign' });
           await expect(create('grader', other.worldId, other.parent)).rejects.toThrow('NotCampaignWorld');
+          expect(await env.service.control.collection('jobs').countDocuments()).toBe(0);
+        });
+
+        it('refuses a scope that has a production deployment, and any scope that is not an evaluation scope', async () => {
+          const { parent, worldId } = await campaign();
+          await deployWorker(env.service, {
+            ...validBundle(),
+            contextPolicy: { ...validBundle().contextPolicy, referenceDepth: 2 },
+          });
+          await expect(create('grader', worldId, parent)).rejects.toThrow('NotCampaignWorld');
+          await env.service.control.collection('deployments').deleteMany({});
+          await expect(
+            new JobRepository(await as('grader')).createCampaignJob(
+              { ...actor, env: 'demo' },
+              {
+                kind: 'cleanup',
+                campaignId: CAMPAIGN,
+                binding: {
+                  runId: 'r',
+                  worldId,
+                  harnessHash: parent,
+                  scopeRevision: 1,
+                  workerProfileHash: HASH,
+                },
+              },
+            ),
+          ).rejects.toThrow('NotCampaignWorld');
           expect(await env.service.control.collection('jobs').countDocuments()).toBe(0);
         });
 

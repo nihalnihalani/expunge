@@ -379,6 +379,7 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
         toHash,
         'rollback',
         deployments.authority.validator(actor),
+        { expectedScopeRevision: 1 },
       );
 
     it('refuses an artifact that was never gated or promoted, even if it has a permitted row', async () => {
@@ -396,7 +397,22 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
 
     it('rolls back to the previously active hash as a new audited transition', async () => {
       const p = await promoted();
-      const receipt = await rollbackTo(p.child, 1, p.parent);
+      // A changed context policy is a behavioral change, which the stored policy says needs a grant (D8-17).
+      const grant = await approvals.issueRollback(actor, {
+        target: 'worker',
+        toHash: p.parent,
+        expiresAt: new Date(Date.now() + 100_000),
+      });
+      const receipt = await deployments.rollback(
+        actor,
+        workerKey,
+        p.child,
+        1,
+        p.parent,
+        'rollback',
+        deployments.authority.validator(actor),
+        { expectedScopeRevision: 1, grant: { grantId: grant.grantId } },
+      );
       expect(receipt).toMatchObject({ fromHash: p.child, toHash: p.parent, toRevision: 2 });
       expect(await promotions()).toBe(2);
       expect((await pointer())?.activeHash).toBe(p.parent);
@@ -414,6 +430,187 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
       const p = await promoted();
       await expect(rollbackTo(p.child, 0, p.parent)).rejects.toThrow('StaleParent');
       expect((await pointer())?.activeHash).toBe(p.child);
+    });
+  });
+  describe('D8-17: rollback is one transaction on the scope state the caller read, with a grant when it widens authority', () => {
+    const granted = ['inspect_schema'];
+    const wider = [...granted, 'apply_cleanup_batch'];
+    const bundleWith = (grants: string[], parentHash: string | null = null) => ({
+      ...validBundle(),
+      parentHash,
+      toolPolicy: { grants, prerequisites: [] },
+    });
+    /** `active` is deployed now; `target` was deployed before (a receipt names it), so it is a legal rollback target. */
+    async function twoDeployed(activeGrants: string[], targetGrants: string[]) {
+      const target = (await artifacts.insert(bundleWith(targetGrants)))._id;
+      const active = (await artifacts.insert(bundleWith(activeGrants, target)))._id;
+      await deployments.initialize(actor, 'worker', active, 1);
+      await env.service.control.collection('promotions').insertOne({
+        _id: 'seed-promotion' as never,
+        ...workerKey,
+        promotionId: 'seed-promotion',
+        fromHash: target,
+        toHash: active,
+        fromRevision: 0,
+        toRevision: 0,
+        gateReportId: 'seed',
+        gateReportDigest: HASH,
+        runtimeHash: HASH,
+        evaluatorHash: HASH,
+        reason: 'seed',
+        createdAt: new Date(),
+      });
+      return { active, target };
+    }
+    const roll = (
+      from: string,
+      to: string,
+      options: Parameters<typeof deployments.rollback>[7] = { expectedScopeRevision: 1 },
+      revision = 0,
+    ) =>
+      deployments.rollback(
+        actor,
+        workerKey,
+        from,
+        revision,
+        to,
+        'rollback',
+        deployments.authority.validator(actor),
+        options,
+      );
+    const refusals = () =>
+      env.service.control.collection('rollback_refusals').find({}).sort({ at: 1 }).toArray();
+    const issue = (toHash: string, expiresAt = new Date(Date.now() + 100_000)) =>
+      approvals.issueRollback(actor, { target: 'worker', toHash, expiresAt });
+
+    it('a rollback that narrows authority needs no grant and consumes none', async () => {
+      const { active, target } = await twoDeployed(wider, granted);
+      const receipt = await roll(active, target);
+      expect(receipt).toMatchObject({ fromHash: active, toHash: target, toRevision: 1 });
+      expect(receipt.consumedGrantId).toBeUndefined();
+      expect(await consumptions()).toBe(0);
+      expect((await pointer())?.activeHash).toBe(target);
+    });
+
+    it('a rollback that widens authority is refused without a grant, and the refusal is recorded', async () => {
+      const { active, target } = await twoDeployed(granted, wider);
+      await expect(roll(active, target)).rejects.toThrow('RollbackNeedsGrant');
+      expect((await pointer())?.activeHash).toBe(active);
+      expect((await refusals()).map((row) => [row.code, row.toHash])).toEqual([
+        ['RollbackNeedsGrant', target],
+      ]);
+    });
+
+    it('a bound, unexpired grant lets it through once, derived server-side, and is consumed with the pointer move', async () => {
+      const { active, target } = await twoDeployed(granted, wider);
+      const grant = await issue(target);
+      // A wrong claim about the class is a refusal; the class comes from the stored bundles.
+      await expect(
+        roll(active, target, {
+          expectedScopeRevision: 1,
+          grant: { grantId: grant.grantId, reverseClass: 'tightening' },
+        }),
+      ).rejects.toThrow('ApprovalInvalidOrConsumed');
+      expect(await consumptions()).toBe(0);
+      const receipt = await roll(active, target, {
+        expectedScopeRevision: 1,
+        grant: { grantId: grant.grantId, reverseClass: 'authority_expansion' },
+      });
+      expect(receipt.consumedGrantId).toBe(grant.grantId);
+      expect(await consumptions()).toBe(1);
+      expect((await pointer())?.activeHash).toBe(target);
+    });
+
+    it('an expired, reused or mismatched grant moves nothing and consumes nothing', async () => {
+      const { active, target } = await twoDeployed(granted, wider);
+      const expired = await issue(target, new Date(Date.now() - 1000));
+      await expect(
+        roll(active, target, { expectedScopeRevision: 1, grant: { grantId: expired.grantId } }),
+      ).rejects.toThrow('ApprovalInvalidOrConsumed');
+      const reused = await issue(target);
+      await env.service.control.collection('grant_consumptions').insertOne({
+        _id: reused.grantId as never,
+        ...workerKey,
+        grantId: reused.grantId,
+        promotionId: 'earlier',
+        candidateId: reused.proposalId,
+        consumedAt: new Date(),
+      });
+      await expect(
+        roll(active, target, { expectedScopeRevision: 1, grant: { grantId: reused.grantId } }),
+      ).rejects.toThrow('ApprovalInvalidOrConsumed');
+      // A grant issued for another transition (to a third bundle) is not this transition's grant.
+      const other = (await artifacts.insert(bundleWith([...wider, 'verify_registered_scope'])))._id;
+      const foreign = await issue(other);
+      await expect(
+        roll(active, target, { expectedScopeRevision: 1, grant: { grantId: foreign.grantId } }),
+      ).rejects.toThrow('ApprovalInvalidOrConsumed');
+      expect(await consumptions()).toBe(1);
+      expect((await pointer())?.activeHash).toBe(active);
+      expect((await refusals()).map((row) => row.code)).toEqual(Array(3).fill('ApprovalInvalidOrConsumed'));
+    });
+
+    it('a stale or missing scope revision is refused and recorded', async () => {
+      const { active, target } = await twoDeployed(wider, granted);
+      await expect(roll(active, target, { expectedScopeRevision: 2 })).rejects.toThrow('StaleScopeRevision');
+      await expect(
+        deployments.rollback(
+          actor,
+          workerKey,
+          active,
+          0,
+          target,
+          'rollback',
+          deployments.authority.validator(actor),
+        ),
+      ).rejects.toThrow('StaleScopeRevision');
+      expect((await pointer())?.activeHash).toBe(active);
+      expect((await refusals()).map((row) => row.code)).toEqual(['StaleScopeRevision', 'StaleScopeRevision']);
+    });
+
+    it('records a refused rollback onto the active hash and a stale parent', async () => {
+      const { active, target } = await twoDeployed(wider, granted);
+      await expect(roll(active, active)).rejects.toThrow('RollbackTargetIsActive');
+      await expect(roll(active, target, { expectedScopeRevision: 1 }, 5)).rejects.toThrow('StaleParent');
+      expect((await refusals()).map((row) => row.code)).toEqual(['RollbackTargetIsActive', 'StaleParent']);
+    });
+
+    it('the pointer moves under a rollback only if the scope revision is still the one it read', async () => {
+      const { active, target } = await twoDeployed(wider, granted);
+      await env.service.control
+        .collection('deployments')
+        .updateOne({ ...workerKey }, { $set: { scopeRevision: 2 } });
+      await expect(roll(active, target)).rejects.toThrow('StaleScopeRevision');
+      expect((await pointer())?.activeHash).toBe(active);
+    });
+
+    it('a concurrent promotion and rollback on one pointer: exactly one wins', async () => {
+      const p = await prepare(1, 'tightening');
+      await deployments.promote(promotionOf(p));
+      const second = await prepare(2, 'tightening', { parent: p.child });
+      const grant = await approvals.issueRollback(actor, {
+        target: 'worker',
+        toHash: p.parent,
+        expiresAt: new Date(Date.now() + 100_000),
+      });
+      const outcomes = await Promise.allSettled([
+        roll(p.child, p.parent, { expectedScopeRevision: 1, grant: { grantId: grant.grantId } }, 1),
+        deployments.promote(promotionOf(second, { parentRevision: 1 })),
+      ]);
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      expect((await pointer())?.revision).toBe(2);
+    });
+
+    it('two rollbacks spending one grant: exactly one wins and the grant is consumed once', async () => {
+      const { active, target } = await twoDeployed(granted, wider);
+      const grant = await issue(target);
+      const options = { expectedScopeRevision: 1, grant: { grantId: grant.grantId } };
+      const outcomes = await Promise.allSettled([
+        roll(active, target, options),
+        roll(active, target, options),
+      ]);
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      expect(await consumptions()).toBe(1);
     });
   });
   describe('K8: a grant says only what the stored gate report says', () => {
@@ -532,6 +729,7 @@ describeLive('promotion and rollback: authority derived from trusted rows (real 
           p.parent,
           'rollback',
           deployments.authority.validator(actor),
+          { expectedScopeRevision: 1 },
         ),
       ).rejects.toThrow('AuthorityRevisionStale');
       expect((await pointer())?.activeHash).toBe(p.child);

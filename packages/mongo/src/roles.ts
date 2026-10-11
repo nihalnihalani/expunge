@@ -61,6 +61,14 @@ export function atlasRoleManifests(
         'authority_touches',
         'decisions',
         'wake_commands',
+        // The operator-facing service runs as this principal and serves committed projections: events, the per-job
+        // sequence counters and the deployment history (promotions) are read-only here.
+        'projection_events',
+        'projection_sequences',
+        'promotions',
+        // The campaign fault plan and campaign artifact permits are read only for a campaign world's run.
+        'world_faults',
+        'campaign_artifact_permits',
         ...DOMAIN_STEP_COLLECTIONS,
       ]),
       control('INSERT', [
@@ -144,8 +152,21 @@ export function atlasRoleManifests(
         'provenance_edges',
         'campaign_freezes',
         'gate_claims',
+        'gate_attempts',
+        'gate_held_runs',
+        'world_faults',
+        'campaign_artifact_permits',
+        // Read-only: the campaign port reads the fault-plan attestation row (kind 'fault') the gateway wrote.
+        'domain_steps',
       ]),
+      // gate_claims: INSERT, then UPDATE of `state` only through the gate's compare-and-set (a collection grant cannot
+      // narrow it). gate_attempts: the atomic per-parent counter (upsert = INSERT + UPDATE). campaign_artifact_permits:
+      // where a campaign's artifact is permitted for its own scope; the grader has NO write on artifact_eligibility.
       control('INSERT', [
+        'gate_claims',
+        'gate_attempts',
+        'gate_held_runs',
+        'campaign_artifact_permits',
         'public_trial_rows',
         'gate_reports',
         'projection_events',
@@ -153,7 +174,7 @@ export function atlasRoleManifests(
         'provenance_edges',
         'jobs',
       ]),
-      control('UPDATE', ['jobs', 'projection_sequences']),
+      control('UPDATE', ['jobs', 'projection_sequences', 'gate_claims', 'gate_attempts']),
     ]),
     approval_issuer: role('expunge_approval_issuer', [
       control('FIND', ['candidates', 'gate_reports', 'deployments', 'artifacts', 'authority_revisions']),
@@ -186,6 +207,8 @@ export function atlasRoleManifests(
         'promotions',
         'grant_consumptions',
         'deployment_outbox',
+        // Every refused rollback, insert-only.
+        'rollback_refusals',
         'projection_events',
         'projection_sequences',
         'provenance_edges',
@@ -201,6 +224,7 @@ export function atlasRoleManifests(
         'deployments',
         'promotions',
         'public_trial_rows',
+        'rollback_refusals',
         'stream_offsets',
       ]),
       control('CHANGE_STREAM', ['projection_events']),
@@ -257,10 +281,13 @@ export function atlasRoleManifests(
       ]),
       action('FIND', names.private, PRIVATE_COLLECTIONS),
       action('INSERT', names.private, PRIVATE_COLLECTIONS),
-      control('FIND', ['jobs', 'artifacts', 'artifact_eligibility']),
+      control('FIND', ['jobs', 'artifacts', 'artifact_eligibility', 'campaign_freezes']),
       control('INSERT', [
         'jobs',
         'artifacts',
+        // Written once before a campaign runs; the fault plan of a campaign world.
+        'campaign_freezes',
+        'world_faults',
         'projection_events',
         'projection_sequences',
         'provenance_edges',
