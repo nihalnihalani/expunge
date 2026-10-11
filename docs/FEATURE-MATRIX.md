@@ -2,7 +2,7 @@
 
 States: **NOT_STARTED** (no code), **IMPLEMENTED** (code exists, no independent verification), **LOCALLY_VERIFIED** (verifier ran deterministic or local-service checks on the current tree), **LIVE_VERIFIED** (verifier ran it against the invited Atlas sandbox, the real model provider or Raindrop and recorded run IDs), **BLOCKED** (cannot progress without an external input named in the row). A row moves state only when the verifier records the evidence in `VERIFICATION.md`; owners cannot self-promote a row.
 
-Updated 2026-10-11 12:12Z (real UTC; earlier lead timestamps ran about 95 minutes ahead) by team-lead. Git HEAD: d9b42b2 (38 commits), pushed to origin/main; PKT-17 operator S2, PKT-21 C1c and PKT-22 DA-5 in verification or the steward's queue; HEAD proof 3 on d9b42b2: 638 passed / 0 failed / 278 skipped.
+Updated 2026-10-11 12:24Z (real UTC) by team-lead at the usage-limit switch. Git HEAD: abafe0b (46 commits), pushed to origin/main; in-flight packets and lane WIP are in checkpoint 20261011T122117Z-85f4b535. Rows marked IMPLEMENTED without a verifier citation are owner-reported.
 
 | # | Feature (spec section) | Owner | State | Evidence pointer | Blocker |
 |---|---|---|---|---|---|

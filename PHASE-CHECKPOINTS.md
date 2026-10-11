@@ -92,3 +92,10 @@ Append-only. Each entry: UTC time, checkpoint ID (from `.expunge/checkpoints/<ts
 ## Clock erratum (recorded 2026-10-11 12:12Z real UTC)
 
 - Clock erratum: lead-written times labelled UTC between 11:30 and 13:46 in these documents ran about 95 minutes ahead of real UTC (checked against `date -u` at 12:11Z); checkpoint ids and git commit dates carry the true times. Later entries use real UTC.
+
+## 2026-10-11 12:21Z real UTC: usage-limit switch (spec section 20)
+
+- Write barrier to all nine agents at 12:21Z. Pre-switch checkpoint 20261011T122117Z-85f4b535 (base abafe0b, complete). HEAD abafe0b = origin/main, 46 commits.
+- Landed since the last entry: 1201525 operator S2; be26a69 DA-5 + mg-live; 0971283 DA-7; 5ae24ef lead docs 2; ledger rows between.
+- In flight (frozen, uncommitted, in the pack): PKT-21 C1c, PKT-23/24/25 C3, PKT-26 continuity, PKT-16 domain gateway (DA-5 must-fix), C1b held, P1b, S3, D1, D3, DA-8 draft.
+- PKT-29 commits the state documents; a final checkpoint follows and becomes LATEST. Resume prompt in HANDOFF.md and PROJECT-STATE.md.

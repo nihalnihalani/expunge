@@ -19,3 +19,4 @@ infra/opendots/.env.candidates.local
 *.private.json
 *.private.jsonl
 *.private.ndjson
+HANDOFF.from-*.md
