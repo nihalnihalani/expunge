@@ -62,6 +62,22 @@ Administration API; driver `createRole` is used only by the local RBAC test.
   `JobRepository.create` requires an existing world under the actor's scope, at its scope revision, outside maintenance.
 - **Scope paths.** Registered paths live under `data.*` (plus the read-only record key `_id`). `*` compiles to a filtered
   positional update or element `$pull`, never to a whole-array write.
+- **Effects are bound to the versions the plan saw.** `commitEffect` requires `expectedDocumentVersions` to name exactly
+  the intent's targets (once each, non-negative integer versions; otherwise `VersionBindingMismatch`), re-reads every
+  target's `_rev` inside the transaction before `apply` runs (`StaleDocumentVersion`), and refuses an `apply` that returns
+  fewer effects than targets (`PartialEffect`). A refused batch writes nothing: no effect row, receipt or counter move.
+- **No world write outside an effect.** `ScopeRepository.writeField` takes the effect transaction's session and throws
+  `EffectTransactionRequired` without one; `applyEffect` is the single-update path the gateway uses.
+- **A world key comes from a stored row.** `JobRepository.worldKey(actor, jobId)` reads the job and mints the `WorldKey`;
+  `WorldRepository.bind` mints one from the stored world binding. `worldKeyOf` is package-internal and not exported from the
+  index, so no caller can brand a job-shaped object of its own.
+- **Receipt refusals have their own codes.** A wrong verdict is `IncompleteReceipt` (complete) or `ReceiptNotIncomplete`
+  (incomplete); a receipt that does not cover the registry is `ReceiptCoverageIncomplete`.
+- **Decision rows come back as stored.** Recording the same decision again returns the stored row (with its first inputs and
+  digest), never the caller's object. The ledger is insert-only by privilege; it is not hash-chained (see the G6 note in the
+  review) and makes no tamper-evidence claim.
+- **Approval-gated workflows cannot proceed yet.** The gateway resolves the `approval_grant` binding to "absent", so a
+  bundle prerequisite on it always denies (fails closed) until grants are wired to the decision path.
 - **Incomplete receipts.** `EffectRepository.complete` commits only a `complete_in_registered_scope` receipt with zero
   residuals and finishes the job `succeeded`. `completeIncomplete` commits an `incomplete` receipt (at least one residual)
   under the same job binding, registry coverage, authority fence and world checks, and finishes the job `failed` with that

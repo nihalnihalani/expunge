@@ -350,9 +350,12 @@ export class ScopeRepository {
     address: DomainAddress,
     fieldId: string,
     input: WritePlanInput,
-    session?: ClientSession,
+    session: ClientSession,
   ): Promise<FieldWriteResult> {
     requirePrincipal(this.service, ['domain_executor', 'setup']);
+    // A world write exists only inside an effect transaction: the session is the transaction that carries the lease
+    // fence, the decision check and the world revision advance. Without one this method has nothing to write under.
+    if (!session) fail('EffectTransactionRequired');
     const field = this.boundField(world, registry, fieldId);
     if (address.collectionId !== field.collectionId) fail('AddressFieldMismatch');
     const plan = compileWritePlan(field, input);

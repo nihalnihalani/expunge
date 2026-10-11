@@ -173,7 +173,7 @@ describeLive('hardening regressions (real replica set)', () => {
             inspectedCollectionIds: [],
           }),
         ),
-      ).rejects.toThrow('IncompleteReceipt');
+      ).rejects.toThrow('ReceiptCoverageIncomplete');
       expect((await jobDoc(id)).status).toBe('running');
     });
 
@@ -257,7 +257,7 @@ describeLive('hardening regressions (real replica set)', () => {
       ];
       for (const [label, overrides] of bad) {
         const { id, run } = await attempt(overrides);
-        await expect(run(), label).rejects.toThrow('IncompleteReceipt');
+        await expect(run(), label).rejects.toThrow('ReceiptCoverageIncomplete');
         expect((await jobDoc(id)).status, label).toBe('running');
       }
       expect(await env.service.control.collection('completion_receipts').countDocuments()).toBe(0);
@@ -277,7 +277,7 @@ describeLive('hardening regressions (real replica set)', () => {
           { $set: { 'discoveryCompleteness.kind': 'partial', 'discoveryCompleteness.limitations': [] } },
         );
       const { run } = await attempt({ ...covering, limitations: [] });
-      await expect(run()).rejects.toThrow('IncompleteReceipt');
+      await expect(run()).rejects.toThrow('ReceiptCoverageIncomplete');
     });
 
     it('fails closed when the bound registry revision does not exist', async () => {
@@ -418,9 +418,163 @@ describeLive('hardening regressions (real replica set)', () => {
     });
   });
 
+  describe('DA-5a G3: expected versions are enforced and a partial batch never commits', () => {
+    const A = string('customers', 'A');
+    const B = string('customers', 'B');
+    const removed = (address: DomainAddress) => ({
+      address,
+      kind: 'delete' as const,
+      preHash: HASH,
+      postHash: null,
+      preVersion: 1,
+      postVersion: null,
+    });
+    async function prepare(options: { targets: DomainAddress[]; versions?: number[] }) {
+      const id = await createJob(env.service);
+      const lease = await claim(id);
+      await seedWorld(`world-${id}`, [{ _id: 'A' }, { _id: 'B' }]);
+      const action = intent(id, {
+        targets: options.targets,
+        ...(options.versions ? { versions: options.versions } : {}),
+      });
+      await recordDecisionFor(env.service, action);
+      return { id, lease, action };
+    }
+    const committed = () => env.service.control.collection('effects').countDocuments();
+
+    it('G3: refuses a target that moved past its expected version before apply runs', async () => {
+      const { lease, action } = await prepare({ targets: [A, B] });
+      await customers().updateOne({ _id: 'B' as never }, { $inc: { _rev: 1 } });
+      let ran = false;
+      await expect(
+        effects.commitEffect({
+          actor,
+          lease,
+          intent: action,
+          apply: async () => {
+            ran = true;
+            return [removed(A), removed(B)];
+          },
+        }),
+      ).rejects.toThrow('StaleDocumentVersion');
+      expect(ran).toBe(false);
+      expect(await committed()).toBe(0);
+    });
+
+    it('G3: refuses a target that no longer exists as stale, not as a silent no-op', async () => {
+      const { lease, action } = await prepare({ targets: [A] });
+      await customers().deleteOne({ _id: 'A' as never });
+      await expect(
+        effects.commitEffect({ actor, lease, intent: action, apply: async () => [removed(A)] }),
+      ).rejects.toThrow('StaleDocumentVersion');
+    });
+
+    it('G3: refuses an apply that returns fewer effects than targets and commits nothing', async () => {
+      const { id, lease, action } = await prepare({ targets: [A, B] });
+      await expect(
+        effects.commitEffect({
+          actor,
+          lease,
+          intent: action,
+          apply: async (session) => {
+            await txCustomers().deleteOne({ _id: 'A' as never }, { session });
+            return [removed(A)];
+          },
+        }),
+      ).rejects.toThrow('PartialEffect');
+      // The transaction aborted as a whole: A is still there, and no effect, receipt or counter move was kept.
+      expect(await customers().countDocuments({ _id: { $in: ['A', 'B'] } as never })).toBe(2);
+      expect(await committed()).toBe(0);
+      expect(await env.service.control.collection('action_receipts').countDocuments()).toBe(0);
+      expect(
+        await env.service.world.collection('world_revisions').findOne({ _id: `world-${id}` as never }),
+      ).toHaveProperty('revision', 0);
+    });
+
+    it('G3: refuses versions that do not cover exactly the targets (missing, extra, repeated or invalid)', async () => {
+      const { lease, action } = await prepare({ targets: [A, B] });
+      const bad: Array<[string, ActionIntent]> = [
+        [
+          'missing a version',
+          { ...action, expectedDocumentVersions: action.expectedDocumentVersions.slice(0, 1) },
+        ],
+        [
+          'a version for a record that is not a target',
+          {
+            ...action,
+            expectedDocumentVersions: [
+              ...action.expectedDocumentVersions.slice(0, 1),
+              { address: string('customers', 'Z'), version: 1 },
+            ],
+          },
+        ],
+        [
+          'a repeated version',
+          {
+            ...action,
+            expectedDocumentVersions: [
+              action.expectedDocumentVersions[0]!,
+              action.expectedDocumentVersions[0]!,
+            ],
+          },
+        ],
+        [
+          'a negative version',
+          {
+            ...action,
+            expectedDocumentVersions: action.expectedDocumentVersions.map((entry) => ({
+              ...entry,
+              version: -1,
+            })),
+          },
+        ],
+        ['no versions at all', { ...action, expectedDocumentVersions: [] }],
+      ];
+      for (const [label, tampered] of bad)
+        await expect(
+          effects.commitEffect({ actor, lease, intent: tampered, apply: async () => [] }),
+          label,
+        ).rejects.toThrow('VersionBindingMismatch');
+      expect(await committed()).toBe(0);
+    });
+  });
+
+  describe('DA-5a G5: a world write exists only inside an effect transaction', () => {
+    it('G5: writeField without a session throws EffectTransactionRequired and writes nothing', async () => {
+      const worldId = 'world-g5';
+      await customers().insertOne({
+        _id: 'g5' as never,
+        ...scope,
+        worldId,
+        _rev: 1,
+        data: { handle: 'h' },
+      } as never);
+      const unsessioned = scopes.writeField as unknown as (...args: unknown[]) => Promise<unknown>;
+      await expect(
+        unsessioned.call(
+          scopes,
+          await ensureWorld(worldId),
+          registryOf({ fields: [field('customers.handle', ['data', 'handle'])] }),
+          string('customers', 'g5'),
+          'customers.handle',
+          { match: 'h', mutation: { kind: 'replace', replacement: '[redacted]' } },
+        ),
+      ).rejects.toThrow('EffectTransactionRequired');
+      expect((await customers().findOne({ _id: 'g5' as never }))?.data.handle).toBe('h');
+    });
+  });
+
   describe('L7: the logical effect identity is derived, not supplied', () => {
     const C = string('customers', 'C');
     const D = string('customers', 'D');
+    const touched = (address: DomainAddress) => ({
+      address,
+      kind: 'delete' as const,
+      preHash: HASH,
+      postHash: null,
+      preVersion: 1,
+      postVersion: null,
+    });
     it('rejects an effect key or argument digest the caller made up', async () => {
       const id = await createJob(env.service);
       const lease = await claim(id);
@@ -455,7 +609,7 @@ describeLive('hardening regressions (real replica set)', () => {
       ) => {
         applied += 1;
         await txCustomers().updateOne({ _id: 'C' as never }, { $inc: { applied: 1 } }, { session });
-        return [];
+        return [touched(C)];
       };
       const firstIntent = intent(id, { targets: [C], toolCallId: 'call-1' });
       const retryIntent = intent(id, { targets: [C], toolCallId: 'call-2', worldRevision: 1 });
@@ -471,13 +625,14 @@ describeLive('hardening regressions (real replica set)', () => {
     it('treats a different batch ordinal as a different effect and a different target set as a conflict', async () => {
       const id = await createJob(env.service);
       const lease = await claim(id);
+      await seedWorld(`world-${id}`, [{ _id: 'C' }]);
       const first = intent(id, { targets: [C], batchOrdinal: 0 });
       const second = intent(id, { targets: [C], batchOrdinal: 1, worldRevision: 1 });
       expect(deriveEffectKey(first)).not.toBe(deriveEffectKey(second));
       await recordDecisionFor(env.service, first);
       await recordDecisionFor(env.service, second);
-      await effects.commitEffect({ actor, lease, intent: first, apply: async () => [] });
-      await effects.commitEffect({ actor, lease, intent: second, apply: async () => [] });
+      await effects.commitEffect({ actor, lease, intent: first, apply: async () => [touched(C)] });
+      await effects.commitEffect({ actor, lease, intent: second, apply: async () => [touched(C)] });
       const conflicting = intent(id, { targets: [D], batchOrdinal: 0, worldRevision: 2 });
       expect(deriveEffectKey(conflicting)).toBe(deriveEffectKey(first));
       expect(deriveArgsDigest(conflicting)).not.toBe(deriveArgsDigest(first));
@@ -504,15 +659,18 @@ describeLive('hardening regressions (real replica set)', () => {
       await customers().insertOne({ _id: id, ...scope, worldId, _rev: 1, data: { handle: 'h' } } as never);
       const found = await scopes.findByField(await ensureWorld(worldId), registry(), 'customers.handle', 'h');
       expect(found).toEqual([{ collectionId: 'customers', recordId: expected, recordIdBsonType: type }]);
-      const result = await scopes.writeField(
-        await ensureWorld(worldId),
-        registry(),
-        found[0]!,
-        'customers.handle',
-        {
-          match: 'h',
-          mutation: { kind: 'replace', replacement: '[redacted]' },
-        },
+      const result = await scopes.service.transaction(async (session) =>
+        scopes.writeField(
+          await ensureWorld(worldId),
+          registry(),
+          found[0]!,
+          'customers.handle',
+          {
+            match: 'h',
+            mutation: { kind: 'replace', replacement: '[redacted]' },
+          },
+          session,
+        ),
       );
       expect(result).toEqual({ matched: 1, modified: 1 });
       expect((await customers().findOne({ _id: id } as never))?.data.handle).toBe('[redacted]');
@@ -527,15 +685,18 @@ describeLive('hardening regressions (real replica set)', () => {
     const worldId = 'world-arrays';
     const record = string('customers', 'arr');
     const write = async (target: FieldDescriptor, match: string, kind: 'replace' | 'remove' = 'replace') =>
-      scopes.writeField(
-        await ensureWorld(worldId),
-        registryOf({ fields: [target] }),
-        record,
-        target.fieldId,
-        {
-          match,
-          mutation: kind === 'replace' ? { kind, replacement: '[redacted]' } : { kind },
-        },
+      scopes.service.transaction(async (session) =>
+        scopes.writeField(
+          await ensureWorld(worldId),
+          registryOf({ fields: [target] }),
+          record,
+          target.fieldId,
+          {
+            match,
+            mutation: kind === 'replace' ? { kind, replacement: '[redacted]' } : { kind },
+          },
+          session,
+        ),
       );
 
     it('rejects a field whose isArray flag disagrees with its wildcard', async () => {
@@ -625,15 +786,18 @@ describeLive('hardening regressions (real replica set)', () => {
         }),
       ).toThrow('UnsafeFieldPath');
       await expect(
-        scopes.writeField(
-          await ensureWorld(worldId),
-          registryOf({ fields: [hostile] }),
-          string('customers', 'ten'),
-          'customers.owner',
-          {
-            match: actor.tenantId,
-            mutation: { kind: 'replace', replacement: 'tenant-victim' },
-          },
+        scopes.service.transaction(async (session) =>
+          scopes.writeField(
+            await ensureWorld(worldId),
+            registryOf({ fields: [hostile] }),
+            string('customers', 'ten'),
+            'customers.owner',
+            {
+              match: actor.tenantId,
+              mutation: { kind: 'replace', replacement: 'tenant-victim' },
+            },
+            session,
+          ),
         ),
       ).rejects.toThrow('UnsafeFieldPath');
       expect(await customers().findOne({ _id: 'ten' as never })).toHaveProperty('tenantId', actor.tenantId);
@@ -652,15 +816,18 @@ describeLive('hardening regressions (real replica set)', () => {
       );
       expect(found).toEqual([string('customers', 'k1')]);
       await expect(
-        scopes.writeField(
-          await ensureWorld(worldId),
-          registryOf({ fields: [key] }),
-          found[0]!,
-          'customers.record_id',
-          {
-            match: 'k1',
-            mutation: { kind: 'replace', replacement: 'k2' },
-          },
+        scopes.service.transaction(async (session) =>
+          scopes.writeField(
+            await ensureWorld(worldId),
+            registryOf({ fields: [key] }),
+            found[0]!,
+            'customers.record_id',
+            {
+              match: 'k1',
+              mutation: { kind: 'replace', replacement: 'k2' },
+            },
+            session,
+          ),
         ),
       ).rejects.toThrow('UnsafeFieldPath');
     });
@@ -729,7 +896,9 @@ describeLive('hardening regressions (real replica set)', () => {
         });
       expect(await keys().countDocuments()).toBe(1);
     });
-    it('is reachable through the fixture builder and grader only', async () => {
+    // Wiring only: this lane has no authentication, so it shows the private database is handed to the fixture builder and
+    // grader clients and withheld from the executor client. The privilege matrix itself is proved in rbac.integration.test.ts.
+    it('wiring: the private database is handed to the fixture builder and grader clients and not to the executor', async () => {
       const builder = await env.as('fixture_builder');
       await builder
         .privateDb!.collection<Document>('campaign_keys')

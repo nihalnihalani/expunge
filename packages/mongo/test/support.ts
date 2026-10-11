@@ -214,6 +214,8 @@ export function intent(
     effectKind?: EffectKind;
     toolCallId?: string;
     worldRevision?: number;
+    /** Version each target is expected at, in target order; defaults to 1, the `_rev` fixtures start at. */
+    versions?: number[];
   } = {},
 ): ActionIntent {
   const base = {
@@ -232,7 +234,10 @@ export function intent(
     intentId: `intent-${options.toolCallId ?? 'call-1'}-${base.stepId}-${base.batchOrdinal}-${jobId}`,
     ...base,
     targetHash: deriveTargetHash(base.targetAddresses),
-    expectedDocumentVersions: [],
+    expectedDocumentVersions: base.targetAddresses.map((address, index) => ({
+      address,
+      version: options.versions?.[index] ?? 1,
+    })),
     worldRevision: options.worldRevision ?? 0,
     policyDecision,
     effectKey: deriveEffectKey(base),

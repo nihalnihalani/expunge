@@ -8,7 +8,6 @@ import {
   WorldRepository,
   bsonPreimageHash,
   isWorldKey,
-  worldKeyOf,
   typedAddress,
   type MongoService,
 } from '../src/index.js';
@@ -146,10 +145,19 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
             const doc = model.get(recordKey)!;
             const siblings = valuesAtPath(doc, field.path).filter((hit) => hit.value !== token);
             if (field.path.includes('*') && siblings.length > 0) mixed += 1;
-            const result = await scopes.writeField(key, world.scope, address, field.fieldId, {
-              match: token,
-              mutation: { kind: 'replace', replacement: REDACTED },
-            });
+            const result = await scopes.service.transaction(async (session) =>
+              scopes.writeField(
+                key,
+                world.scope,
+                address,
+                field.fieldId,
+                {
+                  match: token,
+                  mutation: { kind: 'replace', replacement: REDACTED },
+                },
+                session,
+              ),
+            );
             expect(modelRedact(doc, field, token), recordKey).toBe(true);
             expect(result).toEqual({ matched: 1, modified: 1 });
             writes += 1;
@@ -183,10 +191,19 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
     const original = [...(primary.data.aliases as string[])];
     const removed = original[1]!;
     const address = typedAddress('customers', primary._id);
-    const result = await scopes.writeField(key, world.scope, address, aliases.fieldId, {
-      match: removed,
-      mutation: { kind: 'remove' },
-    });
+    const result = await scopes.service.transaction(async (session) =>
+      scopes.writeField(
+        key,
+        world.scope,
+        address,
+        aliases.fieldId,
+        {
+          match: removed,
+          mutation: { kind: 'remove' },
+        },
+        session,
+      ),
+    );
     expect(result).toEqual({ matched: 1, modified: 1 });
     const after = (await env.service.world
       .collection<Doc>('customers')
@@ -303,12 +320,15 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
         'InvalidWorldKey',
       );
     await expect(
-      scopes.writeField(
-        { ...key } as never,
-        world.scope,
-        { collectionId: 'messages', recordId: 'x', recordIdBsonType: 'string' },
-        field.fieldId,
-        { match: token, mutation: { kind: 'remove' } },
+      scopes.service.transaction(async (session) =>
+        scopes.writeField(
+          { ...key } as never,
+          world.scope,
+          { collectionId: 'messages', recordId: 'x', recordIdBsonType: 'string' },
+          field.fieldId,
+          { match: token, mutation: { kind: 'remove' } },
+          session,
+        ),
       ),
     ).rejects.toThrow('InvalidWorldKey');
   });
@@ -336,7 +356,8 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
         workerProfileHash: HASH,
       },
     });
-    const derived = worldKeyOf(created);
+    const jobs = new JobRepository(env.service);
+    const derived = await jobs.worldKey(worker, created._id);
     expect(derived).toMatchObject({
       worldId: world.worldId,
       scopeRevision: world.scope.revision,
@@ -345,5 +366,8 @@ describeLive('registry-driven targeted writes on mixed arrays (real replica set)
     });
     expect(isWorldKey(derived)).toBe(true);
     expect(isWorldKey({ ...derived })).toBe(false);
+    // The capability comes from the stored row: another scope's actor cannot mint it, and an unknown job has none.
+    await expect(jobs.worldKey({ ...worker, scopeId: 'someone-else' }, created._id)).rejects.toThrow();
+    await expect(jobs.worldKey(worker, 'no-such-job')).rejects.toThrow('JobNotFound');
   });
 });

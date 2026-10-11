@@ -13,6 +13,7 @@ import {
 import { fail, requirePrincipal, type MongoService, type Principal } from './client.js';
 import { ProvenanceRepository } from './provenance.js';
 import { WorldRepository } from './worlds.js';
+import { worldKeyOf, type WorldKey } from './worldkey.js';
 
 /** A job cannot hold more recorded context inputs than this; the runtime must summarize past it. */
 export const MAX_CONTEXT_INPUTS = 4096;
@@ -118,6 +119,14 @@ export class JobRepository {
     };
     await this.collection.insertOne(job);
     return job;
+  }
+  /**
+   * The world capability for one job. It is minted from the job row as stored (its run binding), after the actor's
+   * scope has been checked against it, so a caller can name a job handle and never a world. There is no public
+   * function that brands an arbitrary job-shaped object.
+   */
+  async worldKey(actor: ActorContext, jobId: string, session?: ClientSession): Promise<WorldKey> {
+    return worldKeyOf(await this.readAuthorized(actor, jobId, session));
   }
   async readAuthorized(actor: ActorContext, jobId: string, session?: ClientSession): Promise<Job> {
     const job = await this.collection.findOne({ _id: jobId }, { session });
