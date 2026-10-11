@@ -166,9 +166,11 @@ export function expungeRoutes(
 
   // Every route except readiness and status needs an owner token on the operator, reads included.
   routes.use('/expunge/*', async (c, next) => {
+    // `?fresh=1` skips the 5 s cache and probes the backend, so it needs the owner token (DA-7 RD1).
     const open =
       c.req.method === 'GET' &&
-      /\/expunge\/(readiness|status)$/.test(c.req.path);
+      /\/expunge\/(readiness|status)$/.test(c.req.path) &&
+      c.req.query('fresh') !== '1';
     if (!open && !access.ownerAuthenticated)
       return problem(
         c,
