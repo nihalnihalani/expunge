@@ -178,7 +178,7 @@ export class MongoEpisodePort implements EpisodePort {
         },
         instance,
       )
-      .catch((error: unknown) => failed(error instanceof Error ? error.name : 'RunnerFailed'));
+      .catch(() => failed('RunnerFailed'));
     // The world as committed state holds it, read by the grader principal.
     let readback: VisibleWorld | null = null;
     let faults: EpisodeResult['faults'];

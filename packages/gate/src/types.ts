@@ -28,6 +28,8 @@ export type WorkerProfile = {
   modelId: string;
   /** `fake` is a labeled stand-in for protocol tests. A campaign on a fake model can only be held, never decided. */
   modelKind: 'fake' | 'provider';
+  /** The provider the worker must resolve (e.g. `openai`). Required for a provider profile: the stamp must equal it. */
+  provider?: string;
   params: unknown;
 };
 
@@ -101,6 +103,9 @@ export const INFRA_FAILURE_CODES: readonly string[] = [
   'CredentialUnavailable',
   'ModelUnavailable',
   'CommittedStateUnreadable',
+  // The port could not set up the instance or the runner threw: no job ran, so nothing was learned about the arm.
+  'SetupFailed',
+  'RunnerFailed',
 ];
 export const INFRA_INVALID_THRESHOLD = 0.1;
 
@@ -126,6 +131,8 @@ export type TrialArm = {
   graderBindingFailure: boolean;
   /** The `World` the grader graded was the initial one: the port gave none back. */
   graded: 'readback' | 'initial';
+  /** Why the stored job row did not verify as real evidence (empty when it did, or when no job was started). */
+  evidenceReasons: string[];
 };
 
 export type TrialRow = {

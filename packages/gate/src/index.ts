@@ -63,3 +63,5 @@ export type {
   WorkerRunResult,
   WorkerRunner,
 } from './mongo-port.js';
+export { AttestedJobEvidence, MongoJobEvidence, modelStampsOf, verifyArm } from './job-evidence.js';
+export type { ArmFacts, JobEvidenceReader, ModelStamp } from './job-evidence.js';
