@@ -156,6 +156,26 @@ SHA-256 prefixes (first 12 hex characters), all paths under `apps/operator/`:
   - The browser scans are self-described as inputs, not WCAG claims (`common.mjs:2-5`).
 - **E2E that could pass a wrong build.** E1 is the main risk. S1 and E2 are vacuous assertions.
 
+## Closure re-read for PKT-37 (2026-10-11, about 13:20Z, claude-opus-5-5)
+
+**Pin.** All 124 hashed paths in `docs/ui/S3-MANIFEST.txt` match the tree at 13:19Z (`shasum -c` reported 0 mismatches), and `EventFeed.tsx` is deleted, as listed.
+
+**Checks.** `cd apps/operator && npx vitest run tests/expunge-access.test.ts tests/expunge-receipt-epoch.test.tsx tests/expunge-projection.test.ts tests/expunge-telemetry.test.tsx` exits 0 (4 files, 50 passed), on node 24.13.1.
+
+| Item | Disposition | Basis |
+|---|---|---|
+| K1 | CLOSED | Every `/expunge/*` route except GET readiness and status returns 401 `owner_auth_required` when no owner token is configured (routes.ts:168-180). With a token set, the app middleware checks the bearer (app.ts:82-93). The approver id comes from the server (`ownerId`, domain-service.ts:453-467), never from the browser. NT-K1 is at expunge-access.test.ts:62. *Note:* the approver is the configured operator owner id, not a per-session identity; anyone holding OWNER_TOKEN is "the owner". |
+| owner_auth_required UI | CLOSED | StateViews.tsx:45, CancelControl.tsx:71 and NewCleanupView.tsx:64 show blocked access with the variable name, not a generic failure (expunge-receipt-epoch.test.tsx:144). |
+| S1 | CLOSED (UI) | `ReceiptCell` (JobsHomeView.tsx:236-274) shows a verdict only through `CommittedSeal`, with receipt id, sequence and "as of world revision N". Otherwise it shows "Receipt reference missing". The e2e checks that the seal is present (s2.mjs:42-60). *Integration gap:* `receiptId`, `receiptSequence` and `verifiedWorldRevision` on list items are produced only by the FIXTURE (expunge-domain-fixture.ts:265-280). Nothing in packages/domain or apps/worker emits `receiptDomainStatus` or those fields (grep). So against the real domain no verdict ever appears. That fails safe, but it is not yet real. |
+| T1 | CLOSED | `telemetryState` returns disabled unless `EXPUNGE_ALLOW_TELEMETRY=1` (config.ts:33-38). `applyTelemetryDefault` sets `DO_NOT_TRACK=1` in the process, from `telemetry-default.ts`, which is the first import of `server/index.ts`, so `dev`, `start` and `node dist` agree. |
+| E1 | CLOSED (mechanism), and it fires now | The source build id is recomputed and compared with dist and with `/api/expunge/status`; there are no default ports (common.mjs:19-33; e2e runner lines 42-49,132). **But** the current tree's `sourceBuildId()` is `40b6bf33…`, while the manifest, `dist/build-id.json` and all three `results-s*.json` say `3b3be6a4…`. The cause is `views/ReceiptView.tsx` and `css/50-receipt.css`: untracked, modified after 13:17:52Z, not in the manifest, and **eagerly globbed** by ExpungeApp.tsx:20-22, so any working-tree build includes them. *Condition for PKT-37:* the verifier builds from a scratch export of HEAD plus exactly the manifest paths and gets `sourceBuildId == 3b3be6a4…`; otherwise the browser evidence is re-run. A working-tree run is not evidence for this packet. |
+| RD1 | CLOSED | The cache ignores the caller's signal (readiness.ts:197-219); NT-RD1 is at expunge-access.test.ts:224. *Note (LOW):* `?fresh=1` is open without owner auth and skips the cache, so any loopback client can fan readiness probes out to the domain. Rate-limit it or require owner auth for `fresh`. |
+| RD2 | CLOSED | `validOrigin` (config.ts:53-71) allows https, or http only to a loopback host, and rejects userinfo, path, query and fragment. |
+| RD3 | CLOSED | Status is derived from configuration (routes.ts:182-194); NT-RD3 is at expunge-access.test.ts:179. |
+| R1 | CLOSED | A snapshot is compared with the shown snapshot, not with the event cursor. An older one in the same epoch is ignored, with no reset (reducer.ts:166-201). |
+| R2 | **NOT CLOSED end to end** (client side done) | The reducer handles an epoch change and a conflict between `eventId` and a known sequence (reducer.ts:168-241). But only the test FIXTURE emits `streamEpoch` (expunge-domain-fixture.ts:316,330); apps/worker and packages/domain emit none (grep). Against the real projection the epoch is always null. A restore that moves past the client's cursor sends higher sequences, which are appended as fresh. The null-epoch fallback fires only on OLDER snapshots, so the case R2 describes is still invisible. *Fix owner:* the projection transport, which is frozen interface 7 (lead decision), implemented by runtime-raindrop and mongodb-authority. PKT-37 can land with R2 recorded as "client contract done, backend epoch BLOCKED", not as closed. |
+| TN1 | CLOSED | An `unknown` result is not cached (TelemetryNotice.tsx:15-30). The notice mounts in the authenticated workspace (App.tsx:768) and in WorkspaceDialog, both after unlock. |
+
 ## Footer
 
 ```

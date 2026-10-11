@@ -1,44 +1,48 @@
 {
-  "exportedAt": "2026-10-11T13:12Z",
+  "exportedAt": "2026-10-11T15:27Z",
   "canonicalTracker": "claude-mem work_state list 'expunge-build' (lead-maintained); this file is a sanitized mirror",
   "engine": "Claude Code CLI 2.1.296, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1; named teammates in the session implicit team",
   "leadEffectiveModel": "claude-opus-5-5",
   "teammates": {
     "mongodb-authority": {
       "requested": "claude-sonnet-5-5",
-      "effective": "pending first report (respawned 13:05Z)"
+      "effective": "claude-sonnet-5-5"
     },
     "rsi-evolution": {
       "requested": "claude-sonnet-5-5",
-      "effective": "pending first report (respawned 13:05Z)"
+      "effective": "claude-sonnet-5-5"
     },
     "runtime-raindrop": {
       "requested": "claude-sonnet-5-5",
-      "effective": "pending first report (respawned 13:05Z)"
+      "effective": "claude-sonnet-5-5"
     },
     "verifier": {
       "requested": "claude-sonnet-5-5",
-      "effective": "pending first report (respawned 13:05Z)"
+      "effective": "claude-sonnet-5-5"
     },
     "ui-ux-improver": {
       "requested": "claude-sonnet-5-5",
-      "effective": "pending first report (respawned 13:05Z)"
+      "effective": "claude-sonnet-5-5"
     },
     "devils-advocate": {
       "requested": "claude-opus-5-5",
-      "effective": "pending first report (respawned 13:05Z)"
+      "effective": "claude-opus-5-5"
     },
     "commit-steward": {
       "requested": "claude-haiku-5-5",
-      "effective": "pending first report (respawned 13:05Z)"
+      "effective": "claude-haiku-5-5"
     },
     "gateway-controls": {
       "requested": "claude-sonnet-5-5",
-      "effective": "pending first report"
+      "effective": "claude-sonnet-5-5"
     },
     "verifier-2": {
       "requested": "claude-sonnet-5-5",
-      "effective": "pending first report"
+      "effective": "claude-sonnet-5-5"
+    },
+    "verifier-3": {
+      "requested": "claude-sonnet-5-5",
+      "effective": "claude-sonnet-5-5"
     }
   },
   "barrier": null,
@@ -113,7 +117,7 @@
       "title": "Operator workbench and review per docs/ui/B3-PLAN.md",
       "owner": "ui-ux-improver",
       "status": "doing",
-      "evidence": "S3 at barrier: DA-7 K1, T1, RD1, RD2, RD3, E1 server half, verifier controller backoff and dedupe done with tests; S1 seal, E1 runner restructure, R1, R2, TN1, owner_auth_required UI, browser s3/s4 scripts, three-Node matrix, manifest pending; EventFeed deleted (DecisionLog); shared/expunge.ts changed"
+      "evidence": "S3 landed PKT-37 0d38629; S4 PKT-40, HITL PKT-45, Evaluation PKT-46, Lineage PKT-49 in verification; Privacy, Hider/meta, Evidence views pending"
     },
     {
       "id": "V-1",
@@ -176,7 +180,7 @@
       "owner": "runtime-raindrop",
       "status": "doing",
       "brief": "docs/continuity/briefs/C1-raindrop-evidence.md",
-      "evidence": "C1b held and extended with the runtime half of DG4 (meter carry); worker half of DG4 unfinished (dispatch.ts onPhaseComplete meter, terminal.ts, takeover test); O8 test passes; C1b packet after PKT-21 lands"
+      "evidence": "C1b landed in PKT-33 e9239a4; provider wiring + runtime-hash attestation + assertHarnessDeployed follow-up pending"
     },
     {
       "id": "C3",
@@ -184,7 +188,7 @@
       "owner": "rsi-evolution",
       "status": "doing",
       "brief": "docs/continuity/briefs/C3-admission-promotion.md",
-      "evidence": "three packets ready and in verification (PKT-23/24/25); P1b (privateIdSetOf, selector swap) after C1c; real episode port BLOCKED on PKT-16"
+      "evidence": "PKT-23 landed; PKT-24/25 HELD on C1 grants, D8-3(c) worker wiring, rollback grant consumption; P1b landed PKT-41 974cfb7; campaign-host PKT-47 built"
     },
     {
       "id": "B2-2",
@@ -212,8 +216,8 @@
       "id": "V-3",
       "title": "Wake endpoint and netguard live probes, E1 reliability harness, Claude-to-Codex handoff drill",
       "owner": "verifier",
-      "status": "doing",
-      "evidence": "verifier at barrier: V-3 results NOT yet in VERIFICATION.md: wake probes 79, durable wake 6, netguard 12, candidate-proxy routing 34, E1 faults 8, resume-token 7, worldkey brand 4; FINDINGS TO ROUTE ON RESUME: unfenced late job_failed event from a resumed zombie worker (runtime-raindrop), a terminal projection can be lost on a crash (runtime-raindrop), corrupt resume tokens crash the consumer (ui-ux-improver/runtime-raindrop), leak-guard bypass (covered by C1c); Claude-to-Codex handoff drill not done; remaining tests/reliability files untracked and green, one more packet"
+      "status": "done",
+      "evidence": "F1/F2 fixed in PKT-33 e9239a4, F3 in PKT-39 2587fab; harness PKT-36 efe47c4; drill PKT-38 d6c2e55"
     },
     {
       "id": "PKT-5",
@@ -325,8 +329,8 @@
       "id": "PKT-16",
       "title": "Domain gateway packet (nine tools, gateway pipeline, G1/G2/G4/G7 tests, preview route, four-token service)",
       "owner": "mongodb-authority",
-      "status": "doing",
-      "evidence": "barrier report: domain 64 passed on replica set, governance 23/4 skipped; DG1, DG2, DG5, DG7, DG8, DG10, DG11, DG12, DG13, DG16 done in tree; unfinished: package.json deps, README, live service tests, DG5/DG11/DG12/DG13 tests, requirePrincipal probe, argsDigest versions, private_id_salts, .env.example lines; gateway-controls (DG3/DG4/DG6) in progress; PKT-16b contract form; PKT-17 (G6 identity) and PKT-18 (privacy collections) numbering is mongodb-authority local, lead renumbers on resume"
+      "status": "done",
+      "evidence": "landed 624fb3a (domain gateway, controls, A-1); P2-1 and P2-2 recorded OPEN"
     },
     {
       "id": "DA-6",
@@ -356,14 +360,15 @@
       "owner": "rsi-evolution",
       "status": "doing",
       "brief": "docs/continuity/briefs/D1-hider-adversary.md",
-      "evidence": "packages/adversary sources compile (grammar, enumerator and model Hiders, FAKE modes, admission pipeline, campaign, store); exploratory run: 12 admitted / 4 quarantined, W0 short of reference on 12/12; tests, evidence script, README, fake mixed-mode fix pending; needs adversary_trials collection; lands after PKT-23/24/25"
+      "evidence": "PKT-42 GREEN (verifier-3), lands after PKT-24/25; admission-time shared-parent quarantine requested"
     },
     {
       "id": "D2",
       "title": "Improver evolution and fresh-base comparison",
       "owner": "rsi-evolution",
-      "status": "briefed",
-      "brief": "docs/continuity/briefs/D2-meta-improver.md"
+      "status": "doing",
+      "brief": "docs/continuity/briefs/D2-meta-improver.md",
+      "evidence": "PKT-43 scaffold GREEN, lands after PKT-24/25; verdict rule and resource plan preregistered"
     },
     {
       "id": "D3",
@@ -371,7 +376,7 @@
       "owner": "runtime-raindrop",
       "status": "doing",
       "brief": "docs/continuity/briefs/D3-privacy-eligibility.md",
-      "evidence": "packages/privacy slice 1: 48 tests passing on replica set (registry, retraction state machine, four closure shapes, scan, FAKE erasure lifecycle, retention boundary, mongo adapters); needs PKT-21 (leak guard) and the privacy collections (mongodb-authority); no README"
+      "evidence": "PKT-34 landed 0e762c4; Mongo adapters, P34-8 suppression read pending"
     },
     {
       "id": "E1",
@@ -383,9 +388,10 @@
     {
       "id": "E2",
       "title": "Independent benchmark and preregistration",
-      "owner": "verifier + team-lead",
-      "status": "briefed",
-      "brief": "docs/continuity/briefs/E2-benchmark-preregistration.md"
+      "owner": "team-lead + rsi-evolution",
+      "status": "doing",
+      "brief": "docs/continuity/briefs/E2-benchmark-preregistration.md",
+      "evidence": "resource plan + meta verdict rule in PREREGISTRATION; freeze blocked on live provider (token profile) and spend limit"
     },
     {
       "id": "E3",
@@ -454,8 +460,8 @@
       "id": "GC-1",
       "title": "gateway-controls: runtime workflow enforcement, per-job budgets, retry counter (controls.ts, workflow.ts, budget.ts, controls.integration tests)",
       "owner": "gateway-controls",
-      "status": "doing",
-      "evidence": "barrier report: no product file edited; design settled (violation ids, continuation rule, exempt tools inspect_harness and report_diagnostic, call rows appended in begin(), changed documents from committed receipts, scanned documents gate on discover only); mongodb-authority accepted the gateway.ts documentsToChange:0 change; RISK: baseline expert graph preview maxVisits 1 and summed maxVisits = toolCalls 12 may deny a second-round re-plan (lead-owned packages/baselines if so); own replica set 27418 (compose project expunge-gc)"
+      "status": "done",
+      "evidence": "landed in PKT-16; DA-5 DG3/DG4/DG6, GC-a, GC-b CLOSED"
     },
     {
       "id": "DA-8",
@@ -470,6 +476,36 @@
       "owner": "commit-steward",
       "status": "done",
       "evidence": "landed bcfc5ad"
+    },
+    {
+      "id": "PKT-44",
+      "status": "doing",
+      "evidence": "D8-3 + campaign-world grader rule; verifier-2 verifying",
+      "owner": "mongodb-authority"
+    },
+    {
+      "id": "PKT-48",
+      "status": "doing",
+      "evidence": "plugin sandbox; devils-advocate PS-1/PS-2 + PS-5/6/7 required",
+      "owner": "runtime-raindrop"
+    },
+    {
+      "id": "PKT-50",
+      "status": "doing",
+      "evidence": "candidate broker; BR-1..4 required",
+      "owner": "runtime-raindrop"
+    },
+    {
+      "id": "P2-1",
+      "status": "doing",
+      "evidence": "fault layer on domain path (gateway-controls), hooks by mongodb-authority",
+      "owner": "gateway-controls"
+    },
+    {
+      "id": "PKT-16b",
+      "status": "todo",
+      "evidence": "DG1 ownership-directed discovery",
+      "owner": "mongodb-authority"
     }
   ],
   "blocked": [
@@ -480,48 +516,8 @@
     }
   ],
   "git": {
-    "head": "abafe0b = origin/main (46 commits); checkpoint 20261011T122117Z-85f4b535 base abafe0b",
-    "commits": [
-      "fe12b51 baseline",
-      "506b73e ledger",
-      "e165d48 mongo A2-R finish",
-      "082d2e1 ledger",
-      "d119446 review DA-4",
-      "7cbb983 ledger",
-      "191cbb4 worker B2-2",
-      "a47d302 ledger",
-      "4eb6d5d compiler C2-1",
-      "52c3b86 ledger",
-      "ae59942 mongo B1-0",
-      "7e7e19d ledger",
-      "f70d81f lead docs",
-      "d183898 ledger",
-      "c663bfd governance B1-1",
-      "e69eb02 ledger",
-      "cd821d6 evolution C2-2",
-      "dbabd7e ledger",
-      "5e229c9 hotfix PKT-11 (dangling edges export)",
-      "c45be9b ledger",
-      "f17fd61 operator S1 PKT-10",
-      "a104f90 ledger",
-      "7fe7762 review DA-5a PKT-13",
-      "9d48ebb ledger",
-      "88a75a3 mongo PKT-12",
-      "4172564 ledger + HEAD-proof history",
-      "f9ee239 ledger format fix",
-      "109e2dc review DA-6 PKT-18",
-      "ecfbb5c ledger",
-      "cd821d6 evolution C2-2 (listed above)",
-      "83980b9 evolution C2-3",
-      "96f7b89 mongo PKT-15",
-      "be26a69 review DA-5 + mg-live",
-      "1201525 operator S2",
-      "7c74461 lead docs",
-      "ba41d7b observability+observer C1a"
-    ],
-    "remote": "https://github.com/nihalnihalani/expunge (private)",
-    "lockRule": "a packet that adds a workspace never carries the working-tree lock; the steward regenerates package-lock.json from the staged tree in a scratch export, proves npm ci --ignore-scripts there, and restores the working-tree lock",
-    "headGreenGate": "since PKT-11: npm ci + npm run typecheck on a scratch export of the staged index before every commit; exit codes in the ledger row"
+    "head": "adab094",
+    "note": "landed since takeover: PKT-30,31,35,36,38,34,41,37,16,33,39"
   },
   "switch": {
     "takeoverAt": "2026-10-11T13:01Z",
