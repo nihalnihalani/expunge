@@ -205,9 +205,7 @@
       "title": "Gateway review by reading plus negative-test specification (no exploit scripts)",
       "owner": "devils-advocate",
       "status": "doing",
-      "dependsOn": [
-        "B1"
-      ],
+      "dependsOn": ["B1"],
       "evidence": "dispatched 12:32Z on packages/domain working tree"
     },
     {
