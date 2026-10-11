@@ -4,6 +4,10 @@ import type { ReadinessCheck } from '../../shared/expunge.js';
 export interface ExpungeConfigView {
   /** `pass` means the read projection principal is present and well formed. No network. */
   configured: ReadinessCheck;
+  /**
+   * Which writes can work. All of them need the owner access token on the operator (an unauthenticated
+   * loopback caller can read readiness only), plus the role credential for that write.
+   */
   writes: {
     submit: boolean;
     cancel: boolean;
@@ -17,11 +21,17 @@ export const MIN_TOKEN_LENGTH = 24;
 export const READ_TOKEN = 'EXPUNGE_INTERNAL_TOKEN';
 export const JOB_WRITE_TOKEN = 'EXPUNGE_JOB_WRITE_TOKEN';
 export const APPROVAL_TOKEN = 'EXPUNGE_APPROVAL_TOKEN';
+export const OWNER_TOKEN = 'OWNER_TOKEN';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** Mirrors the upstream rule in setup-telemetry.ts: either flag set to 1 or true disables it. */
+/**
+ * Expunge builds send no upstream telemetry unless the owner opts in with EXPUNGE_ALLOW_TELEMETRY=1,
+ * whichever entry point started the server. With the opt-in, the upstream rule applies: either
+ * flag set to 1 or true disables it, and so does a sample rate of 0.
+ */
 export function telemetryState(env: Env): 'disabled' | 'enabled' {
+  if (env.EXPUNGE_ALLOW_TELEMETRY !== '1') return 'disabled';
   const off =
     ['DO_NOT_TRACK', 'COPILOTKIT_TELEMETRY_DISABLED'].some((key) =>
       ['true', '1'].includes(env[key] ?? ''),
@@ -29,11 +39,26 @@ export function telemetryState(env: Env): 'disabled' | 'enabled' {
   return off ? 'disabled' : 'enabled';
 }
 
+/**
+ * Applies the default before the CopilotKit runtime initialises: the flag the upstream code
+ * already honors is set unless the owner opted in. Called from a side-effect module that is the
+ * first import of the server entry, so `npm run dev`, `npm start` and `node dist/...` all agree.
+ */
+export function applyTelemetryDefault(env: Record<string, string | undefined>) {
+  if (env.EXPUNGE_ALLOW_TELEMETRY !== '1') env.DO_NOT_TRACK = '1';
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
 function validOrigin(value: string) {
   try {
     const url = new URL(value);
+    // Tokens travel to this address, so cleartext http is only for the same machine.
+    const protocolOk =
+      url.protocol === 'https:' ||
+      (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname));
     return (
-      ['http:', 'https:'].includes(url.protocol) &&
+      protocolOk &&
       !url.username &&
       !url.password &&
       url.pathname === '/' &&
@@ -66,11 +91,15 @@ export function describeExpungeConfig(env: Env): ExpungeConfigView {
   };
   check('EXPUNGE_DOMAIN_URL', true);
   check(READ_TOKEN, true);
-  const submit = check(JOB_WRITE_TOKEN, false);
-  const approve = check(APPROVAL_TOKEN, false);
+  const owner = Boolean(env[OWNER_TOKEN]?.trim());
+  const submitRole = check(JOB_WRITE_TOKEN, false);
+  const approveRole = check(APPROVAL_TOKEN, false);
+  const submit = submitRole && owner;
+  const approve = approveRole && owner;
   const writeMissing = [
-    ...(submit ? [] : [JOB_WRITE_TOKEN]),
-    ...(approve ? [] : [APPROVAL_TOKEN]),
+    ...(owner ? [] : [OWNER_TOKEN]),
+    ...(submitRole ? [] : [JOB_WRITE_TOKEN]),
+    ...(approveRole ? [] : [APPROVAL_TOKEN]),
   ];
   const names = [...missing, ...malformed];
   const readFailure = names.filter(

@@ -123,12 +123,33 @@ it('submits only validated fields with the job-write principal and returns the c
   expect(calls[0].body).toEqual(validSubmit);
 });
 
-it('uses the approval principal for decisions and re-reads committed state', async () => {
-  const { app, calls } = build(() => ({
-    accepted: true,
-    state: 'approved',
-    committedEventSequence: 12,
-  }));
+const descriptor = (patch: Record<string, unknown> = {}) => ({
+  proposalId: 'proposal-1',
+  grantId: 'grant-1',
+  state: 'pending',
+  target: 'worker',
+  parentHash: hex('a'),
+  childHash: hex('b'),
+  expectedParentRevision: 3,
+  computedClass: 'tightening',
+  flipSet: [],
+  flipSetDigest: hex('f'),
+  scope: { scopeId: 'scope-1', scopeRevision: 4, authorizationRevision: 2 },
+  gateReportId: 'gate-1',
+  gateReportDigest: hex('g'),
+  approver: { actorId: 'stored-owner', display: 'Owner' },
+  expiresAt: '2026-10-11T12:00:00.000Z',
+  consequences: [],
+  descriptorDigest: hex('d'),
+  ...patch,
+});
+
+it('uses the approval principal for decisions, names the grant and approver itself, and re-reads committed state', async () => {
+  const { app, calls } = build((call) =>
+    call.method === 'GET'
+      ? descriptor()
+      : { accepted: true, state: 'approved', committedEventSequence: 12 },
+  );
   const response = await app.request(
     '/api/expunge/proposals/proposal-1/decision',
     post({
@@ -143,12 +164,51 @@ it('uses the approval principal for decisions and re-reads committed state', asy
     state: 'approved',
     committedEventSequence: 12,
   });
-  expect(calls[0].headers.authorization).toBe(`Bearer ${APPROVAL}`);
-  expect(calls[0].body).toEqual({
+  // The stored descriptor is read first, with the read principal, to learn the grant.
+  expect(calls[0].method).toBe('GET');
+  expect(calls[0].headers.authorization).toBe(`Bearer ${READ}`);
+  expect(calls[1].headers.authorization).toBe(`Bearer ${APPROVAL}`);
+  // DA-7 K1: the forward carries the approver identity and the grant, taken from the server.
+  expect(calls[1].body).toEqual({
     decision: 'approve',
     descriptorDigest: hex('d'),
     toolCallId: 'call-1',
+    grantId: 'grant-1',
+    approverId: 'stored-owner',
   });
+});
+
+it('DA-7 K1: refuses an approval that cannot name a pending grant or that does not match the stored digest, without forwarding it', async () => {
+  for (const stored of [
+    descriptor({ grantId: null }),
+    descriptor({ state: 'consumed' }),
+    descriptor({ state: 'expired' }),
+  ]) {
+    const { app, calls } = build((call) =>
+      call.method === 'GET' ? stored : { accepted: true },
+    );
+    const response = await app.request(
+      '/api/expunge/proposals/proposal-1/decision',
+      post({ decision: 'approve', descriptorDigest: hex('d') }),
+    );
+    expect(response.status).toBe(409);
+    expect(calls.every((call) => call.method === 'GET')).toBe(true);
+  }
+  const mismatch = build((call) =>
+    call.method === 'GET' ? descriptor() : { accepted: true },
+  );
+  const stale = await mismatch.app.request(
+    '/api/expunge/proposals/proposal-1/decision',
+    post({ decision: 'approve', descriptorDigest: hex('e') }),
+  );
+  expect(stale.status).toBe(409);
+  expect(mismatch.calls.every((call) => call.method === 'GET')).toBe(true);
+  const none = build(() => undefined);
+  const missing = await none.app.request(
+    '/api/expunge/proposals/proposal-1/decision',
+    post({ decision: 'approve', descriptorDigest: hex('d') }),
+  );
+  expect(missing.status).toBe(404);
 });
 
 it('names the missing write principal instead of silently using another credential', async () => {

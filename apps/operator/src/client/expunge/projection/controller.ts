@@ -15,6 +15,7 @@ import { isTerminal, pollInterval } from './selectors';
 export interface EventsPage {
   events: ForwardedProjectionEvent[];
   nextSequence: number;
+  streamEpoch?: string;
 }
 
 export interface ProjectionDeps {
@@ -39,6 +40,15 @@ const SLOW_RETRY_MS = 30_000;
 const TERMINAL_CONFIRM_MS = 15_000;
 const FLUSH_MS = 250;
 const MAX_PAGES = 100;
+/** Consecutive re-reads allowed after the stream fails to become contiguous, before it is called broken. */
+export const MAX_REBOOTSTRAPS = 5;
+const INCONSISTENT: FailureInfo = {
+  kind: 'http',
+  status: 0,
+  code: 'projection_inconsistent',
+  message:
+    'The committed event stream is not contiguous, so the event list is withheld. Job status is still read from the database.',
+};
 
 export function failureOf(error: unknown): FailureInfo {
   const e = error as {
@@ -79,6 +89,7 @@ export class JobProjectionController {
   private needsBootstrap = true;
   private terminalConfirmed = false;
   private attempt = 0;
+  private rebootstraps = 0;
   private cycling = false;
 
   constructor(
@@ -116,6 +127,7 @@ export class JobProjectionController {
   refresh() {
     if (!this.running) return;
     this.attempt = 0;
+    this.rebootstraps = 0;
     this.terminalConfirmed = false;
     this.schedule(0);
   }
@@ -165,6 +177,7 @@ export class JobProjectionController {
         type: 'events',
         events: page.events,
         nextSequence: page.nextSequence,
+        epoch: page.streamEpoch ?? null,
         now: this.deps.now(),
       });
       if (result.needsRebootstrap) return;
@@ -203,6 +216,7 @@ export class JobProjectionController {
       type: 'events',
       events: page.events,
       nextSequence: page.nextSequence,
+      epoch: page.streamEpoch ?? null,
       now: this.deps.now(),
     });
     if (this.needsBootstrap) return;
@@ -224,10 +238,29 @@ export class JobProjectionController {
       if (this.needsBootstrap) await this.bootstrap(controller.signal);
       else await this.poll(controller.signal);
       if (this.needsBootstrap) {
+        // A gap, an unsorted page or a conflicting duplicate. Re-reading at once usually heals a
+        // race, so the first re-read is immediate; a persistent fault backs off and then stops
+        // pretending: after MAX_REBOOTSTRAPS the stream is reported as inconsistent and retried
+        // slowly, so a broken backend is never hammered.
+        this.rebootstraps += 1;
         this.cycling = false;
-        this.schedule(0);
+        if (this.rebootstraps > MAX_REBOOTSTRAPS) {
+          this.apply({
+            type: 'failure',
+            failure: INCONSISTENT,
+            attempt: 0,
+            nextRetryMs: SLOW_RETRY_MS,
+          });
+          this.schedule(SLOW_RETRY_MS);
+        } else
+          this.schedule(
+            this.rebootstraps === 1
+              ? 0
+              : backoffDelay(this.rebootstraps - 1, this.deps.random),
+          );
         return;
       }
+      this.rebootstraps = 0;
       this.attempt = 0;
       const status = this.state.snapshot?.status;
       if (!status) return;

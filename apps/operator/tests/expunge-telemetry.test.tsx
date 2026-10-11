@@ -49,18 +49,23 @@ it('leaves telemetry to upstream defaults only when explicitly allowed (opt-in b
   ).toBe('true');
 });
 
-it('reports the server telemetry state with the same rule upstream applies', () => {
-  expect(telemetryState({})).toBe('enabled');
-  expect(telemetryState({ DO_NOT_TRACK: '1' })).toBe('disabled');
-  expect(telemetryState({ DO_NOT_TRACK: 'true' })).toBe('disabled');
-  expect(telemetryState({ COPILOTKIT_TELEMETRY_DISABLED: '1' })).toBe(
-    'disabled',
-  );
-  expect(telemetryState({ COPILOTKIT_TELEMETRY_SAMPLE_RATE: '0' })).toBe(
-    'disabled',
-  );
-  expect(telemetryState({ DO_NOT_TRACK: '0' })).toBe('enabled');
-  // The wrapper's output, fed back in, reads as disabled.
+it('reports the server telemetry state: off unless opted in, then the upstream rule', () => {
+  // DA-7 T1: off by default whichever entry point started the server.
+  expect(telemetryState({})).toBe('disabled');
+  expect(telemetryState({ DO_NOT_TRACK: '0' })).toBe('disabled');
+  expect(telemetryState({ EXPUNGE_ALLOW_TELEMETRY: '0' })).toBe('disabled');
+  const allowed = { EXPUNGE_ALLOW_TELEMETRY: '1' };
+  expect(telemetryState(allowed)).toBe('enabled');
+  expect(telemetryState({ ...allowed, DO_NOT_TRACK: '1' })).toBe('disabled');
+  expect(telemetryState({ ...allowed, DO_NOT_TRACK: 'true' })).toBe('disabled');
+  expect(
+    telemetryState({ ...allowed, COPILOTKIT_TELEMETRY_DISABLED: '1' }),
+  ).toBe('disabled');
+  expect(
+    telemetryState({ ...allowed, COPILOTKIT_TELEMETRY_SAMPLE_RATE: '0' }),
+  ).toBe('disabled');
+  expect(telemetryState({ ...allowed, DO_NOT_TRACK: '0' })).toBe('enabled');
+  // The wrapper's output, fed back in, reads as disabled; so does the in-process default.
   expect(telemetryState(childEnvironment({}))).toBe('disabled');
   expect(
     telemetryState(childEnvironment({ EXPUNGE_ALLOW_TELEMETRY: '1' })),
@@ -69,8 +74,10 @@ it('reports the server telemetry state with the same rule upstream applies', () 
 
 it('serves the state on the status route', async () => {
   for (const [env, expected] of [
+    [{}, 'disabled'],
     [{ DO_NOT_TRACK: '1' }, 'disabled'],
-    [{}, 'enabled'],
+    [{ EXPUNGE_ALLOW_TELEMETRY: '1' }, 'enabled'],
+    [{ EXPUNGE_ALLOW_TELEMETRY: '1', DO_NOT_TRACK: '1' }, 'disabled'],
   ] as const) {
     const store = new Store(':memory:');
     stores.push(store);

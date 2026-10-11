@@ -17,7 +17,11 @@ export const browserDeps: ProjectionDeps = {
       signal,
     }),
   fetchEvents: (jobId, after, signal) =>
-    expungeFetch<{ events: ForwardedProjectionEvent[]; nextSequence: number }>(
+    expungeFetch<{
+      events: ForwardedProjectionEvent[];
+      nextSequence: number;
+      streamEpoch?: string;
+    }>(
       `/jobs/${encodeURIComponent(jobId)}/events?afterSequence=${after}&limit=500`,
       { signal },
     ) as Promise<EventsPage>,

@@ -1,0 +1,257 @@
+/* Reference trace (SVG), legend, decision log. Scoped under .ex-root. */
+.ex-root .ex-trace {
+  display: grid;
+  gap: var(--ex-space-3);
+  min-inline-size: 0;
+}
+.ex-root .ex-trace-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3) var(--ex-space-5);
+  align-items: center;
+  justify-content: space-between;
+}
+.ex-root .ex-trace-bar .ex-note {
+  margin: 0;
+}
+.ex-root .ex-trace-scroll {
+  position: relative;
+  overflow: auto;
+  max-block-size: 30rem;
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-trace-svg {
+  display: block;
+  font-family: var(--ex-font-ui);
+}
+.ex-root .ex-edge {
+  fill: none;
+  stroke: var(--ex-rule-strong);
+  stroke-width: 1;
+}
+.ex-root .ex-edge--committed {
+  stroke: var(--ex-seal);
+  stroke-width: 2;
+}
+.ex-root .ex-edge--back {
+  stroke-dasharray: 3 3;
+}
+.ex-root .ex-edge--dim {
+  stroke: var(--ex-rule);
+}
+.ex-root .ex-gnode {
+  cursor: pointer;
+  outline: none;
+}
+.ex-root .ex-gn-hit {
+  fill: transparent;
+  stroke: none;
+}
+.ex-root .ex-gn-focus {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 2;
+}
+.ex-root .ex-gnode:focus-visible .ex-gn-focus {
+  stroke: var(--ex-ink);
+}
+.ex-root .ex-gn-selected {
+  fill: none;
+  stroke: var(--ex-ink);
+  stroke-width: 2;
+}
+.ex-root .ex-gtext {
+  fill: var(--ex-ink);
+  font-size: 12px;
+}
+.ex-root .ex-glane {
+  fill: var(--ex-ink2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ex-root .ex-gnode--dim .ex-gtext {
+  fill: var(--ex-ink3);
+}
+.ex-root .ex-gnode--dim .ex-gn-box {
+  stroke: var(--ex-ink3);
+}
+.ex-root .ex-gn-box {
+  fill: var(--ex-surface);
+  stroke: var(--ex-ink);
+  stroke-width: 1.5;
+}
+.ex-root .ex-gn-glyph {
+  fill: none;
+  stroke: var(--ex-ink);
+  stroke-width: 1.5;
+}
+.ex-root .ex-gn-fill {
+  fill: var(--ex-ink);
+}
+.ex-root .ex-gn--discovered .ex-gn-box {
+  stroke-dasharray: 1 2;
+}
+.ex-root .ex-gn--previewed .ex-gn-box {
+  stroke-dasharray: 3 2;
+}
+.ex-root .ex-gn--applied .ex-gn-box {
+  fill: var(--ex-seal);
+  stroke: var(--ex-seal);
+}
+.ex-root .ex-gn--applied .ex-gn-glyph {
+  stroke: var(--ex-seal-ink);
+}
+.ex-root .ex-gn--applied .ex-gn-fill {
+  fill: var(--ex-seal-ink);
+}
+.ex-root .ex-gn--retained .ex-gn-box {
+  fill: none;
+}
+.ex-root .ex-gn--excluded .ex-gn-box {
+  fill: var(--ex-sunken);
+  stroke-dasharray: 1 2;
+}
+.ex-root .ex-gn--residual .ex-gn-box {
+  stroke: var(--ex-danger);
+  stroke-width: 2;
+  fill: var(--ex-danger-bg);
+}
+.ex-root .ex-gn--residual .ex-gn-glyph {
+  stroke: var(--ex-danger);
+}
+.ex-root .ex-gn--not_inspected .ex-gn-box {
+  fill: var(--ex-sunken);
+  stroke-dasharray: 3 2;
+}
+.ex-root .ex-gnode--fresh .ex-gn {
+  animation: ex-fresh var(--ex-dur-3) var(--ex-ease) 1;
+}
+@keyframes ex-fresh {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.ex-root .ex-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3) var(--ex-space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ex-space-2);
+}
+.ex-root .ex-legend-line {
+  display: inline-block;
+  inline-size: 24px;
+  border-block-start: 2px solid var(--ex-rule-strong);
+}
+.ex-root .ex-legend-line--committed {
+  border-block-start-color: var(--ex-seal);
+}
+.ex-root .ex-legend-line--back {
+  border-block-start-style: dashed;
+}
+.ex-root .ex-trace-help[hidden] {
+  display: none;
+}
+.ex-root .ex-viewtoggle {
+  display: inline-flex;
+  gap: 0;
+}
+.ex-root .ex-viewtoggle .ex-btn {
+  border-radius: 0;
+}
+.ex-root .ex-viewtoggle .ex-btn:first-child {
+  border-start-start-radius: var(--ex-radius-2);
+  border-end-start-radius: var(--ex-radius-2);
+}
+.ex-root .ex-viewtoggle .ex-btn:last-child {
+  border-start-end-radius: var(--ex-radius-2);
+  border-end-end-radius: var(--ex-radius-2);
+}
+.ex-root .ex-viewtoggle .ex-btn[aria-pressed='true'] {
+  background: var(--ex-ink);
+  border-color: var(--ex-ink);
+  color: var(--ex-canvas);
+}
+@media (forced-colors: active) {
+  .ex-root .ex-gn-box {
+    stroke: CanvasText;
+    fill: Canvas;
+  }
+  .ex-root .ex-gn--applied .ex-gn-box {
+    fill: Highlight;
+    stroke: Highlight;
+  }
+  .ex-root .ex-gtext,
+  .ex-root .ex-glane {
+    fill: CanvasText;
+  }
+  .ex-root .ex-edge {
+    stroke: CanvasText;
+  }
+}
+
+/* Decision log */
+.ex-root .ex-log {
+  display: grid;
+  gap: var(--ex-space-4);
+}
+.ex-root .ex-log-list {
+  max-block-size: 34rem;
+  overflow: auto;
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-loglist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ex-root .ex-log-row {
+  display: grid;
+  gap: var(--ex-space-2);
+  padding: var(--ex-space-3) var(--ex-space-4);
+  border-block-start: 1px solid var(--ex-rule);
+}
+.ex-root .ex-log-row:first-child {
+  border-block-start: 0;
+}
+.ex-root .ex-log-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-3);
+  align-items: center;
+}
+.ex-root .ex-log-text {
+  margin: 0;
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-log-detail summary {
+  cursor: pointer;
+  min-block-size: 24px;
+  font-size: var(--ex-text-xs);
+  color: var(--ex-ink2);
+}
+.ex-root .ex-code-block {
+  margin: var(--ex-space-2) 0 0;
+  padding: var(--ex-space-3);
+  overflow: auto;
+  border: 1px solid var(--ex-rule);
+  border-radius: var(--ex-radius-1);
+  background: var(--ex-sunken);
+  font-family: var(--ex-font-data);
+  font-size: var(--ex-text-xs);
+  white-space: pre-wrap;
+}

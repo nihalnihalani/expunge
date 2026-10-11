@@ -1,0 +1,279 @@
+/* New cleanup form, reference table, record inspector, cancel control. Scoped under .ex-root. */
+.ex-root .ex-form {
+  display: grid;
+  gap: var(--ex-space-5);
+  max-width: 52rem;
+}
+.ex-root .ex-fieldset {
+  margin: 0;
+  padding: var(--ex-space-5);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-legend {
+  padding: 0 var(--ex-space-3);
+  font-family: var(--ex-font-display);
+  font-size: var(--ex-text-lg);
+  font-weight: 500;
+}
+.ex-root .ex-fieldrow {
+  display: grid;
+  gap: var(--ex-space-2);
+  margin: var(--ex-space-4) 0;
+}
+.ex-root .ex-label {
+  font-size: var(--ex-text-sm);
+  font-weight: 600;
+}
+.ex-root .ex-input {
+  box-sizing: border-box;
+  inline-size: min(100%, 30rem);
+  min-height: 36px;
+  padding: var(--ex-space-3) var(--ex-space-4);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+  color: var(--ex-ink);
+  font: inherit;
+}
+.ex-root .ex-input[aria-invalid='true'] {
+  border-color: var(--ex-danger);
+  border-width: 2px;
+}
+.ex-root .ex-fielderror {
+  margin: 0;
+  color: var(--ex-danger);
+  font-size: var(--ex-text-sm);
+  font-weight: 600;
+}
+.ex-root .ex-fielderror::before {
+  content: 'Error: ';
+}
+.ex-root .ex-radio {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--ex-space-3);
+  align-items: start;
+  padding: var(--ex-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ex-radius-2);
+}
+.ex-root .ex-radio:has(input:checked) {
+  border-color: var(--ex-rule-strong);
+  background: var(--ex-sunken);
+}
+.ex-root .ex-radio[data-disabled='true'] {
+  color: var(--ex-ink3);
+}
+.ex-root .ex-radio input {
+  inline-size: 24px;
+  block-size: 24px;
+  margin: 0;
+  accent-color: var(--ex-ink);
+}
+.ex-root .ex-worldfacts {
+  margin-top: var(--ex-space-4);
+  padding-top: var(--ex-space-4);
+  border-top: 1px solid var(--ex-rule);
+}
+.ex-root .ex-btn--primary .ex-chip,
+.ex-root .ex-btn--danger .ex-chip {
+  margin-inline-start: var(--ex-space-2);
+}
+
+/* Reference table */
+.ex-root .ex-reftable {
+  display: grid;
+  gap: var(--ex-space-4);
+  min-inline-size: 0;
+}
+.ex-root .ex-tools {
+  display: grid;
+  gap: var(--ex-space-3);
+}
+.ex-root .ex-tools .ex-fieldrow {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  align-items: end;
+  margin: 0;
+}
+.ex-root .ex-sort,
+.ex-root .ex-rowbtn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ex-root .ex-sort:hover,
+.ex-root .ex-rowbtn:hover {
+  text-decoration: underline;
+}
+.ex-root th[aria-sort='ascending'] .ex-sort::after {
+  content: ' \2191';
+}
+.ex-root th[aria-sort='descending'] .ex-sort::after {
+  content: ' \2193';
+}
+.ex-root .ex-rowbtn {
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ex-root .ex-rowbtn[aria-pressed='true'] {
+  box-shadow: inset 3px 0 0 var(--ex-ink);
+  padding-inline-start: var(--ex-space-3);
+}
+.ex-root .ex-table tbody tr[data-selected='true'] > * {
+  background: var(--ex-sunken);
+}
+.ex-root .ex-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ex-space-4);
+  align-items: center;
+}
+
+/* Marks on records: icon, word and border, never color alone */
+.ex-root .ex-node--discovered {
+  border-style: dotted;
+}
+.ex-root .ex-node--previewed {
+  border-style: dashed;
+}
+.ex-root .ex-node--applied {
+  background: var(--ex-ink);
+  border-color: var(--ex-ink);
+  color: var(--ex-canvas);
+}
+.ex-root .ex-node--retained {
+  background: transparent;
+  border-color: var(--ex-ink);
+  color: var(--ex-ink);
+}
+.ex-root .ex-node--excluded {
+  background: var(--ex-sunken);
+  border-style: dotted;
+  color: var(--ex-ink2);
+}
+.ex-root .ex-node--residual {
+  border-width: 2px;
+  border-color: var(--ex-danger);
+  background: var(--ex-danger-bg);
+  color: var(--ex-danger);
+}
+.ex-root .ex-node--not_inspected {
+  background: var(--ex-sunken);
+  border-style: dashed;
+  color: var(--ex-ink2);
+}
+
+/* Record inspector */
+.ex-root .ex-refgrid {
+  display: grid;
+  gap: var(--ex-space-5);
+  grid-template-columns: minmax(0, 1fr);
+}
+.ex-root .ex-inspector {
+  display: grid;
+  gap: var(--ex-space-4);
+  align-content: start;
+  min-inline-size: 0;
+  padding: var(--ex-space-5);
+  border: 1px solid var(--ex-rule-strong);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+.ex-root .ex-inspector-head {
+  display: flex;
+  gap: var(--ex-space-3);
+  align-items: start;
+  justify-content: space-between;
+}
+.ex-root .ex-inspector-head .ex-h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.ex-root .ex-fields {
+  display: grid;
+  gap: var(--ex-space-4);
+}
+.ex-root .ex-field {
+  padding-inline-start: var(--ex-space-4);
+  border-inline-start: 2px solid var(--ex-rule);
+}
+.ex-root .ex-field--changed {
+  border-inline-start: 3px solid var(--ex-ink);
+}
+.ex-root .ex-field-path {
+  margin: 0 0 var(--ex-space-2);
+}
+.ex-root .ex-elems {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--ex-rule);
+  border-radius: var(--ex-radius-2);
+}
+.ex-root .ex-elem {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  gap: var(--ex-space-3);
+  align-items: center;
+  padding: var(--ex-space-3) var(--ex-space-4);
+  border-top: 1px solid var(--ex-rule);
+  font-size: var(--ex-text-sm);
+}
+.ex-root .ex-elem:first-child {
+  border-top: 0;
+}
+.ex-root .ex-elem-index {
+  color: var(--ex-ink2);
+}
+.ex-root .ex-elem-word {
+  font-size: var(--ex-text-xs);
+  font-weight: 600;
+  color: var(--ex-ink2);
+}
+.ex-root .ex-redacted {
+  display: inline-block;
+  inline-size: min(100%, 9rem);
+  block-size: 1em;
+  border-radius: 2px;
+  background: var(--ex-ink);
+}
+
+/* Cancel control */
+.ex-root .ex-cancel {
+  display: grid;
+  gap: var(--ex-space-3);
+}
+.ex-root .ex-confirm {
+  display: grid;
+  gap: var(--ex-space-3);
+  max-inline-size: 40rem;
+  padding: var(--ex-space-4) var(--ex-space-5);
+  border: 1px solid var(--ex-danger);
+  border-radius: var(--ex-radius-2);
+  background: var(--ex-surface);
+}
+
+@container ex (min-width: 1100px) {
+  .ex-root .ex-refgrid--open {
+    grid-template-columns: minmax(0, 1fr) 26rem;
+    align-items: start;
+  }
+}
+@media (forced-colors: active) {
+  .ex-root .ex-redacted {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}

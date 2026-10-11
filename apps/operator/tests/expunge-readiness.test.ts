@@ -217,7 +217,9 @@ it('is ready only when all four checks pass, and carries the fixture label', asy
   expect(result.ready).toBe(true);
   expect(result.backend.kind).toBe('fixture');
   expect(result.writes).toMatchObject({ submit: false, approve: false });
+  // DA-7 K1: the owner token on the operator is part of what a write needs, so it is named too.
   expect(result.writes.missing).toEqual([
+    'OWNER_TOKEN',
     'EXPUNGE_JOB_WRITE_TOKEN',
     'EXPUNGE_APPROVAL_TOKEN',
   ]);

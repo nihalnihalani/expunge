@@ -163,7 +163,7 @@ export function JobFrame({
           <StatusChip state={snapshot.status} />
           <span className="ex-note">
             Job status comes from the committed record; the completion verdict
-            is separate (Receipt tab).
+            is separate{tabs.includes('receipt') ? ' (Receipt tab)' : ''}.
           </span>
         </div>
       )}
@@ -191,7 +191,9 @@ export function JobFrame({
           <span>
             {state.notice === 'reset'
               ? 'This is its current committed state; earlier events were re-read.'
-              : 'The events were re-read from the start so none are skipped.'}
+              : state.failure?.code === 'projection_inconsistent'
+                ? 'The event list is withheld because the stream is still not contiguous. Job status above is read from the database.'
+                : 'The events were re-read from the start so none are skipped.'}
           </span>
         </div>
       )}

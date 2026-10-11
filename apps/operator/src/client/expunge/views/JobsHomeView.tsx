@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
+import { CommittedSeal } from '../components/CommittedSeal';
 import type {
   ExpungeJobList,
   ExpungeJobListItem,
@@ -171,7 +172,7 @@ export default function JobsHomeView(_props: ViewProps) {
             </EmptyState>
           ) : (
             <TableWrap label="Cleanup jobs">
-              <table className="ex-table">
+              <table className="ex-table ex-table--stack" role="table">
                 <caption>
                   {rows.length} of {jobs.data.items.length} jobs. Jobs that need
                   your decision come first.
@@ -179,21 +180,35 @@ export default function JobsHomeView(_props: ViewProps) {
                     ? ` Updated ${ageText(jobs.updatedAt, now)}.`
                     : ''}
                 </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Job</th>
-                    <th scope="col">Kind</th>
-                    <th scope="col">Subject</th>
-                    <th scope="col">World</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Completion verdict</th>
-                    <th scope="col">Updated</th>
+                <thead role="rowgroup">
+                  <tr role="row">
+                    <th scope="col" role="columnheader">
+                      Job
+                    </th>
+                    <th scope="col" role="columnheader">
+                      Kind
+                    </th>
+                    <th scope="col" role="columnheader">
+                      Subject
+                    </th>
+                    <th scope="col" role="columnheader">
+                      World
+                    </th>
+                    <th scope="col" role="columnheader">
+                      Status
+                    </th>
+                    <th scope="col" role="columnheader">
+                      Completion verdict
+                    </th>
+                    <th scope="col" role="columnheader">
+                      Updated
+                    </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody role="rowgroup">
                   {rows.map((item) => (
-                    <tr key={item.jobId}>
-                      <th scope="row">
+                    <tr key={item.jobId} role="row">
+                      <th scope="row" role="rowheader" data-label="Job">
                         <a
                           className="ex-link ex-data"
                           href={formatRoute({
@@ -205,26 +220,24 @@ export default function JobsHomeView(_props: ViewProps) {
                           {item.jobId}
                         </a>
                       </th>
-                      <td>{item.kind.replaceAll('_', ' ')}</td>
-                      <td>{item.subjectDisplay ?? '—'}</td>
-                      <td className="ex-data">{item.worldId ?? '—'}</td>
-                      <td>
+                      <td role="cell" data-label="Kind">
+                        {item.kind.replaceAll('_', ' ')}
+                      </td>
+                      <td role="cell" data-label="Subject">
+                        {item.subjectDisplay ?? '—'}
+                      </td>
+                      <td role="cell" data-label="World" className="ex-data">
+                        {item.worldId ?? '—'}
+                      </td>
+                      <td role="cell" data-label="Status">
                         <StatusChip state={item.status} />
                       </td>
-                      <td>
-                        {item.receiptDomainStatus ===
-                        'complete_in_registered_scope' ? (
-                          <StatusChip
-                            state="complete_in_scope"
-                            label="Complete in registered scope"
-                          />
-                        ) : item.receiptDomainStatus === 'incomplete' ? (
-                          <StatusChip state="incomplete" />
-                        ) : (
-                          <span className="ex-muted">No receipt committed</span>
-                        )}
+                      <td role="cell" data-label="Completion verdict">
+                        <ReceiptCell item={item} />
                       </td>
-                      <td className="ex-num">{formatTime(item.updatedAt)}</td>
+                      <td role="cell" data-label="Updated" className="ex-num">
+                        {formatTime(item.updatedAt)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -234,5 +247,51 @@ export default function JobsHomeView(_props: ViewProps) {
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * The receipt verdict is shown only when the list item names the committed receipt that carries
+ * it. A verdict without a receipt id, sequence or verified world revision is not rendered as
+ * "Complete" (DA-7 S1): the seal is the only authority badge.
+ */
+export function ReceiptCell({ item }: { item: ExpungeJobListItem }) {
+  const committed =
+    item.receiptId !== undefined &&
+    item.receiptSequence !== undefined &&
+    item.verifiedWorldRevision !== undefined;
+  if (!item.receiptDomainStatus || !committed)
+    return (
+      <span className="ex-muted">
+        {item.receiptDomainStatus
+          ? 'Receipt reference missing'
+          : 'No receipt committed'}
+      </span>
+    );
+  return (
+    <span className="ex-receipt-cell">
+      <CommittedSeal
+        source={{
+          kind: 'receipt',
+          id: item.receiptId!,
+          sequence: item.receiptSequence!,
+        }}
+      />
+      <StatusChip
+        state={
+          item.receiptDomainStatus === 'complete_in_registered_scope'
+            ? 'complete_in_scope'
+            : 'incomplete'
+        }
+        label={
+          item.receiptDomainStatus === 'complete_in_registered_scope'
+            ? 'Complete in registered scope'
+            : undefined
+        }
+      />
+      <span className="ex-muted ex-num">
+        as of world revision {item.verifiedWorldRevision}
+      </span>
+    </span>
   );
 }

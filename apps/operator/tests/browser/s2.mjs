@@ -43,22 +43,34 @@ export async function run(browser, cfg) {
       .locator('.ex-table tbody tr')
       .evaluateAll((rows) =>
         Object.fromEntries(
-          rows.map((row) => [
-            row.querySelector('th a')?.textContent,
-            row.querySelectorAll('td')[4]?.textContent?.trim(),
-          ]),
+          rows.map((row) => {
+            const cell = row.querySelectorAll('td')[4];
+            return [
+              row.querySelector('th a')?.textContent,
+              {
+                seals: cell?.querySelectorAll(
+                  '.ex-seal[data-source-kind="receipt"]',
+                ).length,
+                text: cell?.textContent ?? '',
+              },
+            ];
+          }),
         ),
       );
+    // DA-7 S1/NT-S1c: a verdict appears only with a receipt seal and the verified revision.
+    for (const [job, word] of [
+      ['job-complete', 'Complete in registered scope'],
+      ['job-incomplete', 'Incomplete'],
+    ])
+      check(
+        verdicts[job]?.seals === 1 &&
+          verdicts[job].text.includes(word) &&
+          /as of world revision \d+/.test(verdicts[job].text),
+        `the list shows ${job}'s verdict only through one receipt seal with its world revision`,
+      );
     check(
-      verdicts['job-complete'] === 'Complete in registered scope',
-      `the list shows the committed verdict for a complete job (${verdicts['job-complete']})`,
-    );
-    check(
-      verdicts['job-incomplete'] === 'Incomplete in registered scope',
-      `the list shows the committed verdict for an incomplete job (${verdicts['job-incomplete']})`,
-    );
-    check(
-      verdicts['job-live'] === 'No receipt committed',
+      verdicts['job-live']?.text.trim() === 'No receipt committed' &&
+        verdicts['job-live'].seals === 0,
       'a job without a receipt says so rather than showing a verdict',
     );
     await page.getByRole('button', { name: 'Needs your decision' }).click();
@@ -132,8 +144,8 @@ export async function run(browser, cfg) {
       'limits show used and cap',
     );
     check(
-      /#4/.test(await page.locator('.ex-feed').innerText()),
-      'the feed starts at the latest committed event',
+      /#4/.test(await page.locator('.ex-loglist').innerText()),
+      'the decision log starts at the latest committed event',
     );
     check(
       (await page.locator('.ex-seal').count()) === 0,
@@ -144,7 +156,7 @@ export async function run(browser, cfg) {
     // Advance on the server; the view follows without a reload.
     await control(cfg, 'advance/job-live');
     await page.waitForFunction(
-      () => /#5/.test(document.querySelector('.ex-feed')?.innerText ?? ''),
+      () => /#5/.test(document.querySelector('.ex-loglist')?.innerText ?? ''),
       null,
       { timeout: 8000 },
     );
@@ -249,7 +261,7 @@ export async function run(browser, cfg) {
       { timeout: 8000 },
     );
     check(true, 'Retry now reconnects and the banner clears');
-    const feed = await page.locator('.ex-feed-seq').allInnerTexts();
+    const feed = await page.locator('.ex-log-seq').allInnerTexts();
     check(
       new Set(feed).size === feed.length,
       'no committed event is shown twice after reconnecting',
@@ -271,7 +283,7 @@ export async function run(browser, cfg) {
     await open(page, cfg, '#/expunge/jobs/job-approval');
     await page.waitForSelector('.ex-steps');
     await page.waitForFunction(() =>
-      /#6/.test(document.querySelector('.ex-feed')?.innerText ?? ''),
+      /#6/.test(document.querySelector('.ex-loglist')?.innerText ?? ''),
     );
     await fetch(`${cfg.fixture}/__fixture/restart`, { method: 'POST' });
     await page.evaluate(() =>
@@ -286,10 +298,10 @@ export async function run(browser, cfg) {
       true,
       'a projection that moves backwards is reported as a backend reset',
     );
-    const seqs = await page.locator('.ex-feed-seq').allInnerTexts();
+    const seqs = await page.locator('.ex-log-seq').allInnerTexts();
     check(
       seqs[0] === '#4',
-      `the feed matches the backend's current committed state (${seqs[0]})`,
+      `the decision log matches the backend's current committed state (${seqs[0]})`,
     );
     await shoot(page, cfg, 's2-state-projection-reset-1440-light');
     await context.close();
@@ -399,6 +411,38 @@ export async function run(browser, cfg) {
           `${key}: targets are at least 24 x 24 (${JSON.stringify(scan.smallTargets.slice(0, 3))})`,
         );
         check(scan.unnamed.length === 0, `${key}: every control has a name`);
+        if (name === 'jobs' && width <= 430) {
+          const clipped = await page.evaluate(
+            () =>
+              [...document.querySelectorAll('.ex-tablewrap')].filter(
+                (wrap) => wrap.scrollWidth > wrap.clientWidth + 1,
+              ).length,
+          );
+          check(
+            clipped === 0,
+            `${key}: the jobs table is stacked, not clipped at the right edge`,
+          );
+        }
+        if (width <= 700) {
+          await page.evaluate(() => window.scrollTo(0, 600));
+          await page.waitForTimeout(100);
+          const bar = await page.evaluate(() => {
+            const menu = document.querySelector('.mobile-menu');
+            const top = document.querySelector('.topbar');
+            if (!menu || !top) return { missing: true };
+            const m = menu.getBoundingClientRect();
+            const t = top.getBoundingClientRect();
+            return {
+              sticky: getComputedStyle(top).position === 'sticky',
+              pinned: Math.abs(t.top) < 1,
+              under: t.bottom >= m.bottom && t.top <= m.top,
+            };
+          });
+          check(
+            !bar.missing && bar.sticky && bar.pinned && bar.under,
+            `${key}: after scrolling, the menu button sits on the pinned top bar, not over content (${JSON.stringify(bar)})`,
+          );
+        }
         check(scan.h1 === 1 && scan.main === 1, `${key}: one h1 and one main`);
         const regions = await page.evaluate(() =>
           [...document.querySelectorAll('.ex-tablewrap')].every(

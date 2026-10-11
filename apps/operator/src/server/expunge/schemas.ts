@@ -155,6 +155,7 @@ export const snapshotSchema: z.ZodType<ExpungeJobSnapshotV2> = z.object({
   kind: z.enum(JOB_KINDS),
   status: z.enum(JOB_STATUSES),
   sequence: int,
+  streamEpoch: id.optional(),
   runId: id.optional(),
   harness: z
     .object({
@@ -257,6 +258,9 @@ export const jobListSchema: z.ZodType<ExpungeJobList> = z.object({
         receiptDomainStatus: z
           .enum(['complete_in_registered_scope', 'incomplete'])
           .optional(),
+        receiptId: id.optional(),
+        receiptSequence: int.optional(),
+        verifiedWorldRevision: int.optional(),
         updatedAt: iso,
       }),
     )
@@ -462,6 +466,7 @@ function parseEvent(value: unknown, index: number): ForwardedProjectionEvent {
 export interface EventsPage {
   events: ForwardedProjectionEvent[];
   nextSequence: number;
+  streamEpoch?: string;
 }
 export function parseEventsPage(
   value: unknown,
@@ -472,6 +477,7 @@ export function parseEventsPage(
     .object({
       events: z.array(z.unknown()).max(MAX_EVENTS_PER_PAGE),
       nextSequence: int,
+      streamEpoch: id.optional(),
     })
     .safeParse(value);
   if (!page.success) throw new ProjectionRejected(issuesOf(page.error));
@@ -486,7 +492,9 @@ export function parseEventsPage(
   }
   if (page.data.nextSequence !== sequence)
     throw new ProjectionRejected(['nextSequence:cursor_mismatch']);
-  return { events, nextSequence: sequence };
+  return page.data.streamEpoch === undefined
+    ? { events, nextSequence: sequence }
+    : { events, nextSequence: sequence, streamEpoch: page.data.streamEpoch };
 }
 
 // ---- Artifact payloads ----

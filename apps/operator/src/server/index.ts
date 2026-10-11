@@ -1,3 +1,4 @@
+import './expunge/telemetry-default.js';
 import { webSearchProvider } from './parallel.js';
 import { createShutdown } from './shutdown.js';
 import { reportChannelFailure, safeFailure } from './slack-channel.js';
@@ -11,6 +12,7 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { expungeDomainFromEnv } from './expunge/domain-service.js';
 import { describeExpungeConfig } from './expunge/config.js';
+import { readBuildId } from './expunge/build-id.js';
 import { ensureExpungeDot } from './expunge/expunge-dot.js';
 import {
   intelligenceApiKeyFromEnv,
@@ -102,6 +104,7 @@ const app = createApp({
   platform,
   expungeDomain,
   expungeConfig: describeExpungeConfig(process.env),
+  expungeBuild: readBuildId(),
 });
 app.use('*', async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff');

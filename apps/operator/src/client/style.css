@@ -3467,6 +3467,14 @@ h3 {
   }
   .template-app .topbar {
     padding: 0 15px 0 48px;
+    /* The menu button is position: fixed here, so the bar stays under it instead of letting
+       scrolled content run beneath the button (measured at 390 px; WCAG 2.4.11). */
+    position: sticky;
+    top: 0;
+    z-index: 15;
+  }
+  html {
+    scroll-padding-top: 64px;
   }
   .template-app .new-conversation {
     padding: 20px 18px;

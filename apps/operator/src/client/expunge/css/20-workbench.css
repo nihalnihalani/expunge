@@ -164,29 +164,10 @@
   list-style: none;
   font-size: var(--ex-text-sm);
 }
-.ex-root .ex-feed {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--ex-rule-strong);
-  border-radius: var(--ex-radius-2);
-  background: var(--ex-surface);
-}
-.ex-root .ex-feed-row {
-  display: grid;
-  grid-template-columns: 4rem 11rem minmax(0, 1fr);
-  gap: var(--ex-space-4);
-  padding: var(--ex-space-3) var(--ex-space-4);
-  border-top: 1px solid var(--ex-rule);
-  font-size: var(--ex-text-sm);
-}
-.ex-root .ex-feed-row:first-child {
-  border-top: 0;
-}
-.ex-root .ex-feed-seq {
+.ex-root .ex-log-seq {
   color: var(--ex-ink2);
 }
-.ex-root .ex-feed-kind {
+.ex-root .ex-log-kind {
   font-weight: 600;
 }
 
@@ -198,15 +179,6 @@
 @container ex (max-width: 699px) {
   .ex-root .ex-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .ex-root .ex-feed-row {
-    grid-template-columns: 3.5rem minmax(0, 1fr);
-  }
-  .ex-root .ex-feed-kind {
-    grid-column: 2;
-  }
-  .ex-root .ex-feed-text {
-    grid-column: 1 / -1;
   }
 }
 
@@ -221,4 +193,56 @@
 /* Identifiers in tables do not break at hyphens; the table scrolls instead. */
 .ex-root .ex-table .ex-data {
   white-space: nowrap;
+}
+
+.ex-root .ex-receipt-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ex-space-2) var(--ex-space-3);
+}
+
+/* Narrow containers: the jobs table stacks into one block per job instead of scrolling
+   sideways. Roles are set in the markup so the table semantics survive display: block. */
+@container ex (max-width: 640px) {
+  .ex-root .ex-table--stack {
+    min-width: 0;
+  }
+  .ex-root .ex-table--stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .ex-root .ex-table--stack,
+  .ex-root .ex-table--stack tbody,
+  .ex-root .ex-table--stack tr,
+  .ex-root .ex-table--stack td,
+  .ex-root .ex-table--stack tbody th {
+    display: block;
+  }
+  .ex-root .ex-table--stack caption {
+    display: block;
+  }
+  .ex-root .ex-table--stack tbody tr {
+    padding: var(--ex-space-3) 0;
+    border-top: 1px solid var(--ex-rule);
+  }
+  .ex-root .ex-table--stack tbody th,
+  .ex-root .ex-table--stack td {
+    border-top: 0;
+    padding: var(--ex-space-2) var(--ex-space-4);
+  }
+  .ex-root .ex-table--stack td::before {
+    content: attr(data-label);
+    content: attr(data-label) / '';
+    display: block;
+    color: var(--ex-ink2);
+    font-size: var(--ex-text-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
 }

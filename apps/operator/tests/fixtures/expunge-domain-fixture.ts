@@ -262,23 +262,40 @@ export async function route(
     });
   }
   if (rest === 'jobs' && !isWrite) {
-    const items = [...state.jobs.values()].map(({ snapshot }) => ({
-      jobId: snapshot.jobId,
-      kind: snapshot.kind,
-      status: snapshot.status,
-      sequence: snapshot.sequence,
-      subjectDisplay: snapshot.subject?.display,
-      worldId: snapshot.world?.worldId,
-      harnessHash: snapshot.harness?.hash,
-      receiptDomainStatus:
-        (snapshot as { receiptVerdict?: string }).receiptVerdict === 'complete'
-          ? 'complete_in_registered_scope'
-          : (snapshot as { receiptVerdict?: string }).receiptVerdict ===
-              'incomplete'
-            ? 'incomplete'
-            : undefined,
-      updatedAt: snapshot.updatedAt,
-    }));
+    const items = [...state.jobs.values()].map(({ snapshot, events }) => {
+      const committed = events.find(
+        (item) => item.kind === 'receipt_committed',
+      );
+      const receiptFields =
+        committed && snapshot.receipt
+          ? {
+              receiptId: snapshot.receipt.receiptId,
+              receiptSequence: committed.sequence,
+              verifiedWorldRevision: (
+                committed.payload as { verifiedWorldRevision: number }
+              ).verifiedWorldRevision,
+            }
+          : {};
+      return {
+        ...receiptFields,
+        jobId: snapshot.jobId,
+        kind: snapshot.kind,
+        status: snapshot.status,
+        sequence: snapshot.sequence,
+        subjectDisplay: snapshot.subject?.display,
+        worldId: snapshot.world?.worldId,
+        harnessHash: snapshot.harness?.hash,
+        receiptDomainStatus:
+          (snapshot as { receiptVerdict?: string }).receiptVerdict ===
+          'complete'
+            ? 'complete_in_registered_scope'
+            : (snapshot as { receiptVerdict?: string }).receiptVerdict ===
+                'incomplete'
+              ? 'incomplete'
+              : undefined,
+        updatedAt: snapshot.updatedAt,
+      };
+    });
     return json(200, { items, nextCursor: null });
   }
   if (rest === 'jobs' && isWrite) {
@@ -293,7 +310,11 @@ export async function route(
   if (jobMatch) {
     const job = state.jobs.get(jobMatch[1]);
     if (!job) return json(404, { error: 'not found' });
-    if (!jobMatch[2] && !isWrite) return json(200, job.snapshot);
+    if (!jobMatch[2] && !isWrite)
+      return json(200, {
+        ...job.snapshot,
+        streamEpoch: `epoch-${state.restartCount}`,
+      });
     if (jobMatch[2] === 'events' && !isWrite) {
       const after = Number(url.searchParams.get('afterSequence') ?? '0');
       const limit = Math.min(
@@ -306,6 +327,7 @@ export async function route(
       return json(200, {
         events,
         nextSequence: events.at(-1)?.sequence ?? after,
+        streamEpoch: `epoch-${state.restartCount}`,
       });
     }
     if (jobMatch[2] === 'cancel' && isWrite) {

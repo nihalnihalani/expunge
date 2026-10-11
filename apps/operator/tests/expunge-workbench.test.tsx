@@ -2,7 +2,6 @@ import './fixtures/browser-globals';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { CoverageStatement } from '../src/client/expunge/components/CoverageStatement';
-import { EventFeed } from '../src/client/expunge/components/EventFeed';
 import { GapBanner } from '../src/client/expunge/components/GapBanner';
 import {
   STALE_AFTER_MS,
@@ -16,16 +15,8 @@ import JobsHomeView, {
   sortJobs,
 } from '../src/client/expunge/views/JobsHomeView';
 import WorkbenchView from '../src/client/expunge/views/WorkbenchView';
-import type {
-  ExpungeJobListItem,
-  ForwardedProjectionEvent,
-} from '../src/shared/expunge';
-import {
-  baseSnapshot,
-  event,
-  phaseStates,
-  startedPayload,
-} from './fixtures/expunge-data';
+import type { ExpungeJobListItem } from '../src/shared/expunge';
+import { baseSnapshot, phaseStates } from './fixtures/expunge-data';
 
 const route = { name: 'job', jobId: 'job-1', tab: 'workbench' } as const;
 
@@ -112,25 +103,6 @@ describe('CoverageStatement', () => {
     expect(html).toContain('Every registered collection has been inspected.');
     expect(html).toContain('declares no reference fields');
     expect(html).toContain('not a guarantee that every copy');
-  });
-});
-
-describe('EventFeed', () => {
-  const events = Array.from({ length: 14 }, (_, i) =>
-    event('job-1', i + 1, 'job_started', startedPayload),
-  ) as ForwardedProjectionEvent[];
-  it('shows the latest events newest first with an honest count', () => {
-    const html = renderToStaticMarkup(
-      <EventFeed events={events} dropped={5} />,
-    );
-    expect(html.indexOf('#14')).toBeLessThan(html.indexOf('#13'));
-    expect(html).not.toContain('#3<');
-    expect(html).toContain('Showing the latest 10 of 19 committed events.');
-  });
-  it('says nothing has been committed instead of inventing activity', () => {
-    expect(
-      renderToStaticMarkup(<EventFeed events={[]} dropped={0} />),
-    ).toContain('No committed events yet');
   });
 });
 

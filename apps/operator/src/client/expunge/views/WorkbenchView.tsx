@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { Hand } from 'lucide-react';
+import { CancelControl } from '../components/CancelControl';
 import { CoverageStatement } from '../components/CoverageStatement';
-import { EventFeed } from '../components/EventFeed';
+import { DecisionLog } from '../components/DecisionLog';
 import { GapBanner } from '../components/GapBanner';
 import { JobFrame } from '../components/JobFrame';
 import { LimitsStrip } from '../components/LimitsStrip';
 import { useAnnounce } from '../components/LiveRegion';
 import { PhaseStepper } from '../components/PhaseStepper';
+import { ReferenceSection } from '../components/ReferenceSection';
 import { formatTime, plural } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { isTerminal } from '../projection/selectors';
@@ -113,6 +115,7 @@ export default function WorkbenchView({ route }: ViewProps) {
                     </span>
                   </div>
                 )}
+              <CancelControl snapshot={snapshot} />
             </section>
             <section className="ex-section" aria-labelledby="ex-cov-h">
               <h2 className="ex-h2" id="ex-cov-h">
@@ -140,6 +143,7 @@ export default function WorkbenchView({ route }: ViewProps) {
                   </li>
                 ))}
               </ul>
+              <ReferenceSection snapshot={snapshot} />
             </section>
             <section className="ex-section" aria-labelledby="ex-limits-h">
               <h2 className="ex-h2" id="ex-limits-h">
@@ -149,9 +153,13 @@ export default function WorkbenchView({ route }: ViewProps) {
             </section>
             <section className="ex-section" aria-labelledby="ex-feed-h">
               <h2 className="ex-h2" id="ex-feed-h">
-                Committed events
+                Decision log
               </h2>
-              <EventFeed events={state.events} dropped={state.dropped} />
+              <DecisionLog
+                events={state.events}
+                dropped={state.dropped}
+                withheld={state.failure?.code === 'projection_inconsistent'}
+              />
             </section>
           </>
         );

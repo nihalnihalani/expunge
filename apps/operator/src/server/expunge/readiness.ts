@@ -193,14 +193,20 @@ export class ReadinessCache {
     private readonly ttlMs = 5000,
     private readonly clock: () => number = Date.now,
   ) {}
-  get(force = false, signal?: AbortSignal) {
+  /**
+   * The computation is shared by every caller for the cache window, so it must not take any one
+   * caller's abort signal: a viewer who navigates away would otherwise make everyone else see a
+   * timeout. The caller's signal only decides whether it keeps waiting for the answer; the
+   * domain transport has its own timeout.
+   */
+  get(force = false, _signal?: AbortSignal) {
     const now = this.clock();
     if (!force && this.entry && now - this.entry.at < this.ttlMs)
       return this.entry.value;
     const value = computeReadiness(
       this.config,
       this.domain,
-      signal,
+      undefined,
       () => new Date(now),
     );
     this.entry = { at: now, value };
