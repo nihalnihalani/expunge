@@ -14,6 +14,7 @@ import {
 } from '../../../packages/runtime/test/fakes.js';
 import {
   Dispatcher,
+  type AttestationPort,
   terminalEventFor,
   workerConfigFromEnv,
   type JobRunResult,
@@ -79,6 +80,7 @@ function rig(options: {
   ) => ProjectionSink;
   terminalSweep?: TerminalSweep;
   runtimeHash?: string;
+  attestations?: AttestationPort;
   setup?: (store: MultiJobStore) => void;
 }) {
   const bundle = options.bundle ?? makeBundle();
@@ -114,6 +116,7 @@ function rig(options: {
       ({ append: async (key: unknown, event: any) => void projected.push({ key, event }) } as ProjectionSink),
     ...(options.terminalSweep ? { terminalSweep: options.terminalSweep } : {}),
     ...(options.runtimeHash ? { runtimeHash: options.runtimeHash } : {}),
+    ...(options.attestations ? { attestations: options.attestations } : {}),
     log: (entry) => logs.push(entry),
     onResult: (result) => results.push(result),
   });
@@ -983,6 +986,31 @@ describe('follow-up (FAKE store, FAKE model): the deployed-harness check and the
     const failed = r.projected.find((p) => p.event.kind === 'job_failed');
     expect(failed?.event.payload).toMatchObject({ retryable: true });
     expect(r.store.jobs.get('job-1')!.status).not.toBe('succeeded');
+  });
+
+  it('records the attestation through the insert-only port with the session fence BEFORE the checkpoint copy, and a port failure fails closed', async () => {
+    const calls: Array<{ fence: number; source: string; modelId: string; at: Date }> = [];
+    const r = rig({
+      script: [fakeText('x')],
+      attestations: { record: async (_a, lease, att) => void calls.push({ ...att, fence: lease.fence }) },
+    });
+    await r.dispatcher.runJob('job-1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ fence: 1, source: 'fake', modelId: 'fake-deterministic-1' });
+    const snap = (r.store.checkpoints.get('job-1') as Snap[]).find((c) => c.attestedModels)!;
+    expect(snap.attestedModels![0]).toMatchObject({ fence: 1 }); // convenience copy still written
+
+    const failing = rig({
+      script: [fakeText('x')],
+      attestations: {
+        record: async () => {
+          throw new Error('AttestationConflict');
+        },
+      },
+    });
+    await failing.dispatcher.runJob('job-1');
+    expect(failing.fake.calls).toHaveLength(0);
+    expect(JSON.stringify(failing.store.checkpoints.get('job-1') ?? [])).not.toContain('attestedModels');
   });
 
   it('a takeover by a session with a different model appends a second stamp bound to its own fence and keeps the first', async () => {

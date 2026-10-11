@@ -60,6 +60,7 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
     dispatcher = new Dispatcher({
       jobs: wiring.jobs,
       resolver: wiring.resolver,
+      attestations: wiring.attestations,
       artifacts: wiring.artifacts,
       tools: createDomainToolWiring(wiring.service, { log: logEntry }).provider,
       runtimeHash: runtimeHash(),

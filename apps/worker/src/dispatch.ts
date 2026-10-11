@@ -111,6 +111,27 @@ export type JobRunResult = {
   receiptId?: string;
 };
 
+/**
+ * The insert-only per-fence attestation store (`AttestationRepository` in @expunge/mongo, domain_executor INSERT only).
+ * Structural so tests can fake it; the real repository satisfies it.
+ */
+export interface AttestationPort {
+  record(
+    actor: ActorContext,
+    lease: LeaseBinding,
+    attestation: {
+      fence: number;
+      source: string;
+      provider: string;
+      modelId: string;
+      spec: string;
+      endpoint?: string;
+      endpointHostHash?: string;
+      at: Date;
+    },
+  ): Promise<unknown>;
+}
+
 export type DispatcherDeps = {
   jobs: DispatchJobs;
   resolver: JobResolver;
@@ -118,6 +139,8 @@ export type DispatcherDeps = {
   tools: ToolProvider;
   models: ModelResolver;
   receipts: CompletionReceiptReader;
+  /** Authoritative per-fence model attestations. When set, a failed insert fails the session closed (the checkpoint copy is a convenience). */
+  attestations?: AttestationPort;
   config: WorkerConfig;
   env?: ProviderEnv;
   projection?: ProjectionSink;
@@ -550,6 +573,7 @@ export class Dispatcher implements WakeTarget {
         this.log({ level: 'warn', message: 'attestation checkpoint failed', jobId, code: errorCode(error) });
       }
     }
+    const attestedAt = new Date(); // fixed per session so an identical repeat insert is idempotent
     const hooks: ExecutionHooks = {
       // Written by the worker only, from what the runtime resolved (never from the profile or a caller). APPEND-ONLY:
       // one entry per claiming session, carrying its lease fence, so a takeover with another model leaves two stamps and
@@ -560,6 +584,12 @@ export class Dispatcher implements WakeTarget {
         const existing = writer.models;
         const sameFence = existing.some((e) => (e as { fence?: unknown } | null)?.fence === lease.fence);
         try {
+          // Authoritative, insert-only row first (a fenced-out holder cannot write it), then the checkpoint copy.
+          await this.deps.attestations?.record(actor, lease, {
+            fence: lease.fence,
+            ...attestation,
+            at: attestedAt,
+          });
           await writer.update(
             { attestedModels: sameFence ? existing : [...existing, entry] },
             { revertOnFailure: true },
