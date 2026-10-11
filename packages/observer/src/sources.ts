@@ -1,8 +1,6 @@
 import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import type { ScopeKey } from '@expunge/contracts';
 import { GuardFileError, parseGuardFile, type LeakGuard } from '@expunge/observability';
-import { ErasureSuppressionRepository, type MongoService } from '@expunge/mongo';
-import type { ExportSuppression } from './outbox-dispatcher.js';
 import type { ObserverWindow } from './process.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -52,15 +50,6 @@ export function loadGuardFile(
       throw new EvidenceSourceError(`EXPUNGE_LEAK_GUARD_FILE:${error.reason}`);
     throw new EvidenceSourceError('EXPUNGE_LEAK_GUARD_FILE:unreadable');
   }
-}
-
-/** The export-suppression source: users under an active erasure, read with the observer principal's own FIND right. */
-export function suppressionFromService(service: MongoService): ExportSuppression {
-  const repository = new ErasureSuppressionRepository(service);
-  return {
-    suppressedUserIds: async (providerOrganizationId) =>
-      new Set(await repository.activeUserKeys(providerOrganizationId)),
-  };
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;

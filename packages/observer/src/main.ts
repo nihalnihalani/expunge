@@ -6,7 +6,8 @@ import {
   type MongoService,
 } from '@expunge/mongo';
 import { createEvidenceProcess, type EvidenceLog, type EvidenceSources } from './process.js';
-import { loadGuardFile, suppressionFromService, windowFromEnv } from './sources.js';
+import { createMongoExportSuppression } from './mongo-suppression.js';
+import { loadGuardFile, windowFromEnv } from './sources.js';
 
 const log: EvidenceLog = (entry) => console.log(JSON.stringify({ at: new Date().toISOString(), ...entry }));
 
@@ -15,7 +16,7 @@ const log: EvidenceLog = (entry) => console.log(JSON.stringify({ at: new Date().
  * when BLOCKED, like the worker's `--readiness`. When READY it runs the dispatcher (and the observer when a window is
  * configured) until SIGINT/SIGTERM.
  *
- *  - export suppression: `ErasureSuppressionRepository.activeUserKeys` through the process's own `observer` principal.
+ *  - export suppression: `createMongoExportSuppression` (bounded, hashed injective keys, HOLDs on a full list) through the process's own `observer` principal.
  *    Needs only `MONGODB_OBSERVER_URI`.
  *  - leak guard: the file the privacy controller exports (`EXPUNGE_LEAK_GUARD_FILE`, see loadGuardFile).
  *  - observer window: `EXPUNGE_OBSERVER_WINDOW_START`/`_END`/`_VERSION`/`_EVENT_NAME`; without them only the outbox
@@ -44,7 +45,7 @@ export async function main(
           })
         : undefined;
     sources = {
-      ...(service ? { suppression: suppressionFromService(service) } : {}),
+      ...(service ? { suppression: createMongoExportSuppression(service) } : {}),
       ...(guard ? { guard } : {}),
     };
     window = windowFromEnv(env);
