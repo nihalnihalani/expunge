@@ -65,6 +65,7 @@ export function atlasRoleManifests(
         'campaign_authority_touches',
         'decisions',
         'wake_commands',
+        'run_attestations',
         // The operator-facing service runs as this principal and serves committed projections: events, the per-job
         // sequence counters and the deployment history (promotions) are read-only here.
         'projection_events',
@@ -94,6 +95,8 @@ export function atlasRoleManifests(
         'decisions',
         // Wake-command deduplication ids, insert-only.
         'wake_commands',
+        // The lease holder's per-fence model attestation, insert-only (AttestationRepository).
+        'run_attestations',
         // The gateway's insert-only step log: subject, resolution, discovery, plans, sweeps, diagnostics.
         ...DOMAIN_STEP_COLLECTIONS,
       ]),
@@ -123,6 +126,10 @@ export function atlasRoleManifests(
         'stream_offsets',
         // The export gate's narrow read: users under erasure, and which split a job's world belongs to.
         'erasure_suppressions',
+        // The latest leak-guard export generation: a guard file older than it, or one that does not cover the current
+        // subject set, is held, not used.
+        'guard_exports',
+        'subject_set_generations',
         'world_splits',
       ]),
       control('INSERT', [
@@ -191,6 +198,8 @@ export function atlasRoleManifests(
         'completion_receipts',
         'effects',
         'preview_plans',
+        // The model attestation per fence the gate checks (insert-only, written by the worker).
+        'run_attestations',
       ]),
       // gate_claims: INSERT, then UPDATE of `state` only through the gate's compare-and-set (a collection grant cannot
       // narrow it). gate_attempts: the atomic per-parent counter (upsert = INSERT + UPDATE). campaign_artifact_permits:
@@ -276,6 +285,7 @@ export function atlasRoleManifests(
         'campaign_artifact_rows',
         // The operator Evaluation view reads the grader's insert-only gate reports.
         'gate_reports',
+        'run_attestations',
         'stream_offsets',
       ]),
       control('CHANGE_STREAM', ['projection_events']),
@@ -297,6 +307,8 @@ export function atlasRoleManifests(
         'telemetry_outbox',
         'lessons',
         'erasure_suppressions',
+        'guard_exports',
+        'subject_set_generations',
       ]),
       control('UPDATE', [
         // A tombstone replaces a raw row or a lesson; a suppression flips `active`.
@@ -310,6 +322,8 @@ export function atlasRoleManifests(
         'jobs',
         'telemetry_outbox',
         'projection_sequences',
+        // Bumped (upsert) in the transaction that registers subject tokens.
+        'subject_set_generations',
       ]),
       control('INSERT', [
         'artifact_eligibility',
@@ -324,6 +338,9 @@ export function atlasRoleManifests(
         'projection_events',
         'projection_sequences',
         'jobs',
+        // The leak guard's export generation, insert-only (GuardExportRepository).
+        'guard_exports',
+        'subject_set_generations',
       ]),
       control('REMOVE', ['raw_artifacts', 'subject_tokens']),
     ]),

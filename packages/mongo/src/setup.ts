@@ -11,6 +11,7 @@ import {
 } from './validators.js';
 import { CAMPAIGN_RESULT_COLLECTIONS, CAMPAIGN_RESULT_INDEXES } from './validators-campaign.js';
 import { GATE_CONTROL_COLLECTIONS, GATE_CONTROL_INDEXES } from './validators-extra.js';
+import { ATTEST_COLLECTIONS, ATTEST_INDEXES } from './validators-attest.js';
 import { PRIVACY_COLLECTIONS, PRIVACY_INDEXES } from './validators-privacy.js';
 
 export const WORLD_COLLECTIONS = [
@@ -73,6 +74,7 @@ export const CONTROL_COLLECTIONS = [
   ...GATE_CONTROL_COLLECTIONS,
   ...CAMPAIGN_RESULT_COLLECTIONS,
   ...PRIVACY_COLLECTIONS,
+  ...ATTEST_COLLECTIONS,
 ] as const;
 export const PRIVATE_COLLECTIONS = [
   'fixture_specs',
@@ -172,6 +174,7 @@ export const CONTROL_INDEXES: IndexEntry[] = [
   ...GATE_CONTROL_INDEXES,
   ...CAMPAIGN_RESULT_INDEXES,
   ...PRIVACY_INDEXES,
+  ...ATTEST_INDEXES,
 ];
 export const WORLD_INDEXES: IndexEntry[] = [
   ...WORLD_COLLECTIONS.filter((n) =>

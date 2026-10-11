@@ -355,6 +355,26 @@ describe('role manifests: structural negatives (offline mirror of rbac.integrati
     expect(holders('INSERT', 'world_revisions')).not.toContain('grader');
   });
 
+  it('keeps run attestations and guard exports insert-only with named writers and readers', () => {
+    expect(holders('INSERT', 'run_attestations')).toEqual(['domain_executor']);
+    expect(holders('FIND', 'run_attestations').sort()).toEqual([
+      'domain_executor',
+      'grader',
+      'projection_reader',
+    ]);
+    expect(holders('INSERT', 'guard_exports')).toEqual(['privacy_controller']);
+    expect(holders('FIND', 'guard_exports').sort()).toEqual(['observer', 'privacy_controller']);
+    // The subject-set generation is bumped by the privacy controller when it registers subjects; the observer only reads it.
+    expect(holders('INSERT', 'subject_set_generations')).toEqual(['privacy_controller']);
+    expect(holders('UPDATE', 'subject_set_generations')).toEqual(['privacy_controller']);
+    expect(holders('REMOVE', 'subject_set_generations')).toEqual([]);
+    expect(holders('FIND', 'subject_set_generations').sort()).toEqual(['observer', 'privacy_controller']);
+    for (const collection of ['run_attestations', 'guard_exports']) {
+      expect(holders('UPDATE', collection), collection).toEqual([]);
+      expect(holders('REMOVE', collection), collection).toEqual([]);
+    }
+  });
+
   it('keeps the gateway step log insert-only and with the worker alone', () => {
     for (const collection of [
       'job_subjects',

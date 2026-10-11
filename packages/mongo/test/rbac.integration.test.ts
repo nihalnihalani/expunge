@@ -467,6 +467,25 @@ describeRbac('real authenticated local replica-set RBAC (not Atlas provisioning)
     // The operator Evaluation view reads gate reports; it cannot write them.
     await allowed('projection_reader', 'gate_reports', ['find']);
     await denied('projection_reader', 'gate_reports', ['insert', 'update', 'remove']);
+    // Per-fence model attestations: the worker inserts, the gate reads, nobody changes one.
+    await allowed('domain_executor', 'run_attestations', ['find', 'insert']);
+    await denied('domain_executor', 'run_attestations', ['update', 'remove']);
+    await allowed('grader', 'run_attestations', ['find']);
+    await denied('grader', 'run_attestations', ['insert', 'update', 'remove']);
+    await allowed('projection_reader', 'run_attestations', ['find']);
+    await denied('projection_reader', 'run_attestations', ['insert', 'update', 'remove']);
+    await denied('promoter', 'run_attestations', ['find', 'insert', 'update', 'remove']);
+    // Leak-guard export generations: the privacy controller inserts, the observer reads.
+    await allowed('privacy_controller', 'guard_exports', ['find', 'insert']);
+    await denied('privacy_controller', 'guard_exports', ['update', 'remove']);
+    await allowed('observer', 'guard_exports', ['find']);
+    await denied('observer', 'guard_exports', ['insert', 'update', 'remove']);
+    await denied('domain_executor', 'guard_exports', ['find', 'insert', 'update', 'remove']);
+    await allowed('privacy_controller', 'subject_set_generations', ['find', 'insert', 'update']);
+    await denied('privacy_controller', 'subject_set_generations', ['remove']);
+    await allowed('observer', 'subject_set_generations', ['find']);
+    await denied('observer', 'subject_set_generations', ['insert', 'update', 'remove']);
+    await denied('domain_executor', 'subject_set_generations', ['find', 'insert', 'update', 'remove']);
     // The fixture builder can write NO standing authority: raw-driver inserts are denied. Its campaign row is separate.
     await denied('fixture_builder', 'authority_revisions', ['insert', 'update', 'remove']);
     await denied('fixture_builder', 'authority_touches', ['insert', 'update', 'remove']);

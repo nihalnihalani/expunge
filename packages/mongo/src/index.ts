@@ -25,3 +25,6 @@ export * from './campaign.js';
 export * from './campaign-artifacts.js';
 export * from './privacy-stores.js';
 export * from './world-splits.js';
+export * from './attestations.js';
+export * from './guard-exports.js';
+export { ATTEST_COLLECTIONS, ATTEST_VALIDATORS, ATTEST_INDEXES } from './validators-attest.js';
