@@ -1,39 +1,37 @@
 # Expunge project state (sanitized, version-controlled)
 
-Updated: 2026-10-11 12:24Z (real UTC) by team-lead at a usage-limit switch (spec section 20). Checkpoint pack 20261011T122117Z-85f4b535 (base abafe0b) holds every lane's WIP; a final pack is taken after this commit. The portable resume prompt is in the ignored HANDOFF.md and reproduced below.
+Updated: 2026-10-11 13:10Z (real UTC) by team-lead after the takeover in the Claude Code CLI. The takeover brief is `docs/continuity/briefs/TAKEOVER-2026-10-11.md`.
 
 ## Objective
 
-Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt` (sections 1 to 20) in this workspace. Local commits are authorized. Public publishing, production deployment changes, paid upgrades and external messaging require explicit human authorization.
+Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt` (sections 1 to 20) in this workspace. Local commits are authorized; the human's standing instruction is to push every commit to the private origin. Public publishing, visibility changes, production deployment changes, paid upgrades and external messaging require explicit human authorization.
 
 ## Engine and team
 
-- Engine: Claude Code inside the Claude desktop app. Native Agent Teams are CLI-only per the official docs; this build uses named subagents with per-agent model selection and direct messaging as a role-preserving adapter. See `docs/continuity/OWNERSHIP.md`.
-- Lead effective model: `claude-fable-5-1` (session model). Spec requested `claude-opus-5-5`.
-- Teammates: spawned with `opus` / `sonnet` / `haiku` aliases; effective IDs are recorded in TASKS.json when each teammate reports.
+- Engine: Claude Code CLI 2.1.296, agent teams enabled. Named teammates in the session's implicit team, messaging via SendMessage. See `docs/continuity/OWNERSHIP.md`.
+- Lead effective model: `claude-opus-5-5` (as requested). Teammates: devils-advocate on opus; mongodb-authority, gateway-controls, runtime-raindrop, rsi-evolution, ui-ux-improver, verifier and verifier-2 on sonnet; commit-steward on haiku. TASKS.json records the effective IDs that each teammate reports.
 
 ## Current constraints (facts, not narrative)
 
 | Item | State |
 |---|---|
-| Git | branch `main`; HEAD e2e1db1 = origin/main, 42 commits (baseline fe12b51; per-lane packets PKT-2 to PKT-18 each followed by a COMMIT-LEDGER row commit); remote `origin` = https://github.com/nihalnihalani/expunge (private); every commit is pushed immediately (human instruction); workspace-adding packets get a lock regenerated from the staged tree; every packet passes the HEAD-green gate (npm ci + typecheck on a scratch export of the staged index) |
-| Root `.env` | MISSING. All Atlas, model-provider, Raindrop and CopilotKit Intelligence live checks are BLOCKED until it exists. Required variable names are listed in `.env.example`. |
-| `apps/operator/.env` | MISSING (operator loads root `.env` through `apps/operator/scripts/run-from-root.mjs`) |
-| Node / npm | v25.2.1 / 11.6.2 (root engines `>=24`) |
-| Docker | 28.4.0 server via colima; local replica-set tests use `packages/mongo/test/docker-compose.yml` |
-| Baseline checks | `npx vitest run`: 55 passed, 17 skipped (Mongo integration suites skip without `MONGODB_TEST_URI`), exit 0. `npm run typecheck`: 1 error (`packages/mongo/test/integration.test.ts` Uint8Array.equals). |
+| Git | branch `main`; HEAD a4af80c = origin/main at takeover (54 commits); remote `origin` is private; every commit passes the HEAD-green gate and is pushed |
+| Working tree | about 101 dirty or untracked lane paths at takeover, identical to checkpoint 20261011T122853Z-81ef900a (pack MATCH 318, worktree MATCH 1011) |
+| Root `.env` | MISSING. All Atlas, model-provider, Raindrop and CopilotKit Intelligence live checks are BLOCKED until it exists. Required names are in `.env.example` and `docs/ENVIRONMENT.md`. |
+| Node / npm | 24.13.1 / 11.8.0 installed through nvm at takeover (the supported floor); machine default stays 25.2.1, and teammates prefix PATH with 24.13.1 |
+| Docker | colima; local replica sets on 27018 (protocol), 27019 (RBAC), 27218 (verifier-2), 27418 (gateway-controls) |
+| Typecheck at takeover | `npm run typecheck` exit 0 (node 25.2.1, working tree) |
 
 ## Phase progress
 
 | Phase | Status | Evidence |
 |---|---|---|
-| P0 audit | done | see Baseline checks |
-| P0 tooling / continuity skeleton | done | this file, OWNERSHIP.md, TASKS.json; checkpoint tooling 35/35 |
-| Wave A repair (A2-R mongo, A3-R fixtures/grader) | done | commits fe12b51, e165d48, ae59942 |
-| Wave B (gateway, worker/OpenMuse, operator UX) | B2 done (191cbb4); B1 governance half done (c663bfd), domain gateway in progress; B3 S1 under verification (PKT-10), S2 in progress | commits 191cbb4, c663bfd; VERIFICATION.md |
-| Wave C (Raindrop, compiler/evolver, admission/promotion) | C2 done (4eb6d5d, cd821d6; DA-5a fixes PKT-19 in verification); C1a verified and approved (PKT-14), C1c fixes and C1b integration next; C3 in progress | checkpoints 0f466519, cf40f999, 86e41ce5 |
-| Wave D (Hider, meta, privacy) | briefed (docs/continuity/briefs/D1, D2, D3) | |
-| Wave E (reliability, benchmark, deployment) | briefed (E1, E2, E3); restore drill passed | VERIFICATION.md verifier-2 section |
+| P0 audit, tooling, continuity | done | checkpoint tooling; takeover reconciliation ALL MATCH |
+| Wave A repair (mongo, fixtures/grader) | done | fe12b51, e165d48, ae59942 |
+| Wave B | B2 worker done (191cbb4 and follow-ups); B1 governance done (c663bfd), domain gateway PKT-16 in progress (DA-5 must-fix); B3 operator S1 and S2 landed, S3 in progress (DA-7) | COMMIT-LEDGER.md |
+| Wave C | C2 compiler/evolver done (PKT-5, PKT-9, PKT-19); C1a and C1c landed (PKT-14, PKT-21 217a55a), C1b held in tree; C3 fixtures/grader keyed derivation landed (PKT-23 22b015f), gate and deployment HELD (PKT-24/25, DA-8) | COMMIT-LEDGER.md |
+| Wave D | D1 Hider and D3 privacy started (tree only); D2 briefed | TASKS.json |
+| Wave E | E1, E2, E3 briefed; restore drill passed (V-3b) | VERIFICATION.md |
 
 ## Decisions
 
@@ -53,19 +51,12 @@ Build the full-scope Expunge project described in `EXPUNGE-CLAUDE-GOAL-SPEC.txt`
 - Root `.env` with the principal URIs, provider key(s), CopilotKit Intelligence key and Raindrop keys. Names only in `.env.example`.
 - Confirmation that the Atlas deployment is the email-invitation Hackathon Sandbox, and whether the account can create custom roles.
 - Raindrop plan entitlement (Issues/Experiments are Pro-only per research notes).
-- Node runtime: the machine has 22.23.2, 24.11.1 and 25.2.1 under nvm; none is in the fixed range `>=24.13.1 <25.0.0 || >=25.4.0` (util.inspect regression nodejs/node#60717 breaks error logging in the operator runtime and anything that logs a ZodError). Installing Node 24.13.1 is a download that needs the human: `nvm install 24.13.1 && nvm use 24.13.1`. Until then tests run on 25.2.1 with the operator's never-throwing console wrapper as mitigation.
+- `research/` publication decision and repository visibility.
 
+## Next actions (13:10Z)
 
-## Switch notice and resume (2026-10-11 12:24Z)
-
-HEAD abafe0b = origin/main (46 commits). Index empty. About 142 dirty or untracked lane paths, all captured in the checkpoint pack above. Packets in flight: PKT-21 C1c (verifier-2), PKT-23/24/25 C3 (verifier), PKT-26 continuity (verifier-2); PKT-16 domain gateway under the DA-5 must-fix list with gateway-controls on DG3/DG4/DG6; C1b held behind PKT-21; P1b after PKT-21; operator S3 with the DA-7 must-fix set; D1 and D3 started; DA-8 in progress. Human-blocked: root .env, Node 24.13.1, research/ decision, repository visibility.
-
-Resume: read CLAUDE.md, the spec (section 20 first), HANDOFF.md if present, this file, TASKS.json, OWNERSHIP.md, COMMIT-LEDGER.md, PHASE-CHECKPOINTS.md, VERIFICATION.md and the LATEST checkpoint; run `git status` and `npm run checkpoint:verify -- <full pack path>`; reconcile without resetting anything; respawn the roster per OWNERSHIP.md (including verifier-2 and gateway-controls) and re-send frozen paths and standing rules; first approve the green packets from VERIFICATION.md to the steward, then unfreeze owners, then finish PKT-16 and wire the real episode port. Live checks remain BLOCKED until the human provides the root .env.
-
-## Next actions
-
-1. Land PKT-9 (evolution) and PKT-10 (operator S1); unfreeze owners.
-2. B1 domain gateway packet (mongodb-authority), then DA-5 gateway review by reading.
-3. C1 Raindrop packet (runtime-raindrop) with the offline-replayable outbox; live sender BLOCKED on root .env.
-4. C3 gate and deployment (rsi-evolution); DA-5a governance and evolution review (devils-advocate).
-5. B3 S2 to S8 operator slices; V-3 probes and the Claude-to-Codex handoff drill.
+1. PKT-16 domain gateway: gateway-controls finishes durable workflow/visit enforcement, lease-fenced step log, replay digests and cumulative budgets (controls.ts, workflow.ts, budget.ts); mongodb-authority finishes the rest of the packet; devils-advocate re-reads DA-5; a verifier runs the matrix; commit.
+2. C1b worker packet plus durable phase meters across takeover (runtime-raindrop); then V-3 fixes: zombie failure fencing, crash-lost terminal projection, corrupt resume-token recovery.
+3. Wire createDomainToolProvider into the worker; worker-backed EpisodePort with grader reads of committed receipts (runtime-raindrop with rsi-evolution).
+4. DA-8 closure (rsi-evolution fixes, D8-3 by mongodb-authority, devils-advocate re-read), then PKT-24 and PKT-25.
+5. Operator S3 to S8 and DA-7 (ui-ux-improver); D1, D3, then D2, E1, E2 and E3.

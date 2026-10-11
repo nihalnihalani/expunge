@@ -1,44 +1,47 @@
 {
-  "exportedAt": "2026-10-11T12:34:00Z",
+  "exportedAt": "2026-10-11T13:12Z",
   "canonicalTracker": "claude-mem work_state list 'expunge-build' (lead-maintained); this file is a sanitized mirror",
-  "engine": "claude-code-desktop-named-subagents",
-  "leadEffectiveModel": "claude-fable-5-1",
+  "engine": "Claude Code CLI 2.1.296, CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1; named teammates in the session implicit team",
+  "leadEffectiveModel": "claude-opus-5-5",
   "teammates": {
     "mongodb-authority": {
       "requested": "claude-sonnet-5-5",
-      "effective": "claude-sonnet-5-5"
+      "effective": "pending first report (respawned 13:05Z)"
     },
     "rsi-evolution": {
       "requested": "claude-sonnet-5-5",
-      "effective": "claude-sonnet-5-5"
+      "effective": "pending first report (respawned 13:05Z)"
     },
     "runtime-raindrop": {
       "requested": "claude-sonnet-5-5",
-      "effective": "claude-sonnet-5-5"
+      "effective": "pending first report (respawned 13:05Z)"
     },
     "verifier": {
       "requested": "claude-sonnet-5-5",
-      "effective": "claude-sonnet-5-5"
+      "effective": "pending first report (respawned 13:05Z)"
     },
     "ui-ux-improver": {
       "requested": "claude-sonnet-5-5",
-      "effective": "claude-sonnet-5-5"
+      "effective": "pending first report (respawned 13:05Z)"
     },
     "devils-advocate": {
       "requested": "claude-opus-5-5",
-      "effective": "claude-opus-5-5"
+      "effective": "pending first report (respawned 13:05Z)"
     },
     "commit-steward": {
       "requested": "claude-haiku-5-5",
-      "effective": "claude-haiku-5-5"
+      "effective": "pending first report (respawned 13:05Z)"
+    },
+    "gateway-controls": {
+      "requested": "claude-sonnet-5-5",
+      "effective": "pending first report"
+    },
+    "verifier-2": {
+      "requested": "claude-sonnet-5-5",
+      "effective": "pending first report"
     }
   },
-  "barrier": {
-    "active": true,
-    "declaredAt": "2026-10-11T12:21:00Z",
-    "reason": "human announced imminent usage limit; spec section 20 switch",
-    "mode": "every agent asked to finish its in-progress edit to a whole file, stop, and report; verifiers to stop at a clean point; steward commits only PKT-29 state docs"
-  },
+  "barrier": null,
   "tasks": [
     {
       "id": "P0-1",
@@ -63,7 +66,7 @@
       "title": "Spawn roster and verify effective models",
       "owner": "team-lead",
       "status": "done",
-      "evidence": "all seven reported effective model IDs matching requests; lead is claude-fable-5-1"
+      "evidence": "respawned at 13:05Z takeover in CLI agent teams"
     },
     {
       "id": "P0-5",
@@ -202,7 +205,9 @@
       "title": "Gateway review by reading plus negative-test specification (no exploit scripts)",
       "owner": "devils-advocate",
       "status": "doing",
-      "dependsOn": ["B1"],
+      "dependsOn": [
+        "B1"
+      ],
       "evidence": "dispatched 12:32Z on packages/domain working tree"
     },
     {
@@ -244,8 +249,8 @@
       "id": "PKT-9",
       "title": "Commit packet C2-2 evolution (new workspace; lock regenerated)",
       "owner": "commit-steward",
-      "status": "doing",
-      "evidence": "verifier green at checkpoint cf40f999; 20 pathspecs approved 11:31Z"
+      "status": "done",
+      "evidence": "landed per COMMIT-LEDGER"
     },
     {
       "id": "PKT-10",
@@ -402,8 +407,8 @@
       "id": "PKT-21",
       "title": "C1c DA-6 fixes, propagator pin, agent_diagnostic, additive contracts (24 files)",
       "owner": "verifier-2 then commit-steward",
-      "status": "doing",
-      "evidence": "verifier-2 GREEN 12:25Z: 28 files (not 24), checkpoint 1bd65026, 198/2 skipped with replica set, export lock one entry changed, regression 744/72; approved to steward at the switch"
+      "status": "done",
+      "evidence": "landed 217a55a"
     },
     {
       "id": "PKT-22",
@@ -416,8 +421,8 @@
       "id": "PKT-23",
       "title": "C3 P1 fixtures/grader keyed derivation + second solver (18 files)",
       "owner": "verifier then commit-steward",
-      "status": "doing",
-      "evidence": "verifier GREEN (checkpoint 4a849c71; 133/133; byte-identity 60/60 except generator and manifest hashes); approved to steward at the switch after PKT-21 and PKT-26"
+      "status": "done",
+      "evidence": "landed 22b015f"
     },
     {
       "id": "PKT-24",
@@ -437,14 +442,15 @@
       "id": "PKT-26",
       "title": "Verifier continuity packet (8 paths) + VERIFICATION.md snapshot",
       "owner": "verifier-2 then commit-steward",
-      "status": "doing",
-      "evidence": "verifier-2 GREEN: 42/42 continuity, restore scenarios pass, 5/6 mutations killed; open: SRV exemption untested, scanner side effects (reserved-host and bearer-fixture substring), --pack-only wording; approved to steward at the switch with VERIFICATION.md snapshot"
+      "status": "done",
+      "evidence": "landed 90cb692"
     },
     {
       "id": "PKT-27",
       "title": "DA-7 operator client review document",
       "owner": "commit-steward",
-      "status": "doing"
+      "status": "done",
+      "evidence": "landed (DA-7 document) per COMMIT-LEDGER"
     },
     {
       "id": "GC-1",
@@ -464,7 +470,8 @@
       "id": "PKT-29",
       "title": "Switch state docs commit",
       "owner": "commit-steward",
-      "status": "doing"
+      "status": "done",
+      "evidence": "landed bcfc5ad"
     }
   ],
   "blocked": [
@@ -472,11 +479,6 @@
       "item": "Live Atlas/model/Raindrop/Intelligence proof",
       "reason": "root .env missing",
       "unblockedBy": "human creates root .env with names from .env.example"
-    },
-    {
-      "item": "Node runtime in fixed range",
-      "reason": "installed 22.23.2/24.11.1/25.2.1 all affected by nodejs/node#60717",
-      "unblockedBy": "human runs nvm install 24.13.1"
     }
   ],
   "git": {
@@ -524,8 +526,9 @@
     "headGreenGate": "since PKT-11: npm ci + npm run typecheck on a scratch export of the staged index before every commit; exit codes in the ledger row"
   },
   "switch": {
-    "checkpoint": "20261011T122117Z-85f4b535",
-    "finalCheckpoint": "taken after PKT-29; see .expunge/checkpoints/LATEST",
-    "resumePrompt": "HANDOFF.md section RESUME PROMPT; mirrored in PROJECT-STATE.md Switch notice"
+    "takeoverAt": "2026-10-11T13:01Z",
+    "checkpoint": "20261011T122853Z-81ef900a",
+    "verify": "pack MATCH 318, worktree MATCH 1011",
+    "head": "a4af80c"
   }
 }
