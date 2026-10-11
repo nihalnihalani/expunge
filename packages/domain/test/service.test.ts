@@ -117,13 +117,14 @@ describe('each token works only on its own route family, for the one owner it is
     expect((await call('GET', '/internal/projection/jobs', READ, { owner: 'someone-else' })).status).toBe(
       403,
     );
-    expect((await call('GET', '/internal/projection/jobs', READ)).status).toBe(501);
+    // An allowed read of a route this package still does not serve is a 501 (jobs, events and the list are served now).
+    expect((await call('GET', '/internal/projection/proposals/p-1', READ)).status).toBe(501);
   });
 
   it('keeps read, job-write and approval apart', async () => {
     const matrix: Array<[string, string, string, number]> = [
       // method, path, token, expected status (501 = allowed, but served by the projection layer)
-      ['GET', '/internal/projection/jobs', READ, 501],
+      ['GET', '/internal/projection/threads/t-1', READ, 501],
       ['GET', '/internal/projection/jobs', JOB, 403],
       ['GET', '/internal/projection/jobs', APPROVAL, 403],
       ['GET', '/internal/projection/jobs/job-1/events', JOB, 403],
@@ -136,7 +137,7 @@ describe('each token works only on its own route family, for the one owner it is
       ['POST', '/internal/projection/proposals/p-1/decision', JOB, 403],
       ['POST', '/internal/projection/proposals/p-1/decision', APPROVAL, 501],
       ['GET', '/internal/projection/artifacts/a-1', JOB, 403],
-      ['GET', '/internal/projection/artifacts/a-1', READ, 501],
+      ['GET', '/internal/projection/proposals/p-1', READ, 501],
     ];
     for (const [method, path, token, status] of matrix)
       expect(
