@@ -1,0 +1,17 @@
+# PKT-49 manifest (Lineage/rollback view), 2026-10-11T16:03:46Z; HEAD 355cd31 (PKT-40 and PKT-45 landed) stacked with the PKT-46, 49, 52, 53, 56 manifests in that order, S5 held tab patch applied; node 24.13.1. Build id of the stack up to and including this packet: d674fde25249bb8780cb41486d09ea70e7a297e57a774ec5a064e0ccf5238729. Evidence (screenshots, results-s*.json) comes from the full stack through PKT-56, build id f7191af190b98436a8348cf006b99869c050cb2bec17efcec21801a34c1c0964. Lineage PAGE test (no ex-seal in any data state). Flake note: one earlier full vitest run had 1 failure in upstream tests/telemetry.test.ts; isolated reruns and later full runs passed; cause not found. The S6 patch is stale against the shared/schema edits in PKT-53 and will be regenerated after PKT-53 lands.
+09f22e58b224316b48d35a075dacb58b9b76c63a179d14415fcbfacd9c40d9a7  apps/operator/src/client/expunge/views/LineageView.tsx
+fd99474b2d24a4e539c409f3435eea8e0e9beeab4fab5af8b55910381095abe7  apps/operator/src/client/expunge/css/56-lineage.css
+cd457f2a3f3cb59ffbb895e7f2808491b29f15758db59b0da0addc71c36bf343  apps/operator/tests/browser/s6.mjs
+afdd90eba05fb963f85f0dd22afa108cde01c5d5b1184c17660fd78ca01d7c9d  apps/operator/tests/expunge-lineage.test.tsx
+d2cae62720c73da31d8faf89a7eaebd3434c10127c8a090047dd439b7d0c3d49  apps/operator/tests/fixtures/ext/50-lineage.ts
+7cc007be38fab07c1177be9213b025eb58f2764ee517238ba998c19c1fe0fb8f  docs/ui/S6-held-refused-rollbacks.patch
+4c88eeecafb57afb36612d87bd4d6eac4d85485a19d1e7938b3d2619ad95b98d  docs/ui/screens/s6/results-s6.json
+74cf5a8dcdb9014d8fab4c54974339d1b672bb86d1cace41d4e83ae0e850fde6  docs/ui/screens/s6/s6-lineage-1024-dark.png
+04e7cf5e269f430967a401d65e9dd15e31ba0841d5efcf2b201f441fdcdfc233  docs/ui/screens/s6/s6-lineage-1024-light.png
+66d62d26ae24071aeb6a12fd7715beeb5cf2b83825195e80ad474970b27e47da  docs/ui/screens/s6/s6-lineage-1440-dark.png
+385183130583324d3b49fe5819a9ab8ff4ffa11cff848a8207effca6485184a7  docs/ui/screens/s6/s6-lineage-1440-light.png
+dfeef58d45dd4f81e78fd44fcb920d4d292c0d3111092ad9af927a25316a3db2  docs/ui/screens/s6/s6-lineage-390-dark.png
+3c725e8f2e4dfc1d96a758db14b4dc33e7120ae9020b9f564d6db207675ed8e7  docs/ui/screens/s6/s6-lineage-390-light.png
+b79665d74cb74fd25033d49ad68f264b45030c96457f0c7e78af2a1adac8c131  docs/ui/screens/s6/s6-lineage-768-dark.png
+21ea2dabfcb274f6afb8926bdc53facad5c03f12a64ad283ef5dfda35b6412be  docs/ui/screens/s6/s6-lineage-768-light.png
+2053274d4255fb6e0079c260b488f686b375458ce511a8d90a1837bea0ecdd2c  docs/ui/screens/s6/s6-lineage-worker-1440-light.png

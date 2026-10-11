@@ -1,0 +1,24 @@
+--- a/apps/operator/src/shared/expunge.ts	2026-10-11 20:37:19
++++ b/apps/operator/src/shared/expunge.ts	2026-10-11 20:37:19
+@@ -882,6 +882,8 @@
+     childHash: string;
+     reasonCodes: string[];
+   }>;
++  /** Rollbacks the deployment service refused (for example RollbackNeedsGrant). Absent when the backend does not report them. */
++  refusedRollbacks?: Array<{ toHash: string; code: string; at: string }>;
+ }
+ export interface CampaignView {
+   campaignId: string;
+--- a/apps/operator/src/server/expunge/schemas.ts	2026-10-11 20:37:19
++++ b/apps/operator/src/server/expunge/schemas.ts	2026-10-11 20:37:29
+@@ -809,6 +809,10 @@
+       }),
+     )
+     .max(100),
++  refusedRollbacks: z
++    .array(z.object({ toHash: hash, code: text(64), at: iso }))
++    .max(50)
++    .optional(),
+ });
+ const campaign: z.ZodType<CampaignView> = z.object({
+   campaignId: id,
