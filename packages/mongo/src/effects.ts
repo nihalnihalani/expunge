@@ -40,7 +40,11 @@ export function deriveEffectKey(
     'effect-key',
   );
 }
-/** Digest of what the effect does. A different target set or effect kind under the same key is a conflict. */
+/**
+ * Digest of what the effect does. A different target set, effect kind or set of expected record versions under the
+ * same key is a conflict: the versions are part of what the plan approved, so a replay at other versions is a
+ * different action, never a duplicate of the committed one.
+ */
 export function deriveArgsDigest(
   intent: Pick<
     ActionIntent,
@@ -52,7 +56,9 @@ export function deriveArgsDigest(
     | 'batchOrdinal'
     | 'targetAddresses'
     | 'effectKind'
-  >,
+  > &
+    // Optional only for callers that digest an intent with no targets; `assertDerivedIdentity` always passes the whole intent.
+    Partial<Pick<ActionIntent, 'expectedDocumentVersions'>>,
 ): string {
   return contentHash(
     {
@@ -63,6 +69,10 @@ export function deriveArgsDigest(
       approvedPlanHash: intent.approvedPlanHash,
       batchOrdinal: intent.batchOrdinal,
       targetHash: deriveTargetHash(intent.targetAddresses),
+      versions: (intent.expectedDocumentVersions ?? []).map((entry) => ({
+        address: canonicalAddress(entry.address),
+        version: entry.version,
+      })),
       effectKind: intent.effectKind,
     },
     'effect-args',
@@ -193,8 +203,9 @@ export class EffectRepository {
       actor.authorizationRevision !== intent.policyDecision.authorizationRevision
     )
       fail('EffectNotAuthorized');
-    assertDerivedIdentity(intent);
+    // Structure first: a malformed version list is VersionBindingMismatch, not a digest mismatch that hides why.
     assertVersionBinding(intent);
+    assertDerivedIdentity(intent);
     const saved = await this.replay(actor, intent);
     if (saved) return saved;
     const receiptId = randomUUID(),

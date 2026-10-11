@@ -13,6 +13,12 @@ export interface OwnerPolicy {
   readonly redactionReplacement: string;
   /** Registered field id that holds the record's private payload, or null when the collection has none. */
   payloadFieldId(collectionId: string): string | null;
+  /**
+   * Whether a registered field carries identity: a value that names the subject exactly (an id, an alias, an e-mail).
+   * Only identity fields seed discovery, resolve the subject's bindings and select other records. A free field
+   * (a country code, a status) never does, however many records share its value.
+   */
+  isIdentityField(fieldId: string): boolean;
 }
 
 const SYNTHETIC_V1 = {
@@ -29,6 +35,11 @@ export const SYNTHETIC_OWNER_POLICY_V1: OwnerPolicy = Object.freeze({
   subjectCollectionId: 'customers',
   redactionReplacement: '[redacted]',
   payloadFieldId: (collectionId: string) => `${collectionId}.private_payload`,
+  // The synthetic registries name their identity-bearing fields by convention; a policy for another registry names its own.
+  isIdentityField: (fieldId: string) =>
+    fieldId.endsWith('.identity_binding') ||
+    fieldId === 'customers.aliases' ||
+    fieldId === 'customers.identity_email',
 });
 
 const POLICIES: readonly OwnerPolicy[] = [SYNTHETIC_OWNER_POLICY_V1];

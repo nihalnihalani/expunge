@@ -42,12 +42,16 @@ export type InfrastructureHashes = {
 export * from './primitives.js';
 
 /**
- * Limits stated by docs/expunge/ACCEPTANCE.md ("Worker execution" and "Controlled world" rows): at most 12
- * model/tool phases each, 120 seconds per episode, a 24,000 total token cap, 500 documents and five reference hops.
+ * Limits from docs/expunge/ACCEPTANCE.md ("Worker execution" and "Controlled world" rows): 120 seconds per episode,
+ * a 24,000 total token cap, 500 documents and five reference hops. The phase ceiling is 16 model calls and 16 tool
+ * calls under amendment A-1 (PREREGISTRATION.md, recorded before any result). ACCEPTANCE.md stated 12. A cleanup plan
+ * applies one batch per effect kind, and the ten fixture families need 2 to 4 apply calls per plan. At 12 calls the
+ * expert procedure could not reach verification on four-batch plans or run its verification-failure round at all.
+ * The amendment applies identically to every arm (W0, expert-static, evolved, score-only, wrong-incident).
  */
 export const ACCEPTANCE_LIMITS = {
-  modelCalls: 12,
-  toolCalls: 12,
+  modelCalls: 16,
+  toolCalls: 16,
   scannedDocuments: 500,
   changedDocuments: 500,
   traversalDepth: 5,
@@ -94,7 +98,7 @@ const w0Workflow: WorkflowGraph = {
     node('resolve', 'resolve_subject', 1, { scope: 'inspect.output' }),
     node('discover', 'discover_references', 1, { subject: 'resolve.output' }),
     node('preview', 'preview_cleanup', 1, { targets: 'discover.output' }),
-    node('apply', 'apply_cleanup_batch', 3, { plan: 'preview.output' }),
+    node('apply', 'apply_cleanup_batch', 5, { plan: 'preview.output' }),
     node('complete', 'complete_cleanup', 1, { plan: 'preview.output' }),
   ],
   edges: [
@@ -102,21 +106,29 @@ const w0Workflow: WorkflowGraph = {
     { from: 'resolve', to: 'discover', when: 'success' },
     { from: 'discover', to: 'preview', when: 'success' },
     { from: 'preview', to: 'apply', when: 'success' },
+    { from: 'apply', to: 'apply', when: 'batches_remaining' },
     { from: 'apply', to: 'apply', when: 'retryable_error' },
     { from: 'apply', to: 'complete', when: 'success' },
   ],
   terminalNodeIds: ['complete'],
 };
 
-/** Expert procedure: bounded discovery loop, verification before completion, verification failure re-enters discovery. */
+/**
+ * Expert procedure: bounded discovery loop, verification before completion, verification failure re-enters discovery.
+ * A plan is applied one batch per call (`batches_remaining` until the last batch, then `success`). The re-entry is a
+ * second round discover -> preview -> apply -> verify, so preview and verify allow two visits and apply allows six
+ * (a four-batch first round plus a smaller second round). Summed maxVisits stays within ACCEPTANCE_LIMITS.toolCalls
+ * (16): 1+1+3+2+6+2+1 = 16. With preview at one visit (the pre-enforcement value), the gateway's runtime workflow
+ * enforcement denied every second round at preview, so the verification-failure branch could never complete.
+ */
 const expertWorkflow: WorkflowGraph = {
   entryNodeId: 'inspect',
   nodes: [
     node('inspect', 'inspect_scope'),
     node('resolve', 'resolve_subject', 1, { scope: 'inspect.output' }),
     node('discover', 'discover_references', 3, { subject: 'resolve.output', frontier: 'discover.output' }),
-    node('preview', 'preview_cleanup', 1, { targets: 'discover.output' }),
-    node('apply', 'apply_cleanup_batch', 3, { plan: 'preview.output' }),
+    node('preview', 'preview_cleanup', 2, { targets: 'discover.output' }),
+    node('apply', 'apply_cleanup_batch', 6, { plan: 'preview.output' }),
     node('verify', 'verify_registered_scope', 2, { plan: 'preview.output' }),
     node('complete', 'complete_cleanup', 1, { receipt: 'verify.output' }),
   ],
@@ -126,6 +138,7 @@ const expertWorkflow: WorkflowGraph = {
     { from: 'discover', to: 'discover', when: 'more_references' },
     { from: 'discover', to: 'preview', when: 'success' },
     { from: 'preview', to: 'apply', when: 'success' },
+    { from: 'apply', to: 'apply', when: 'batches_remaining' },
     { from: 'apply', to: 'apply', when: 'retryable_error' },
     { from: 'apply', to: 'verify', when: 'success' },
     { from: 'verify', to: 'discover', when: 'verification_failed' },
@@ -257,6 +270,7 @@ export const DISCLOSED_PRIMITIVES = {
   workflowEdgeConditions: [
     'success',
     'more_references',
+    'batches_remaining',
     'needs_approval',
     'retryable_error',
     'verification_failed',

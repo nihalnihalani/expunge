@@ -1,0 +1,19 @@
+{
+  "name": "@expunge/domain",
+  "version": "0.1.0",
+  "description": "Trusted domain gateway: the nine typed, job-bound worker tools, owner-policy effects, registered-scope verification and the operator projection service.",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@expunge/baselines": "0.1.0",
+    "@expunge/contracts": "0.1.0",
+    "@expunge/governance": "0.1.0",
+    "@expunge/harness-compiler": "0.1.0",
+    "@expunge/mongo": "0.1.0",
+    "@expunge/runtime": "0.1.0",
+    "@expunge/vendor-openmuse": "0.1.0",
+    "mongodb": "7.7.0",
+    "zod": "4.6.5"
+  }
+}

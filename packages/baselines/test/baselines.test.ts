@@ -89,7 +89,7 @@ describe('baseline harness bundles', () => {
     expect(DISCLOSED_PRIMITIVES.guardrailOps).toContain('receipt_valid');
   });
 
-  it('both bundles declare visit bounds consistent with the frozen 12-phase tool-call budget (DA-2 E4)', () => {
+  it('both bundles declare visit bounds consistent with the 16-call tool budget of amendment A-1 (DA-2 E4)', () => {
     for (const bundle of [buildW0Bundle(testHashes), buildExpertStaticBundle(testHashes)]) {
       const visits = bundle.workflow.nodes.reduce((sum, nodeDef) => sum + nodeDef.maxVisits, 0);
       expect(visits).toBeLessThanOrEqual(bundle.limits.toolCalls);
@@ -101,11 +101,69 @@ describe('baseline harness bundles', () => {
       inspect: 1,
       resolve: 1,
       discover: 3,
-      preview: 1,
-      apply: 3,
+      preview: 2,
+      apply: 6,
       verify: 2,
       complete: 1,
     });
+    expect(buildExpertStaticBundle(testHashes).limits.toolCalls).toBe(16);
+    expect(buildW0Bundle(testHashes).limits.toolCalls).toBe(16);
+  });
+
+  /** Walks a bundle's workflow edge by edge, asserting every visit stays within the node's maxVisits. */
+  function walk(bundle: ReturnType<typeof buildExpertStaticBundle>, steps: Array<[string, string]>): string {
+    const limit = new Map(bundle.workflow.nodes.map((nodeDef) => [nodeDef.id, nodeDef.maxVisits]));
+    const visits = new Map<string, number>();
+    let at = bundle.workflow.entryNodeId;
+    for (const [nodeId, outcome] of steps) {
+      expect(at).toBe(nodeId);
+      visits.set(nodeId, (visits.get(nodeId) ?? 0) + 1);
+      expect(visits.get(nodeId)!, nodeId).toBeLessThanOrEqual(limit.get(nodeId)!);
+      const edge = bundle.workflow.edges.find(
+        (candidate) => candidate.from === nodeId && candidate.when === outcome,
+      );
+      expect(edge, `${nodeId} on ${outcome}`).toBeDefined();
+      at = edge!.to;
+    }
+    expect(bundle.workflow.terminalNodeIds).toContain(at);
+    return at;
+  }
+
+  it('the expert procedure applies a four-batch plan, fails verification and completes a second round within its bounds', () => {
+    const expert = buildExpertStaticBundle(testHashes);
+    walk(expert, [
+      ['inspect', 'success'],
+      ['resolve', 'success'],
+      ['discover', 'more_references'],
+      ['discover', 'success'],
+      ['preview', 'success'],
+      ['apply', 'batches_remaining'],
+      ['apply', 'batches_remaining'],
+      ['apply', 'batches_remaining'],
+      ['apply', 'success'],
+      ['verify', 'verification_failed'],
+      ['discover', 'success'],
+      ['preview', 'success'],
+      ['apply', 'batches_remaining'],
+      ['apply', 'success'],
+      ['verify', 'success'],
+    ]);
+  });
+
+  it('W0 applies a four-batch plan with one retry and completes without verification', () => {
+    const w0 = buildW0Bundle(testHashes);
+    walk(w0, [
+      ['inspect', 'success'],
+      ['resolve', 'success'],
+      ['discover', 'success'],
+      ['preview', 'success'],
+      ['apply', 'batches_remaining'],
+      ['apply', 'retryable_error'],
+      ['apply', 'batches_remaining'],
+      ['apply', 'batches_remaining'],
+      ['apply', 'success'],
+    ]);
+    expect(w0.workflow.nodes.some((nodeDef) => nodeDef.toolId === 'verify_registered_scope')).toBe(false);
   });
 
   it('workflow size is bounded by graphNodes/graphEdges, not by reference-traversal limits (DA-2 B5)', () => {
@@ -150,19 +208,27 @@ describe('baseline harness bundles', () => {
     ]) {
       expect(acceptance, text).toContain(text);
     }
+    // ACCEPTANCE.md stated 12 phases; amendment A-1 (PREREGISTRATION.md) raises the call ceilings to 16 for every arm.
+    const preregistration = readFileSync(new URL('../../../PREREGISTRATION.md', import.meta.url), 'utf8');
+    expect(acceptance).toContain('amendment A-1');
+    expect(preregistration).toContain('A-1');
+    expect(preregistration).toMatch(/A-1[^\n]*16 model calls and 16 tool calls/);
     expect(ACCEPTANCE_LIMITS).toMatchObject({
-      modelCalls: 12,
-      toolCalls: 12,
+      modelCalls: 16,
+      toolCalls: 16,
       wallTimeMs: 120_000,
       totalTokens: 24_000,
     });
-    // These three are lead-set owner maxima: nothing in ACCEPTANCE.md states them.
+    // These three are lead-set owner maxima: nothing in ACCEPTANCE.md states them. The amendment A-1 sentence (whose 16
+    // is the call ceiling, not a graph cap) is removed before the check.
+    const acceptanceStated = acceptance.replace(/The phase ceiling is raised[^|]*/, '');
+    expect(acceptanceStated).not.toContain('amendment A-1');
     for (const value of [
       WORKFLOW_GRAPH_CAPS.graphNodes,
       WORKFLOW_GRAPH_CAPS.graphEdges,
       PROVISIONAL_COST_CEILING_MICROUSD,
     ]) {
-      expect(acceptance.includes(String(value)), String(value)).toBe(false);
+      expect(acceptanceStated.includes(String(value)), String(value)).toBe(false);
     }
     expect(OWNER_EPISODE_LIMITS).toEqual({
       ...ACCEPTANCE_LIMITS,

@@ -55,8 +55,9 @@ export function buildDecisionInput(snapshot: JobSnapshot): DecisionInput {
   const allBatchesCommitted = plan !== null && plan.committedBatches >= plan.batchCount;
   const bindings: Record<string, unknown> = {
     preview_plan: plan === null ? null : planCurrent ? 'valid' : 'invalid',
+    // A plan with nothing to apply has nothing to commit: it is valid while current, so verification can still follow.
     action_receipt:
-      plan === null || plan.committedBatches === 0
+      plan === null || (plan.committedBatches === 0 && plan.batchCount > 0)
         ? null
         : allBatchesCommitted && planCurrent
           ? 'valid'

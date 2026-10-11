@@ -66,6 +66,9 @@ Administration API; driver `createRole` is used only by the local RBAC test.
   the intent's targets (once each, non-negative integer versions; otherwise `VersionBindingMismatch`), re-reads every
   target's `_rev` inside the transaction before `apply` runs (`StaleDocumentVersion`), and refuses an `apply` that returns
   fewer effects than targets (`PartialEffect`). A refused batch writes nothing: no effect row, receipt or counter move.
+  The derived `argsDigest` binds those versions, so replaying an effect key at other versions is an
+  `IdempotencyConflict`, never the saved receipt. Malformed version lists are reported as `VersionBindingMismatch`
+  before the digest is compared.
 - **No world write outside an effect.** `ScopeRepository.writeField` takes the effect transaction's session and throws
   `EffectTransactionRequired` without one; `applyEffect` is the single-update path the gateway uses.
 - **A world key comes from a stored row.** `JobRepository.worldKey(actor, jobId)` reads the job and mints the `WorldKey`;
@@ -120,4 +123,7 @@ both URIs and the require flag set.
 (64 hex) plus `EXPUNGE_TENANT_ID`, `EXPUNGE_ENV`, `EXPUNGE_SCOPE_ID` it also seeds that scope's authority row and a policy
 per target; behavioral changes need approval unless `EXPUNGE_BEHAVIORAL_REQUIRES_APPROVAL` is exactly `0`. Without the
 floor hash nothing is seeded and promotion and effects fail closed. `npm run probe:mongo` reports server version, topology
-and transaction support without printing credentials.
+and transaction support without printing credentials. With `MONGODB_DOMAIN_EXECUTOR_URI` set it also reports a `boundary`
+block for the worker principal (privileges that name the private database, whether a direct read of it is refused with
+code 13, and `rbacEnforced`). On a local replica set without authentication that block says `rbacEnforced: false`; it
+describes the server it ran against and is not evidence about an Atlas custom role.

@@ -1,4 +1,4 @@
-import type { Collection } from 'mongodb';
+import type { ClientSession, Collection } from 'mongodb';
 import {
   contentHash,
   validateHarnessBundle,
@@ -42,17 +42,22 @@ export class ArtifactRepository {
     validateHarnessBundle(envelope.payload);
     if (contentHash(envelope.payload) !== envelope._id) fail('ArtifactHashMismatch');
   }
-  async read(hash: string): Promise<ArtifactEnvelope> {
-    const envelope = await this.collection.findOne({ _id: hash });
+  async read(hash: string, session?: ClientSession): Promise<ArtifactEnvelope> {
+    const envelope = await this.collection.findOne({ _id: hash }, { session });
     if (!envelope) fail('ArtifactNotFound');
     this.verify(envelope);
     return envelope;
   }
-  async readPermitted(key: ScopeKey, hash: string): Promise<ArtifactEnvelope> {
+  /**
+   * The artifact, if it is currently permitted for this scope. With a `session` the eligibility row is read in that
+   * transaction's snapshot, so a revocation that lands before the transaction commits conflicts with it instead of
+   * slipping past a read made outside it.
+   */
+  async readPermitted(key: ScopeKey, hash: string, session?: ClientSession): Promise<ArtifactEnvelope> {
     const permission = await this.service.control
       .collection('artifact_eligibility')
-      .findOne({ ...scopeFilter(key), artifactHash: hash, state: 'permitted' });
+      .findOne({ ...scopeFilter(key), artifactHash: hash, state: 'permitted' }, { session });
     if (!permission) fail('ArtifactIneligible');
-    return this.read(hash);
+    return this.read(hash, session);
   }
 }

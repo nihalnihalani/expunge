@@ -195,6 +195,30 @@ describe('derived effect identity', () => {
     expect(deriveArgsDigest({ ...base, targetAddresses: other })).not.toBe(base.argsDigest);
     expect(deriveArgsDigest({ ...base, effectKind: 'redact' })).not.toBe(base.argsDigest);
   });
+  it('binds the record versions the plan approved: the same targets at other versions are another action', () => {
+    const versioned = intent('job-1', { targets: base.targetAddresses, versions: [3] });
+    expect(versioned.argsDigest).not.toBe(base.argsDigest);
+    expect(versioned.effectKey).toBe(base.effectKey);
+    expect(
+      deriveArgsDigest({
+        ...versioned,
+        expectedDocumentVersions: versioned.expectedDocumentVersions.map((entry) => ({
+          ...entry,
+          version: 4,
+        })),
+      }),
+    ).not.toBe(versioned.argsDigest);
+    // Spelling an address another way (`5` versus `'5'` for an int id) does not change the digest.
+    const spelled = [{ collectionId: 'c', recordId: '5', recordIdBsonType: 'int' as const }];
+    const plain = [{ collectionId: 'c', recordId: 5, recordIdBsonType: 'int' as const }];
+    const digestOf = (targets: typeof plain | typeof spelled) =>
+      deriveArgsDigest({
+        ...base,
+        targetAddresses: targets,
+        expectedDocumentVersions: targets.map((address) => ({ address, version: 2 })),
+      });
+    expect(digestOf(spelled)).toBe(digestOf(plain));
+  });
   it('canonicalizes target spellings and binds the decision to the intent', () => {
     const spelled = [{ collectionId: 'c', recordId: '5', recordIdBsonType: 'int' as const }];
     const plain = [{ collectionId: 'c', recordId: 5, recordIdBsonType: 'int' as const }];

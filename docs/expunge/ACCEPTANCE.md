@@ -87,7 +87,7 @@ Use this **proposed initial configuration**, frozen in a campaign manifest after
 | Configuration | Initial value |
 |---|---|
 | Controlled world | At most 500 domain documents, six collections, five reference hops; fixture generator must satisfy these bounds. |
-| Worker execution | At most 12 model/tool phases each, 120 seconds per episode, 24,000 total token cap; document/effect caps from owner scope. |
+| Worker execution | At most 12 model/tool phases each, 120 seconds per episode, 24,000 total token cap; document/effect caps from owner scope. The phase ceiling is raised to 16 model calls and 16 tool calls by amendment A-1 (PREREGISTRATION.md), for every arm, before any result. |
 | Parallel episodes | Start with four; raise to eight only after provider-rate and Atlas-ops probes support it. |
 | Candidate mutation | At most three independently justified edits; no authority increase without a bound grant. |
 | Training trigger evidence | Two distinct structural failure worlds, three repeats each per parent/candidate. |

@@ -10,6 +10,8 @@ import type { HarnessBundle } from '@expunge/contracts';
 import { ELIGIBILITY_POLICY_HASH, ELIGIBILITY_POLICY_ID } from '../../fixtures/src/index.js';
 import {
   DEFAULT_AUTHORITY_FLOOR,
+  EFFECT_TOOLS,
+  FloorMismatch,
   FloorViolation,
   GATEWAY_RULES,
   PolicyEvaluator,
@@ -226,7 +228,7 @@ describe('policy evaluation', () => {
   const evaluator = (bundle: HarnessBundle = expert()) =>
     new PolicyEvaluator(bundle, DEFAULT_AUTHORITY_FLOOR);
   const decide = (bundle: HarnessBundle, snapshot: Partial<JobSnapshot>, revision = 1) =>
-    evaluator(bundle).decide(base(snapshot), revision).decision;
+    evaluator(bundle).decide(base(snapshot), revision, DEFAULT_AUTHORITY_FLOOR.hash).decision;
 
   it('allows a granted read tool with no prerequisite', () => {
     expect(decide(expert(), { toolId: 'inspect_scope' })).toEqual({
@@ -297,15 +299,21 @@ describe('policy evaluation', () => {
       allowedEffects: ['delete'],
       maxLimits: OWNER_EPISODE_LIMITS,
     });
-    const out = new PolicyEvaluator(expert(), tight).decide(base({ toolId: 'resolve_subject' }), 1).decision;
+    const tightBundle: HarnessBundle = { ...expert(), authorityFloorHash: tight.hash };
+    const out = new PolicyEvaluator(tightBundle, tight).decide(
+      base({ toolId: 'resolve_subject' }),
+      1,
+      tight.hash,
+    ).decision;
     expect(out.result).toBe('deny');
     expect(out.ruleIds).toContain(GATEWAY_RULES.toolNotInFloor);
-    const effect = new PolicyEvaluator(expert(), tight).decide(
+    const effect = new PolicyEvaluator(tightBundle, tight).decide(
       base({
         toolId: 'inspect_scope',
         batch: { documentCount: 1, effectKind: 'tombstone', policyStatus: 'eligible' },
       }),
       1,
+      tight.hash,
     ).decision;
     expect(effect.ruleIds).toContain(GATEWAY_RULES.effectNotInFloor);
   });
@@ -347,8 +355,27 @@ describe('policy evaluation', () => {
         batch: { documentCount: 3, effectKind: 'delete', policyStatus: 'eligible' },
       }).result,
     ).toBe('allow');
-    // No batch yet: the fact is null, the comparison is unknown, and an ask rule fires.
-    expect(decide(asking, { ...ready, batch: null }).result).toBe('ask');
+    // An effect with no batch is unknown and denied outright (DA-5a G2), whatever the ask rule would have said.
+    expect(decide(asking, { ...ready, batch: null }).result).toBe('deny');
+    // For a read, an unknown fact still makes an ask rule fire: unknown is never collapsed to allow.
+    const unknownFact: HarnessBundle = {
+      ...expert(),
+      guardrails: [
+        {
+          ruleId: 'ask_when_frontier_open',
+          predicate: {
+            op: 'compare',
+            comparator: 'gt',
+            left: { kind: 'fact', factId: 'frontier_open_count' },
+            right: { kind: 'constant', value: 0 },
+          },
+          result: 'ask',
+          sourceEvidenceIds: [],
+          appliesTo: ['inspect_scope'],
+        },
+      ],
+    };
+    expect(decide(unknownFact, { toolId: 'inspect_scope', discovery: null }).result).toBe('ask');
     // A deny from another source outranks the ask.
     expect(
       decide(asking, {
@@ -360,5 +387,112 @@ describe('policy evaluation', () => {
 
   it('reports the authorization revision it was given and never trusts the bundle for it', () => {
     expect(decide(expert(), { toolId: 'inspect_scope' }, 7).authorizationRevision).toBe(7);
+  });
+
+  describe('DA-5a G1: the floor is the one the bundle names and the one stored for the scope', () => {
+    const noDelete = createAuthorityFloor({
+      allowedTools: WORKER_TOOL_IDS,
+      allowedEffects: ['redact', 'restrict', 'tombstone'],
+      maxLimits: OWNER_EPISODE_LIMITS,
+    });
+    it('G1: refuses to build an evaluator whose floor is not the floor the bundle names', () => {
+      const bundle: HarnessBundle = { ...expert(), authorityFloorHash: noDelete.hash };
+      expect(() => new PolicyEvaluator(bundle, DEFAULT_AUTHORITY_FLOOR)).toThrow(FloorMismatch);
+      expect(() => new PolicyEvaluator(expert(), noDelete)).toThrow('FloorMismatch');
+      expect(() => new PolicyEvaluator(bundle, noDelete)).not.toThrow();
+    });
+    it('G1: a floor that excludes delete denies a delete batch under its own bundle, never allows it', () => {
+      const bundle: HarnessBundle = { ...expert(), authorityFloorHash: noDelete.hash };
+      const verdict = new PolicyEvaluator(bundle, noDelete).decide(
+        base({
+          toolId: 'apply_cleanup_batch',
+          plan: plan(),
+          batch: { documentCount: 1, effectKind: 'delete', policyStatus: 'eligible' },
+        }),
+        1,
+        noDelete.hash,
+      );
+      expect(verdict.decision.result).toBe('deny');
+      expect(verdict.decision.ruleIds).toContain(GATEWAY_RULES.effectNotInFloor);
+    });
+    it('G1: denies with gateway:floor_mismatch when the stored owner floor is no longer the run floor', () => {
+      const evaluator = new PolicyEvaluator(expert(), DEFAULT_AUTHORITY_FLOOR);
+      const verdict = evaluator.decide(base({ toolId: 'inspect_scope' }), 1, 'b'.repeat(64));
+      expect(verdict.decision.result).toBe('deny');
+      expect(verdict.decision.ruleIds).toContain(GATEWAY_RULES.floorMismatch);
+      expect(GATEWAY_RULES.floorMismatch).toBe('gateway:floor_mismatch');
+      // The same call under the stored floor is allowed, so the deny comes from the mismatch alone.
+      expect(
+        evaluator.decide(base({ toolId: 'inspect_scope' }), 1, DEFAULT_AUTHORITY_FLOOR.hash).decision.result,
+      ).toBe('allow');
+    });
+  });
+
+  describe('DA-5a G2: an effect with an unknown batch fails closed', () => {
+    it('G2: apply_cleanup_batch with batch null is deny gateway:batch_unknown even when the plan is current', () => {
+      const verdict = new PolicyEvaluator(expert(), DEFAULT_AUTHORITY_FLOOR).decide(
+        base({ toolId: 'apply_cleanup_batch', plan: plan(), batch: null }),
+        1,
+        DEFAULT_AUTHORITY_FLOOR.hash,
+      );
+      expect(verdict.decision.result).toBe('deny');
+      expect(verdict.decision.ruleIds).toContain(GATEWAY_RULES.batchUnknown);
+      expect(GATEWAY_RULES.batchUnknown).toBe('gateway:batch_unknown');
+    });
+    it('G2: a batch whose effect kind is not one of the four is also unknown', () => {
+      const verdict = new PolicyEvaluator(expert(), DEFAULT_AUTHORITY_FLOOR).decide(
+        base({
+          toolId: 'apply_cleanup_batch',
+          plan: plan(),
+          batch: { documentCount: 1, effectKind: 'purge' as never, policyStatus: 'eligible' },
+        }),
+        1,
+        DEFAULT_AUTHORITY_FLOOR.hash,
+      );
+      expect(verdict.decision.ruleIds).toContain(GATEWAY_RULES.batchUnknown);
+    });
+    it('G2: the same tool with a known allowed batch is still allowed', () => {
+      expect(EFFECT_TOOLS).toEqual(['apply_cleanup_batch']);
+      const verdict = new PolicyEvaluator(expert(), DEFAULT_AUTHORITY_FLOOR).decide(
+        base({
+          toolId: 'apply_cleanup_batch',
+          plan: plan(),
+          batch: { documentCount: 1, effectKind: 'redact', policyStatus: 'eligible' },
+        }),
+        1,
+        DEFAULT_AUTHORITY_FLOOR.hash,
+      );
+      expect(verdict.decision.result).toBe('allow');
+    });
+  });
+
+  describe('DA-5a G7: approval grants are not wired yet', () => {
+    it('G7: a prerequisite on approval_grant always denies today (fails closed); the positive case lands with C3', () => {
+      const gated: HarnessBundle = {
+        ...expert(),
+        toolPolicy: {
+          ...expert().toolPolicy,
+          prerequisites: [
+            ...expert().toolPolicy.prerequisites,
+            {
+              toolId: 'apply_cleanup_batch',
+              requiredArtifact: 'approval_grant',
+              binding: 'same_job_same_plan_current_revision',
+            },
+          ],
+        },
+      };
+      const verdict = new PolicyEvaluator(gated, DEFAULT_AUTHORITY_FLOOR).decide(
+        base({
+          toolId: 'apply_cleanup_batch',
+          plan: plan(),
+          batch: { documentCount: 1, effectKind: 'redact', policyStatus: 'eligible' },
+        }),
+        1,
+        DEFAULT_AUTHORITY_FLOOR.hash,
+      );
+      expect(verdict.decision.result).toBe('deny');
+      expect(verdict.decision.ruleIds).toContain(GATEWAY_RULES.prerequisite('approval_grant'));
+    });
   });
 });
