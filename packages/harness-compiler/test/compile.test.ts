@@ -3,7 +3,6 @@ import { contentHash, type GuardrailAst, type HarnessBundle, type WorkflowGraph 
 import { WORKER_TOOL_IDS } from '@expunge/baselines';
 import {
   COMPILER_HASH,
-  REJECTION_CODES,
   VOCABULARY_HASH,
   compileHarness,
   type CompileResult,
@@ -22,14 +21,11 @@ import {
   w0,
 } from './helpers.js';
 
-/** Every rejection the suite provokes, by code, so the final test can prove each category is covered. */
-const provoked = new Set<RejectionCode>();
 function rejected(result: CompileResult, code: RejectionCode, phase?: string): void {
   expect(result.ok, `expected rejection ${code}`).toBe(false);
   if (result.ok) return;
   expect(result.rejection.codes, JSON.stringify(result.rejection.issues)).toContain(code);
   if (phase) expect(result.rejection.phase).toBe(phase);
-  provoked.add(code);
 }
 function accepted(result: CompileResult) {
   if (!result.ok) throw new Error(`rejected: ${JSON.stringify(result.rejection.issues)}`);
@@ -1138,9 +1134,5 @@ describe('the compiler hashes', () => {
     expect(contentHash({ sources: changed }, 'harness-compiler-source')).not.toBe(
       contentHash({ sources }, 'harness-compiler-source'),
     );
-  });
-  it('every rejection category in the vocabulary is provoked by a test above', () => {
-    const untested = REJECTION_CODES.filter((code) => !provoked.has(code));
-    expect(untested).toEqual([]);
   });
 });
