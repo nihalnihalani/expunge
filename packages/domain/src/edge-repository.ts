@@ -13,6 +13,9 @@ import {
 export const EDGE_INDEX_COMPLETE_NODE = '0'.repeat(64);
 export const EDGE_INDEX_COMPLETE_ID = '__index_complete__';
 export const MAX_REACH_HOPS = 5;
+/** The registry an edge index was derived from: an index is valid only for that registry (the validator requires it). */
+export const registryHashOf = (registry: unknown): string =>
+  contentHash(registry as never, 'edge-index-registry');
 
 export type EdgeDirection = 'incoming' | 'outgoing' | 'both';
 export type EdgeRow = {
@@ -50,23 +53,43 @@ export class IdentityEdgeRepository {
     return { ...scopeFilter(world), worldId: world.worldId, worldRevision };
   }
 
-  /** True when the edge index for this revision was fully written (the marker row exists). */
-  async isComplete(world: WorldKey, worldRevision: number, session?: ClientSession): Promise<boolean> {
+  /**
+   * True when the edge index for this revision was fully written (the marker row exists). With `registryHash`, only an
+   * index derived from that registry counts.
+   */
+  async isComplete(
+    world: WorldKey,
+    worldRevision: number,
+    session?: ClientSession,
+    registryHash?: string,
+  ): Promise<boolean> {
     requirePrincipal(this.service, ['domain_executor', 'fixture_builder', 'setup']);
     const marker = await this.collection.findOne(
-      { ...this.bind(world, worldRevision), edgeId: EDGE_INDEX_COMPLETE_ID },
+      {
+        ...this.bind(world, worldRevision),
+        edgeId: EDGE_INDEX_COMPLETE_ID,
+        ...(registryHash === undefined ? {} : { registryHash }),
+      },
       { session, projection: { _id: 1 } },
     );
     return marker !== null;
   }
 
-  /** Idempotent: an edge already present for this revision is kept. The marker is written separately. */
-  async insertEdges(world: WorldKey, worldRevision: number, edges: EdgeRow[]): Promise<number> {
+  /**
+   * Idempotent: an edge already present for this revision is kept. The marker is written separately. Every row carries
+   * the hash of the registry it was derived from (`registryHashOf`), which the `identity_edges` validator requires.
+   */
+  async insertEdges(
+    world: WorldKey,
+    worldRevision: number,
+    edges: EdgeRow[],
+    registryHash: string,
+  ): Promise<number> {
     requirePrincipal(this.service, ['domain_executor', 'fixture_builder', 'setup']);
     const binding = this.bind(world, worldRevision);
     const rows = edges.map((edge) => {
       const edgeKey = contentHash(
-        { ...binding, edgeId: edge.edgeId, fromNode: edge.fromNode, toNode: edge.toNode },
+        { ...binding, registryHash, edgeId: edge.edgeId, fromNode: edge.fromNode, toNode: edge.toNode },
         'identity-edge',
       );
       return {
@@ -74,6 +97,7 @@ export class IdentityEdgeRepository {
         edgeKey,
         ...binding,
         scopeRevision: world.scopeRevision,
+        registryHash,
         ...edge,
         createdAt: new Date(),
       };
@@ -94,14 +118,16 @@ export class IdentityEdgeRepository {
     return inserted;
   }
 
-  async markComplete(world: WorldKey, worldRevision: number): Promise<void> {
+  async markComplete(world: WorldKey, worldRevision: number, registryHash: string): Promise<void> {
     requirePrincipal(this.service, ['domain_executor', 'fixture_builder', 'setup']);
     const binding = this.bind(world, worldRevision);
+    const markerKey = contentHash({ ...binding, registryHash, marker: true }, 'identity-edge-index');
     const marker: Document = {
-      _id: contentHash({ ...binding, marker: true }, 'identity-edge-index'),
-      edgeKey: contentHash({ ...binding, marker: true }, 'identity-edge-index'),
+      _id: markerKey,
+      edgeKey: markerKey,
       ...binding,
       scopeRevision: world.scopeRevision,
+      registryHash,
       edgeId: EDGE_INDEX_COMPLETE_ID,
       fieldId: '',
       fromNode: EDGE_INDEX_COMPLETE_NODE,

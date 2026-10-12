@@ -6,7 +6,7 @@ import {
   type WorldKey,
 } from '@expunge/mongo';
 import type { ReferenceDeclaration, ScopeRegistry } from '@expunge/contracts';
-import { IdentityEdgeRepository, type EdgeRow } from './edge-repository.js';
+import { IdentityEdgeRepository, registryHashOf, type EdgeRow } from './edge-repository.js';
 import { referenceKeys, valuesAt, type ReferenceRule } from './values.js';
 
 export type EdgeIndexStats = {
@@ -110,7 +110,8 @@ export async function ensureEdgeIndex(options: {
   records?: ReadonlyMap<string, readonly ScannedRecord[]>;
 }): Promise<EdgeIndexStats> {
   const { edges, scopes, world, registry, worldRevision, maxDocuments } = options;
-  if (await edges.isComplete(world, worldRevision)) {
+  const registryHash = registryHashOf(registry);
+  if (await edges.isComplete(world, worldRevision, undefined, registryHash)) {
     return {
       worldRevision,
       scannedDocuments: 0,
@@ -120,8 +121,8 @@ export async function ensureEdgeIndex(options: {
   }
   const records = options.records ?? (await scanWorld(scopes, world, registry, maxDocuments));
   const derived = deriveEdges(registry, records);
-  await edges.insertEdges(world, worldRevision, derived);
-  await edges.markComplete(world, worldRevision);
+  await edges.insertEdges(world, worldRevision, derived, registryHash);
+  await edges.markComplete(world, worldRevision, registryHash);
   const scanned = [...records.values()].reduce((sum, list) => sum + list.length, 0);
   return { worldRevision, scannedDocuments: scanned, edges: derived.length, reused: false };
 }
