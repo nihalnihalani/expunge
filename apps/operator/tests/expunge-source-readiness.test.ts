@@ -137,3 +137,21 @@ it('strips unknown metadata before the DTO is forwarded', () => {
   });
   expect(dto).not.toHaveProperty('privateExpectedManifest');
 });
+
+it('names an isolated replay registration as a copy, never as the real source', () => {
+  const checks = describeSourceReadiness(
+    {
+      ...binding,
+      sourceId: 'replay:world_0123456789abcdef01234567',
+      sourceKind: 'isolated_replay',
+    },
+    observedAt,
+  );
+  expect(checks.sourceRegistered.status).toBe('pass');
+  expect(checks.sourceRegistered.detail).toMatch(/isolated replay copy/);
+  expect(checks.sourceRegistered.detail).toMatch(
+    /does not erase the original source/,
+  );
+  expect(checks.sourceRegistered.detail).not.toMatch(/real-source/);
+  expect(checks.cleanupAuthorized.status).toBe('pass');
+});

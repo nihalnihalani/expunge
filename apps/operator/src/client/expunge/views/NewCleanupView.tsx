@@ -8,9 +8,8 @@ import type {
 } from '../../../shared/expunge';
 import {
   cleanupReadinessPassed,
-  sourceBindingMatchesReadiness,
   sourceBindingsEqual,
-  SOURCE_ENVIRONMENTS,
+  sourceScopeReady,
 } from '../../../shared/expunge';
 import { ExpungeApiError, expungeFetch } from '../api';
 import { ConnectionBanner } from '../components/ConnectionBanner';
@@ -343,14 +342,7 @@ export default function NewCleanupView({ navigate }: ViewProps) {
     readiness.resource.status === 'ok' &&
     readinessFresh &&
     cleanupReadinessPassed(readiness.resource.data) &&
-    Boolean(
-      selected &&
-      (SOURCE_ENVIRONMENTS as readonly string[]).includes(selected.env) &&
-      sourceBindingMatchesReadiness(
-        selected.source,
-        readiness.resource.data?.source,
-      ),
-    );
+    sourceScopeReady(selected, readiness.resource.data?.source);
   const edit =
     <T,>(setter: (next: T) => void) =>
     (next: T) => {

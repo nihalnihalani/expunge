@@ -5,9 +5,8 @@ import {
   JOB_STATUSES,
   TARGET_KINDS,
   cleanupReadinessPassed,
-  sourceBindingMatchesReadiness,
   sourceBindingsEqual,
-  SOURCE_ENVIRONMENTS,
+  sourceScopeReady,
   type TargetKind,
 } from '../../shared/expunge.js';
 import { describeExpungeConfig, type ExpungeConfigView } from './config.js';
@@ -62,8 +61,7 @@ export function expungeRoutes(
     );
     return world &&
       !world.maintenanceMode &&
-      (SOURCE_ENVIRONMENTS as readonly string[]).includes(world.env) &&
-      sourceBindingMatchesReadiness(world.source, state.source)
+      sourceScopeReady(world, state.source)
       ? world
       : null;
   };
