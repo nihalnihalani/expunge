@@ -310,7 +310,14 @@ export async function readSnapshot(env: DomainEnv, config: ServiceConfig, jobId:
     ...(epoch ? { streamEpoch: epoch } : {}),
     runId: job.binding.runId,
     ...(deployment && deployment.activeHash === job.binding.harnessHash
-      ? { harness: { hash: job.binding.harnessHash, parentHash: null, activeRevision: deployment.revision } }
+      ? {
+          harness: {
+            hash: job.binding.harnessHash,
+            // Lineage comes from the stored, content-addressed bundle: the child names its parent in the artifact itself.
+            parentHash: bundle?.parentHash ?? null,
+            activeRevision: deployment.revision,
+          },
+        }
       : {}),
     scope: { scopeId: scope.scopeId, scopeRevision: job.binding.scopeRevision, env: scope.env },
     ...(world

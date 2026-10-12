@@ -13,7 +13,14 @@ import {
 import { guardMiddleware } from './middleware-guard.js';
 import type { Subscriber, Subscription } from 'rxjs';
 import { filterModelStateEvent, stripProtectedKeys } from './authority.js';
-import { RuntimeError, JobWaitSignal, errorCode, isFenceLoss, type RuntimeErrorCode } from './errors.js';
+import {
+  RuntimeError,
+  JobWaitSignal,
+  errorCode,
+  isFenceLoss,
+  refusalCode,
+  type RuntimeErrorCode,
+} from './errors.js';
 import { releaseLease } from './lease-release.js';
 import { EMPTY_CARRY, UsageMeter, readMeterCarry, type MeterCarry } from './meter.js';
 import { profileFingerprint } from './models.js';
@@ -393,6 +400,10 @@ export class RunSession {
             result = { error: 'LostLease' };
           } else if (error instanceof RuntimeError) {
             result = { error: error.code };
+          } else if (refusalCode(error)) {
+            // A gateway refusal (policy denial, invalid arguments, a refused precondition) is an expected outcome: the
+            // model gets its closed code and nothing is reported as a fault.
+            result = { error: refusalCode(error) };
           } else {
             this.deps.hooks?.onHookError?.(`tool:${tool.name}`, error);
             const code = errorCode(error);
