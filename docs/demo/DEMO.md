@@ -59,6 +59,6 @@ All three processes read the root `.env`. Use a **new** scope id for each fresh 
 | Real model provider in the worker | Real (OpenAI) |
 | Raindrop tracing from the worker | Ingest observed in the Raindrop dashboard; Query read-back of the baseline episode demonstrated (trace `7002add2…`, 20 spans) after the `tool_call.tool_name` fix; subject registration at submit time is not wired yet |
 | Evidence-linked, model-generated mutation | Pending: the production evolver has no real model adapter yet; the demo candidate is operator-authored |
-| Fresh admission (38 pairs, 76 episodes) | Pending: not run; the demo uses a 12-episode pilot and a labelled test-fixture admit |
+| Fresh admission (38 pairs, 76 episodes) | Run for real with `scripts/demo/admission.ts` ([admission.md](admission.md)): **HOLD** (`retention_violation`, `limits_exceeded`, `harness_defect_pair`, `infra_invalid`). The candidate wins on the scored pairs (train 3 vs 0, protected 4 vs 0, validation 4 vs 0) but goes over its 24k-token limit in 19 of 38 arms, and a likely gate fault-plan classification defect marks 18 pairs as harness defects. No report was stored, so promotion still uses the labelled test-fixture admit |
 | Real owner data, 360-episode protocol, meta controls | BLOCKED: no authorized owner data, no specification file for the real-data protocol |
 | Live Raindrop user deletion | Out of scope for this demo |
