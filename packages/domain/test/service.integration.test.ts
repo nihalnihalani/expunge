@@ -1,5 +1,10 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DeploymentRepository } from '@expunge/mongo';
+import { DeploymentRepository, GuardExportRepository } from '@expunge/mongo';
+import { jobTelemetryUserId } from '@expunge/observability';
+import { privacySubjectRegistrar } from '@expunge/privacy';
 import { HASH, describeLive } from '../../mongo/test/support.js';
 import {
   createDomainService,
@@ -18,6 +23,8 @@ const READ = 'r'.repeat(32);
 const JOB = 'j'.repeat(32);
 const APPROVAL = 'a'.repeat(32);
 const WAKE = 'w'.repeat(32);
+const PROJECT = 'project-submit-test';
+const ORG = 'org-submit-test';
 
 /**
  * The domain service in front of a real replica set. The wake transport is a recorded stand-in (FAKE: it only notes
@@ -67,10 +74,29 @@ describeLive('domain service on a real replica set (wake transport is a labeled 
         woken.push(jobId);
         return true;
       },
+      // The real registrar, on its own privacy_controller principal (per-principal users when the lane provisions them).
+      registerSubject: privacySubjectRegistrar(await rig.env.as('privacy_controller'), {
+        projectId: PROJECT,
+        guard: { path: join(guardDir, 'guard.json'), providerOrganizationId: ORG },
+      }),
     });
   }, 60_000);
   afterAll(async () => {
     await rig?.dispose();
+    rmSync(guardDir, { recursive: true, force: true });
+  });
+
+  const guardDir = mkdtempSync(join(tmpdir(), 'submit-guard-'));
+  const registry = () => ({
+    tokens: rig.env.service.control.collection('subject_tokens'),
+    generation: async () =>
+      (await rig.env.service.control.collection('subject_set_generations').findOne({}))?.generation as
+        number | undefined,
+    guard: () =>
+      new GuardExportRepository(rig.env.service).status(seeded.binding, ORG) as Promise<{
+        latest: { generation: number } | null;
+        covered: boolean;
+      }>,
   });
 
   it('reports the bound scope and lists the world with its registry counts', async () => {
@@ -237,6 +263,20 @@ describeLive('domain service on a real replica set (wake transport is a labeled 
         .findOne({ _id: queued.body.jobId as never });
       expect(stored?.value).toBe(seeded.world.subjectHandle);
       expect(woken).toContain(queued.body.jobId);
+      // The subject is registered once, mapped to the job's opaque telemetry id, and the guard export covers it.
+      const { tokens, generation, guard } = registry();
+      const rows = await tokens.find({}).toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        ...seeded.binding,
+        subjectHandle: seeded.world.subjectHandle,
+        provider: 'raindrop',
+        tokenGeneration: 1,
+        tokens: [jobTelemetryUserId(PROJECT, seeded.binding, queued.body.jobId as string)],
+      });
+      expect(JSON.stringify(rows[0]!.tokens)).not.toContain(seeded.world.subjectHandle);
+      expect(await generation()).toBe(1);
+      expect(await guard()).toMatchObject({ latest: { generation: 1 }, covered: true });
     });
 
     it('is idempotent on the request key: the same submission is the same job, not a second one', async () => {
@@ -250,6 +290,11 @@ describeLive('domain service on a real replica set (wake transport is a labeled 
       });
       expect(again.status).toBe(200);
       expect(await jobs.countDocuments()).toBe(before);
+      // Resubmission registers nothing new: same single row, no subject-set bump, no new guard export.
+      const { tokens, generation, guard } = registry();
+      expect(await tokens.countDocuments()).toBe(1);
+      expect(await generation()).toBe(1);
+      expect(await guard()).toMatchObject({ latest: { generation: 1 }, covered: true });
     });
 
     it('refuses a preview id the world no longer produces', async () => {
@@ -287,6 +332,22 @@ describeLive('domain service on a real replica set (wake transport is a labeled 
         .findOne({ jobId: queued.body.jobId as never, kind: 'cancel_requested' });
       expect(event?.sequence).toBe(cancelled.body.sequence);
       expect((await call('POST', '/jobs/job-that-is-not-here/cancel', JOB, {})).status).toBe(404);
+    });
+
+    it('a second job for the same subject adds its token as the next generation and the guard is re-exported', async () => {
+      const { tokens, generation, guard } = registry();
+      const latest = await tokens.findOne({}, { sort: { tokenGeneration: -1 } });
+      // The cancel test above submitted request-cancel-0001 for the same subject.
+      const jobIds = (await rig.env.service.control.collection('jobs').find({}).toArray()).map(
+        (job) => job._id as unknown as string,
+      );
+      expect(jobIds).toHaveLength(2);
+      expect(latest?.tokenGeneration).toBe(2);
+      expect([...(latest?.tokens as string[])].sort()).toEqual(
+        jobIds.map((id) => jobTelemetryUserId(PROJECT, seeded.binding, id)).sort(),
+      );
+      expect(await generation()).toBe(2);
+      expect(await guard()).toMatchObject({ latest: { generation: 2 }, covered: true });
     });
   });
 

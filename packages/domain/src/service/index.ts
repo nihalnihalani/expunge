@@ -3,7 +3,7 @@ export type { ServiceConfig, ServicePrincipal } from './config.js';
 export { authenticate } from './auth.js';
 export { ServiceRefusal } from './errors.js';
 export { operatorPreview, previewRequestSchema, type OperatorPreview } from './preview.js';
-export { cancelJob, httpWakeSender, submitCleanup, type WakeSender } from './jobs.js';
+export { cancelJob, httpWakeSender, submitCleanup, type SubjectRegistrar, type WakeSender } from './jobs.js';
 export { listWorlds } from './worlds.js';
 export { serveArtifactRoute, readArtifact, readDeployment } from './artifacts.js';
 export { serveProjection, readSnapshot, readEventsPage, listJobs } from './projection.js';

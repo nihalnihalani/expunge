@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { Job, ScopeKey } from '@expunge/contracts';
 import type { OutboxRepository } from '@expunge/mongo';
 import {
@@ -6,6 +5,7 @@ import {
   carrierIsComplete,
   enqueueTelemetry,
   episodeEventId,
+  jobTelemetryUserId,
   raindropWriteConfigFromEnv,
   runAsSubagent,
   sdkEpisodeIntent,
@@ -104,20 +104,8 @@ export function episodeSummary(facts: OutcomeFacts): EpisodeSummary {
  * it names no data subject and no person. Deletion requests by user id are therefore job-granular.
  */
 export function telemetryUserId(projectId: string, scope: ScopeKey, jobId: string): string {
-  const digest = createHash('sha256')
-    .update(
-      JSON.stringify([
-        'expunge-telemetry-user',
-        1,
-        projectId,
-        scope.tenantId,
-        scope.env,
-        scope.scopeId,
-        jobId,
-      ]),
-    )
-    .digest('hex');
-  return `u_${digest.slice(0, 32)}`;
+  // One derivation, shared with the privacy registry that records this id as the job subject's Raindrop token.
+  return jobTelemetryUserId(projectId, scope, jobId);
 }
 
 export function episodeContext(job: Job, projectId: string): EpisodeContext {

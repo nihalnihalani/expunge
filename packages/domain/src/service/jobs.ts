@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { contentHash, type ActorContext } from '@expunge/contracts';
+import { contentHash, type ActorContext, type ScopeKey } from '@expunge/contracts';
 import { DeploymentRepository, ProtocolError } from '@expunge/mongo';
 import type { DomainEnv } from '../env.js';
 import type { ServiceConfig } from './config.js';
@@ -27,6 +27,15 @@ const isDuplicate = (error: unknown): boolean =>
 
 /** Sends a wake command to the worker. The job is already queued, so a failure here only delays pickup. */
 export type WakeSender = (jobId: string) => Promise<boolean>;
+
+/**
+ * Registers a submitted job's subject in the privacy registry, idempotently. Supplied by the composition root on a
+ * privacy_controller principal: the owner actor that submits jobs (domain_executor) cannot write the registry.
+ */
+export type SubjectRegistrar = (
+  scope: ScopeKey,
+  input: { jobId: string; subjectHandle: string },
+) => Promise<unknown>;
 
 export function httpWakeSender(
   wake: { origin: string; token: string },
@@ -74,6 +83,7 @@ export async function submitCleanup(
   deployments: DeploymentRepository,
   wake: WakeSender | null,
   request: SubmitRequest,
+  registerSubject: SubjectRegistrar | null = null,
 ): Promise<{ jobId: string; status: string }> {
   if (!config.workerProfileHash) throw new ServiceRefusal(501, 'unsupported');
   const preview = await operatorPreview(env, config, {
@@ -109,10 +119,32 @@ export async function submitCleanup(
   } catch (error) {
     if (!isDuplicate(error)) throw error;
     const existing = await env.jobs.readAuthorized(actor, jobId);
+    // A resubmission registers again (a no-op when it is there), which also heals a crash between create and register.
+    await register(registerSubject, scope, jobId, request.subject.value);
     return { jobId, status: existing.status };
   }
+  // Registered before the wake, so the job's evidence finds its subject in the registry and the guard covering it.
+  await register(registerSubject, scope, jobId, request.subject.value);
   if (wake) await wake(jobId);
   return { jobId, status: 'queued' };
+}
+
+/**
+ * The job is already queued when this runs; a failure answers 503 with a closed code (never the cause, which could name
+ * the subject), and the same request key retried registers it.
+ */
+async function register(
+  registerSubject: SubjectRegistrar | null,
+  scope: ScopeKey,
+  jobId: string,
+  subjectHandle: string,
+): Promise<void> {
+  if (!registerSubject) return;
+  try {
+    await registerSubject(scope, { jobId, subjectHandle });
+  } catch {
+    throw new ServiceRefusal(503, 'subject_registry_unavailable');
+  }
 }
 
 /** Records the owner's cancellation request. A job nobody is running is cancelled at once; a running one stops at its next tool call. */

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type { ScopeKey } from '@expunge/contracts';
 import { otelMiddleware } from '@tanstack/ai/middlewares/otel';
 import type { Interaction, SubagentRun } from 'raindrop-ai';
 import type { ToolDefinition } from '@expunge/vendor-openmuse';
@@ -34,6 +36,28 @@ export function episodeInput(input: string, policy: SanitizationPolicy): string 
 /** Opaque, namespaced telemetry identity: a short lower-case namespace and a hex digest. A handle or a name does not fit. */
 const TELEMETRY_USER_ID = /^[a-z]{1,8}_[a-f0-9]{16,64}$/;
 export const isTelemetryUserId = (id: string): boolean => TELEMETRY_USER_ID.test(id);
+
+/**
+ * Opaque telemetry identity of a job's episode: a hash of non-secret scope and job identifiers, naming no data subject
+ * and no person. The worker stamps it on the episode and the privacy registry records it as the subject's provider token
+ * when the job is submitted, so both derive it here and cannot drift.
+ */
+export function jobTelemetryUserId(projectId: string, scope: ScopeKey, jobId: string): string {
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify([
+        'expunge-telemetry-user',
+        1,
+        projectId,
+        scope.tenantId,
+        scope.env,
+        scope.scopeId,
+        jobId,
+      ]),
+    )
+    .digest('hex');
+  return `u_${digest.slice(0, 32)}`;
+}
 export class InvalidTelemetryUserId extends Error {
   constructor() {
     super('InvalidTelemetryUserId');
