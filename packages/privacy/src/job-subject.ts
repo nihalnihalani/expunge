@@ -82,14 +82,27 @@ export async function registerJobSubject(
     else if (attempt >= RACE_RETRIES) throw new PrivacyError('SubjectRegistrationRaced');
   }
   let guardGeneration: number | null = null;
-  if (guard && deps.exports && !(await deps.exports.status(scope, guard.providerOrganizationId)).covered)
-    guardGeneration = (
-      await exportGuardFile({ tokens: deps.tokens, exports: deps.exports }, scope, guard.path, {
-        providerOrganizationId: guard.providerOrganizationId,
-      })
-    ).generation;
+  if (guard && deps.exports)
+    for (let attempt = 1; ; attempt++) {
+      if ((await deps.exports.status(scope, guard.providerOrganizationId)).covered) break;
+      try {
+        guardGeneration = (
+          await exportGuardFile({ tokens: deps.tokens, exports: deps.exports }, scope, guard.path, {
+            providerOrganizationId: guard.providerOrganizationId,
+          })
+        ).generation;
+        break;
+      } catch (error) {
+        // A concurrent registration exported the same generation first (GuardExportConflict on the row id, or
+        // GuardExportRaced on the latest check). Read coverage again: that export usually covers this subject too.
+        if (!isExportRace(error) || attempt >= RACE_RETRIES) throw error;
+      }
+    }
   return { registered, guardGeneration };
 }
+
+const isExportRace = (error: unknown): boolean =>
+  error instanceof Error && /GuardExport(Conflict|Raced)/.test(error.message);
 
 /**
  * The submit-time registrar the domain service is given (`DomainServiceDeps.registerSubject`). `service` must be a

@@ -65,10 +65,10 @@ describeLive('job subject registration at submit', () => {
   });
 
   it('a second job for the same subject adds its token as the next generation; concurrent repeats stay single', async () => {
-    const results = await Promise.all([
-      register(scope, { jobId: 'job_b', subjectHandle: handle }),
-      register(scope, { jobId: 'job_b', subjectHandle: handle }),
-    ]);
+    // Three concurrent identical calls: each may race the others' guard export for the same generation.
+    const results = await Promise.all(
+      [1, 2, 3].map(() => register(scope, { jobId: 'job_b', subjectHandle: handle })),
+    );
     expect(results.filter((r) => r.registered === 'created')).toHaveLength(1);
     const found = await rows();
     expect(found).toHaveLength(2);
