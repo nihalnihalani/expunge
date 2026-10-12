@@ -9,6 +9,7 @@ import { LimitsStrip } from '../components/LimitsStrip';
 import { useAnnounce } from '../components/LiveRegion';
 import { PhaseStepper } from '../components/PhaseStepper';
 import { ReferenceSection } from '../components/ReferenceSection';
+import { UnclaimedNotice } from '../components/UnclaimedNotice';
 import { formatTime, plural } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { isTerminal } from '../projection/selectors';
@@ -82,6 +83,7 @@ export default function WorkbenchView({ route }: ViewProps) {
                 phase={snapshot.phase}
               />
               <GapBanner snapshot={snapshot} />
+              <UnclaimedNotice job={snapshot} />
               {snapshot.status === 'waiting_approval' && (
                 <div className="ex-banner ex-banner--warn" role="note">
                   <Hand size={16} aria-hidden />
