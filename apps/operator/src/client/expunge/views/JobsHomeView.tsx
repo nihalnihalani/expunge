@@ -16,6 +16,7 @@ import {
 } from '../components/StateViews';
 import { StatusChip } from '../components/StatusChip';
 import { TableWrap } from '../components/TableWrap';
+import { UnclaimedNotice } from '../components/UnclaimedNotice';
 import { ageText, formatTime } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useNow } from '../hooks/useNow';
@@ -231,6 +232,7 @@ export default function JobsHomeView(_props: ViewProps) {
                       </td>
                       <td role="cell" data-label="Status">
                         <StatusChip state={item.status} />
+                        <UnclaimedNotice job={item} now={now} />
                       </td>
                       <td role="cell" data-label="Completion verdict">
                         <ReceiptCell item={item} />

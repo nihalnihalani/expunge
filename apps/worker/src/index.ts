@@ -125,6 +125,8 @@ async function main(): Promise<void> {
     JSON.stringify({
       listening: `${worker.config.host}:${worker.config.port}`,
       ownerId: worker.config.ownerId,
+      // The one scope this worker claims and polls; jobs queued under any other scope stay queued.
+      scope: worker.config.scope ?? null,
       status: worker.readiness.status,
     }),
   );
