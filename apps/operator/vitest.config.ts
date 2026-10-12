@@ -12,6 +12,7 @@ export default mergeConfig(
         'tests/expunge-{domain-origin,startup-config,subject-normalization}.test.ts',
         'tests/expunge-heldout-projection.test.ts',
         'tests/expunge-unclaimed.test.tsx',
+        'tests/expunge-finished-incomplete.test.tsx',
       ],
     },
   }),

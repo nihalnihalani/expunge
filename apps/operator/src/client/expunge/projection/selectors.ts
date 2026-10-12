@@ -84,6 +84,73 @@ export function chipForStatus(status: JobStatus): ChipState {
   return status;
 }
 
+/** Plain words for the worker's terminal reason codes on a failed job with no receipt. */
+const TERMINAL_REASON_TEXT: Record<string, string> = {
+  ModelAttestationFailed:
+    'Stopped before any model call: model stamp could not be written',
+  NoCompletionReceipt: 'Ended without a completion receipt',
+  CompletionReceiptRequired: 'Ended without a completion receipt',
+  StepLimitReached: 'Stopped at the step limit before a completion receipt',
+  WallTimeExceeded: 'Stopped: time budget used up',
+  ToolCallBudgetExceeded: 'Stopped: tool call budget used up',
+  TokenBudgetExceeded: 'Stopped: token budget used up',
+  CostBudgetExceeded: 'Stopped: cost budget used up',
+  PricingUnavailable: 'Stopped: model pricing is not available',
+  PhaseTimeout: 'Stopped: a phase timed out',
+  LostLease: 'Stopped: the worker lost its lease',
+  ModelUnavailable: 'Stopped: the model is not available',
+  ModelRunFailed: 'Stopped: the model run failed',
+  ProviderServerError: 'Stopped: the model provider returned a server error',
+  ProviderRateLimited: 'Stopped: the model provider rate-limited the run',
+  HarnessNotDeployed: 'Stopped: the harness is not deployed',
+};
+
+export function terminalReasonText(code: string): string {
+  return TERMINAL_REASON_TEXT[code] ?? `Stopped with code ${code}`;
+}
+
+/**
+ * The status chip for a job, display-side only. A `failed` job that committed a receipt whose verdict is
+ * `incomplete` ran correctly and reported honestly: it reads "Finished: cleanup incomplete" (warning), not "Failed".
+ * `receiptIncomplete` must be true only when the receipt is COMMITTED (id, sequence and verified world revision all
+ * present) and its domain status is `incomplete`. A failed job with no receipt keeps "Failed", with its terminal
+ * reason in plain words when one is known. Nothing here ever says "Complete": that is the receipt verdict's job.
+ */
+export function jobStatusChip(facts: {
+  status: JobStatus;
+  receiptIncomplete: boolean;
+  terminalReason?: string;
+}): { state: ChipState; label?: string } {
+  if (facts.status !== 'failed') return { state: chipForStatus(facts.status) };
+  if (facts.receiptIncomplete) return { state: 'finished_incomplete' };
+  if (facts.terminalReason)
+    return {
+      state: 'failed',
+      label: `Failed: ${terminalReasonText(facts.terminalReason)}`,
+    };
+  return { state: 'failed' };
+}
+
+/**
+ * True when the job detail names a committed receipt AND the committed `receipt_committed` event for that same
+ * receipt id says `incomplete` (it also carries the verified world revision). A receipt id with no matching
+ * committed event in the window is not enough: the chip then stays "Failed".
+ */
+export function snapshotReceiptIncomplete(
+  snapshot: Pick<ExpungeJobSnapshotV2, 'receipt'>,
+  events: readonly ForwardedProjectionEvent[],
+): boolean {
+  const ref = snapshot.receipt;
+  if (!ref) return false;
+  return events.some(
+    (event) =>
+      event.kind === 'receipt_committed' &&
+      event.payload.receiptId === ref.receiptId &&
+      event.payload.domainStatus === 'incomplete' &&
+      Number.isInteger(event.payload.verifiedWorldRevision),
+  );
+}
+
 export function notInspected(snapshot: ExpungeJobSnapshotV2) {
   const inspected = new Set(snapshot.coverage.inspectedCollectionIds);
   return snapshot.coverage.registeredCollectionIds.filter(

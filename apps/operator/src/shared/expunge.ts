@@ -516,6 +516,11 @@ export interface ExpungeJobListItem {
   receiptId?: string;
   receiptSequence?: number;
   verifiedWorldRevision?: number;
+  /**
+   * Present only on a failed job with no committed receipt: the worker's short terminal reason code (for example
+   * `ModelAttestationFailed`, `NoCompletionReceipt`). A code-shaped token, never free text or subject data.
+   */
+  terminalReason?: string;
   updatedAt: string;
 }
 export interface ExpungeJobList {

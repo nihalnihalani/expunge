@@ -4,7 +4,11 @@ import { ExpungeApiError } from '../api';
 import { formatClock, formatTime } from '../format';
 import { useNow } from '../hooks/useNow';
 import { useJobProjection, type JobProjection } from '../projection/store';
-import { isTerminal } from '../projection/selectors';
+import {
+  isTerminal,
+  jobStatusChip,
+  snapshotReceiptIncomplete,
+} from '../projection/selectors';
 import { formatRoute, type ExpungeRoute, type JobTab } from '../routes';
 import { registeredTabs } from '../viewModules';
 import { ConnectionBanner, type Connection } from './ConnectionBanner';
@@ -161,7 +165,15 @@ export function JobFrame({
       />
       {snapshot && (
         <div className="ex-actions">
-          <StatusChip state={snapshot.status} />
+          <StatusChip
+            {...jobStatusChip({
+              status: snapshot.status,
+              receiptIncomplete: snapshotReceiptIncomplete(
+                snapshot,
+                state.events,
+              ),
+            })}
+          />
           <span className="ex-note">
             Job status comes from the committed record; the completion verdict
             is separate{tabs.includes('receipt') ? ' (Receipt tab)' : ''}.

@@ -320,6 +320,10 @@ export const jobListSchema: z.ZodType<ExpungeJobList> = z.object({
         receiptId: id.optional(),
         receiptSequence: int.optional(),
         verifiedWorldRevision: int.optional(),
+        terminalReason: z
+          .string()
+          .regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
+          .optional(),
         updatedAt: iso,
       }),
     )

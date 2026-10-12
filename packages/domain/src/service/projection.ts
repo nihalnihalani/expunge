@@ -399,6 +399,18 @@ function decodeCursor(raw: string | null): Cursor | null {
 }
 
 /**
+ * The worker's terminal decision reason from the job checkpoint (`terminal.decision.reason`), only when it is a short
+ * code-shaped token. Anything else is dropped rather than forwarded: the list never carries free text.
+ */
+function terminalReasonField(checkpoint: unknown): { terminalReason?: string } {
+  const terminal = (checkpoint as { terminal?: { decision?: { reason?: unknown } } } | null)?.terminal;
+  const reason = terminal?.decision?.reason;
+  return typeof reason === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(reason)
+    ? { terminalReason: reason }
+    : {};
+}
+
+/**
  * GET .../jobs?cursor&limit&kind&status: newest first by last update, bounded pages. Receipt fields (`receiptId`,
  * `receiptSequence`, `verifiedWorldRevision`, `receiptDomainStatus`) are present only for a job with a COMMITTED receipt.
  */
@@ -465,6 +477,7 @@ export async function listJobs(
               : {}),
           }
         : {}),
+      ...(job.status === 'failed' && !receipt ? terminalReasonField(job.checkpoint) : {}),
       updatedAt: iso(job.updatedAt),
     });
   }
