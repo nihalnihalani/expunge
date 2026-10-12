@@ -25,7 +25,11 @@
     "drill:continuity": "node scripts/continuity/drill.mjs",
     "test:mongo": "vitest run packages/mongo/test",
     "setup:mongo": "node --import tsx --env-file-if-exists=.env scripts/setup-mongo.ts",
-    "probe:mongo": "node --import tsx --env-file-if-exists=.env scripts/probe-mongo.ts"
+    "probe:mongo": "node --import tsx --env-file-if-exists=.env scripts/probe-mongo.ts",
+    "seed:world": "node --import tsx --env-file-if-exists=.env scripts/seed-world.ts",
+    "seed:candidate": "node --import tsx --env-file-if-exists=.env scripts/demo/seed-candidate-world.ts",
+    "demo:start": "node scripts/demo/start.mjs",
+    "demo:stop": "node scripts/demo/start.mjs stop"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
