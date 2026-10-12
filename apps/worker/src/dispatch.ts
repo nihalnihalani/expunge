@@ -5,6 +5,7 @@ import type { CarrierHeaders } from '@expunge/observability';
 import {
   ExpungeExecutionAgent,
   errorCode,
+  faultCode,
   type ArtifactReader,
   type CompletionReceiptReader,
   type ExecutionHooks,
@@ -673,7 +674,7 @@ export class Dispatcher implements WakeTarget {
         await writer.update({ meter: carry as unknown as JsonValue });
       },
       onHookError: (hook, error) =>
-        this.log({ level: 'warn', message: `hook ${hook} failed`, jobId, code: errorCode(error) }),
+        this.log({ level: 'warn', message: `hook ${hook} failed`, jobId, code: faultCode(error) }),
     };
 
     const agent = new ExpungeExecutionAgent(

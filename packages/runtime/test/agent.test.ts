@@ -14,6 +14,7 @@ import {
   STEP_LIMIT_NOTE,
   JobWaitSignal,
   RuntimeError,
+  faultCode,
   type ExecutionHooks,
   type PhaseInfo,
   type SecurityEvent,
@@ -1348,5 +1349,67 @@ describe('chat middleware (observability) passthrough', () => {
     expect(errors).toEqual(
       expect.arrayContaining(['chatMiddleware:explodes.onStart', 'chatMiddleware:explodes.onFinish']),
     );
+  });
+
+  it('a refused tool call is an expected outcome: the model gets the refusal code and no hook error is reported', async () => {
+    class ToolRefusal extends Error {
+      constructor(readonly code: string) {
+        super(code);
+        this.name = 'ToolRefusal';
+      }
+    }
+    const errors: string[] = [];
+    const phases: PhaseInfo[] = [];
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 }, id: 'call-1' }]), fakeText('stopped')],
+      pricing: { inputMicrousdPerMillion: 1, outputMicrousdPerMillion: 1 },
+      tools: () => [
+        defineTool({
+          name: 'echo',
+          description: 'refuses',
+          parameters: z.object({ v: z.number() }),
+          execute: async () => {
+            throw new ToolRefusal('PolicyDenied');
+          },
+        }),
+      ],
+      hooks: {
+        onHookError: (hook) => void errors.push(hook),
+        onPhaseComplete: async (info) => void phases.push(info),
+      },
+    });
+    const events = await collect(r.agent.run(runInput()));
+    const result = events.find((e) => e.type === EventType.TOOL_CALL_RESULT) as unknown as {
+      content: string;
+    };
+    expect(JSON.parse(result.content)).toEqual({ error: 'PolicyDenied' });
+    expect(errors).toEqual([]);
+    expect(phases.map((p) => [p.toolId, p.outcome])).toEqual([['echo', 'tool_error']]);
+  });
+
+  it('an unexpected tool fault is reported with a stable class code, never the message', async () => {
+    const reported: Array<[string, string]> = [];
+    const r = rig({
+      script: [fakeToolCalls([{ name: 'echo', args: { v: 1 }, id: 'call-1' }]), fakeText('x')],
+      pricing: { inputMicrousdPerMillion: 1, outputMicrousdPerMillion: 1 },
+      tools: () => [
+        defineTool({
+          name: 'echo',
+          description: 'faults',
+          parameters: z.object({ v: z.number() }),
+          execute: async () => {
+            throw new TypeError('subject alice@example.com is undefined');
+          },
+        }),
+      ],
+      hooks: { onHookError: (hook, error) => void reported.push([hook, faultCode(error)]) },
+    });
+    const events = await collect(r.agent.run(runInput()));
+    const result = events.find((e) => e.type === EventType.TOOL_CALL_RESULT) as unknown as {
+      content: string;
+    };
+    expect(JSON.parse(result.content)).toEqual({ error: 'ToolFailed' });
+    expect(reported).toEqual([['tool:echo', 'TypeError']]);
+    expect(faultCode(new Error('secret'))).toBe('UnclassifiedError');
   });
 });
