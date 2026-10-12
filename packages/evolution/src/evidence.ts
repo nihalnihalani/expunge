@@ -29,6 +29,11 @@ export interface EvidencePacket {
   items: EvidenceItem[];
   /** Every identifier a patch may cite; anything else is rejected before compilation. */
   citableIds: string[];
+  /**
+   * Each shown bundle's evidenceId mapped to its SOURCE ids. A child's evidence list holds references, which mention source
+   * ids but never a bundle's own evidenceId, so a citation of an evidenceId is expanded to these before compilation.
+   */
+  sourceIdsByEvidenceId?: Record<string, string[]>;
   /** References to append to a child bundle's `evidence` when it cites an identifier of this packet. */
   references: EvidenceReference[];
   chars: number;
@@ -166,6 +171,12 @@ export function buildEvidencePacket(input: {
     })),
     items: fitted.items,
     citableIds: [...new Set(shown.flatMap(identifiers))],
+    sourceIdsByEvidenceId: Object.fromEntries(
+      shown.map((bundle) => [
+        bundle.evidenceId,
+        identifiers(bundle).filter((id) => id !== bundle.evidenceId),
+      ]),
+    ),
     references: shown.flatMap((bundle) => bundle.sources),
     chars: canonicalJson(fitted.items).length,
     budgetChars: input.budgetChars,

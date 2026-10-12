@@ -5,7 +5,10 @@
  * held-out instance is used, and the candidate is re-parented onto the pilot's own W0 (see the README section in docs/demo).
  *
  *   node --import tsx --env-file-if-exists=.env scripts/demo/pilot.ts --candidate FILE.json [--pairs 6] [--concurrency 4]
- *        [--out DIR] [--mongo-uri URI]
+ *        [--out DIR] [--mongo-uri URI] [--parent FILE.json] [--families direct_nested,alias_two_hop]
+ *
+ * --parent replaces W0 as the parent arm with a stored bundle (W0 is still inserted, as that bundle's ancestor), and
+ * --families restricts the fresh training worlds to the named training families (round-robin over the list).
  *
  * Reads, by NAME only (values are never printed): MONGODB_PILOT_URI (or --mongo-uri; must be a loopback replica set),
  * EXPUNGE_MODEL_PROVIDER, EXPUNGE_MODEL_ID, OPENAI_API_KEY or ANTHROPIC_API_KEY, optional EXPUNGE_MODEL_PRICE_*_MICROUSD_PER_MILLION.
@@ -78,6 +81,10 @@ const fail = (message: string): never => {
 const candidatePath =
   flag('--candidate') ?? fail('--candidate FILE.json (the compiled child HarnessBundle) is required');
 const pairsWanted = Number(flag('--pairs', '6'));
+const parentPath = flag('--parent');
+const familyList = (flag('--families', 'direct_nested,alias_two_hop') ?? '').split(',').filter(Boolean);
+if (!familyList.length || familyList.some((family) => !['direct_nested', 'alias_two_hop'].includes(family)))
+  fail('--families takes training families only: direct_nested, alias_two_hop');
 const concurrency = Math.max(1, Math.min(4, Number(flag('--concurrency', '4'))));
 const outDir = flag('--out') ?? join(tmpdir(), `expunge-pilot-${Date.now()}`);
 const uri =
@@ -161,9 +168,14 @@ async function main(): Promise<void> {
   const builder = await as('fixture_builder');
 
   const candidateRaw = JSON.parse(readFileSync(candidatePath, 'utf8')) as HarnessBundle;
-  const parent = buildW0Bundle(infra);
+  const w0 = buildW0Bundle(infra);
   const artifacts = new ArtifactRepository(builder);
-  const parentHash = (await artifacts.insert(parent))._id;
+  const w0Hash = (await artifacts.insert(w0))._id;
+  // --parent: a stored bundle (e.g. the improved child) re-parented onto this pilot's own W0.
+  const parent: HarnessBundle = parentPath
+    ? { ...(JSON.parse(readFileSync(parentPath, 'utf8')) as HarnessBundle), parentHash: w0Hash }
+    : w0;
+  const parentHash = parentPath ? (await artifacts.insert(parent))._id : w0Hash;
   const candidate: HarnessBundle = { ...candidateRaw, parentHash };
   const candidateHash = (await artifacts.insert(candidate))._id;
   const raw = candidateRaw as unknown as Record<string, unknown>;
@@ -191,7 +203,7 @@ async function main(): Promise<void> {
   const view = sealPlanForGate(buildSealedSplitPlan(masterSeed));
   // The sealed plan has only two TRAIN entries (one per training family). The pilot needs more pairs, so it takes the same two
   // training families with FRESH seeds derived from this campaign: new worlds, never a validation, protected or test family.
-  const families = ['direct_nested', 'alias_two_hop'] as const;
+  const families = familyList as Array<'direct_nested' | 'alias_two_hop'>;
   const entries = Array.from({ length: pairsWanted }, (_v, i) => {
     const seed = contentHash({ masterSeed, pair: i }, 'pilot-world-seed');
     return {
@@ -391,6 +403,8 @@ async function main(): Promise<void> {
     model: { provider, modelId, keyVariable: keyName },
     runtimeHash: RT,
     parentHash,
+    parentSource: parentPath ? 'stored bundle (--parent), re-parented onto the pilot W0' : 'W0',
+    families,
     candidateHash,
     lineageNotes: lineageNote,
     campaignId,

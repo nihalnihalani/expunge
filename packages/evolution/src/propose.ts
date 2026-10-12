@@ -22,7 +22,7 @@ import {
   type Rejection,
 } from '@expunge/harness-compiler';
 import type { EvidencePacket } from './evidence.js';
-import { proposalSchema, toTypedPatch, type EvolverModel } from './model.js';
+import { proposalSchema, toTypedPatch, type EvolverModel, type EvolverModelStamp } from './model.js';
 import { replayCandidate, type ReplayReport } from './replay.js';
 
 export function evidenceLevelOf(replay: ReplayReport | undefined): EvidenceLevel {
@@ -80,6 +80,8 @@ export interface ProposalRecord {
   replay?: ReplayReport;
   /** Set whenever a replay ran. Absent for proposals that never reached one. */
   evidenceLevel?: EvidenceLevel;
+  /** A provider model's stamp taken right after its call: attestation, prices and metered usage. Absent for fakes. */
+  modelStamp?: EvolverModelStamp;
 }
 
 export interface ProposeInput {
@@ -128,6 +130,12 @@ function evidenceReferences(packet: EvidencePacket, ids: ReadonlySet<string>): E
 }
 
 export async function proposeCandidate(input: ProposeInput): Promise<ProposalRecord> {
+  const outcome = await proposeUnstamped(input);
+  const stamp = input.model.stamp?.();
+  return stamp ? { ...outcome, modelStamp: stamp } : outcome;
+}
+
+async function proposeUnstamped(input: ProposeInput): Promise<ProposalRecord> {
   const { model, packet, parent } = input;
   const base = {
     arm: packet.arm,
@@ -161,12 +169,22 @@ export async function proposeCandidate(input: ProposeInput): Promise<ProposalRec
     return record(base, 'citation_rejected', ['evidence_not_in_packet']);
   if (proposal.patches.length > maxEdits) return record(base, 'compile_rejected', ['edit_budget_exceeded']);
 
+  // A cited evidenceId stands for its bundle's sources: expand it to the source ids a reference can mention, so the
+  // compiler's in-bundle check can see it. Unknown or source-less ids are kept and the compiler judges them.
+  const expand = (ids: readonly string[]): string[] => [
+    ...new Set(
+      ids.flatMap((id) =>
+        packet.sourceIdsByEvidenceId?.[id]?.length ? packet.sourceIdsByEvidenceId[id] : [id],
+      ),
+    ),
+  ];
   const patches: TypedPatch[] = [];
   for (const proposed of proposal.patches) {
     const target = parsePatchPath(proposed.path);
     if (!target) return record(base, 'compile_rejected', ['patch_path_invalid']);
     // `before` is read from the parent, never taken from the model.
-    patches.push(toTypedPatch(proposed, readUnit(parent, target)));
+    const typed = toTypedPatch(proposed, readUnit(parent, target));
+    patches.push({ ...typed, sourceEvidenceIds: expand(typed.sourceEvidenceIds).slice(0, 8) });
   }
   return compileAndReplay(input, base, patches, proposal.claimedClass, proposal.hypothesis);
 }
