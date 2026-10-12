@@ -77,6 +77,15 @@
   border-color: var(--ex-danger);
   color: var(--ex-danger);
 }
+.ex-root .ex-step--incomplete {
+  border-color: var(--ex-warning);
+  border-top-style: double;
+  border-top-width: 3px;
+  color: var(--ex-warning);
+}
+.ex-root .ex-step--incomplete .ex-step-state {
+  color: var(--ex-warning);
+}
 .ex-root .ex-step--skipped {
   border-style: dotted;
 }

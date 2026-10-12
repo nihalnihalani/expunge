@@ -15,6 +15,7 @@ import {
   UnavailableState,
 } from '../components/StateViews';
 import { StatusChip } from '../components/StatusChip';
+import { jobStatusChip } from '../projection/selectors';
 import { TableWrap } from '../components/TableWrap';
 import { ageText, formatTime } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -33,7 +34,7 @@ export const meta: ViewMeta = {
   home: 10,
 };
 
-type Filter = 'all' | 'approval' | 'evidence' | 'running' | 'finished';
+export type Filter = 'all' | 'approval' | 'evidence' | 'running' | 'finished';
 const FILTERS: Array<[Filter, string]> = [
   ['all', 'All'],
   ['approval', 'Needs your decision'],
@@ -41,13 +42,34 @@ const FILTERS: Array<[Filter, string]> = [
   ['running', 'Queued or running'],
   ['finished', 'Finished'],
 ];
-const match = (filter: Filter, status: JobStatus) =>
+/**
+ * "Finished" is every terminal job: succeeded, cancelled, failed, and the failed jobs that finished with a committed
+ * incomplete receipt (status `failed`, shown as "Finished: cleanup incomplete").
+ */
+export const matchesFilter = (filter: Filter, status: JobStatus) =>
   filter === 'all' ||
   (filter === 'approval' && status === 'waiting_approval') ||
   (filter === 'evidence' && status === 'waiting_evidence') ||
   (filter === 'running' && (status === 'queued' || status === 'running')) ||
   (filter === 'finished' &&
     ['succeeded', 'failed', 'cancelled'].includes(status));
+
+/** The receipt is committed (id, sequence and verified revision all present): DA-7 S1. */
+const receiptCommitted = (item: ExpungeJobListItem) =>
+  item.receiptId !== undefined &&
+  item.receiptSequence !== undefined &&
+  item.verifiedWorldRevision !== undefined;
+
+/** Status chip for a list row; see `jobStatusChip`. */
+export function JobStatusCell({ item }: { item: ExpungeJobListItem }) {
+  const chip = jobStatusChip({
+    status: item.status,
+    receiptIncomplete:
+      receiptCommitted(item) && item.receiptDomainStatus === 'incomplete',
+    terminalReason: receiptCommitted(item) ? undefined : item.terminalReason,
+  });
+  return <StatusChip state={chip.state} label={chip.label} />;
+}
 
 /** Jobs that need a human come first, then the most recently updated. */
 export function sortJobs(items: ExpungeJobListItem[]) {
@@ -70,7 +92,7 @@ export default function JobsHomeView(_props: ViewProps) {
   const rows = useMemo(
     () =>
       sortJobs(jobs.data?.items ?? []).filter((item) =>
-        match(filter, item.status),
+        matchesFilter(filter, item.status),
       ),
     [jobs.data, filter],
   );
@@ -230,7 +252,7 @@ export default function JobsHomeView(_props: ViewProps) {
                         {item.worldId ?? '—'}
                       </td>
                       <td role="cell" data-label="Status">
-                        <StatusChip state={item.status} />
+                        <JobStatusCell item={item} />
                       </td>
                       <td role="cell" data-label="Completion verdict">
                         <ReceiptCell item={item} />
@@ -256,10 +278,7 @@ export default function JobsHomeView(_props: ViewProps) {
  * "Complete" (DA-7 S1): the seal is the only authority badge.
  */
 export function ReceiptCell({ item }: { item: ExpungeJobListItem }) {
-  const committed =
-    item.receiptId !== undefined &&
-    item.receiptSequence !== undefined &&
-    item.verifiedWorldRevision !== undefined;
+  const committed = receiptCommitted(item);
   if (!item.receiptDomainStatus || !committed)
     return (
       <span className="ex-muted">

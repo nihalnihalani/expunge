@@ -11,7 +11,7 @@ import { PhaseStepper } from '../components/PhaseStepper';
 import { ReferenceSection } from '../components/ReferenceSection';
 import { formatTime, plural } from '../format';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { isTerminal } from '../projection/selectors';
+import { isTerminal, snapshotReceiptIncomplete } from '../projection/selectors';
 import type { ViewMeta, ViewProps } from '../registry';
 import type { ExpungeJobSnapshotV2 } from '../../../shared/expunge';
 
@@ -24,7 +24,13 @@ export const meta: ViewMeta = {
   order: 10,
 };
 
-function Announcer({ snapshot }: { snapshot: ExpungeJobSnapshotV2 }) {
+function Announcer({
+  snapshot,
+  finishedIncomplete,
+}: {
+  snapshot: ExpungeJobSnapshotV2;
+  finishedIncomplete: boolean;
+}) {
   const announce = useAnnounce();
   const last = useRef<{
     phase: string | null;
@@ -41,12 +47,16 @@ function Announcer({ snapshot }: { snapshot: ExpungeJobSnapshotV2 }) {
     last.current = now;
     if (!before) return;
     if (now.status !== before.status && isTerminal(snapshot.status))
-      announce(`Job ${snapshot.status}.`);
+      announce(
+        finishedIncomplete
+          ? 'Job finished: cleanup incomplete.'
+          : `Job ${snapshot.status}.`,
+      );
     else if (now.approval === 'pending' && before.approval !== 'pending')
       announce('A harness proposal needs your decision.');
     else if (now.phase !== before.phase && now.phase)
       announce(`Phase: ${now.phase}.`);
-  }, [snapshot, announce]);
+  }, [snapshot, finishedIncomplete, announce]);
   return null;
 }
 
@@ -70,9 +80,15 @@ export default function WorkbenchView({ route }: ViewProps) {
     <JobFrame route={route} title={`Job ${route.jobId}`}>
       {({ state }) => {
         const snapshot = state.snapshot!;
+        const finishedIncomplete =
+          snapshot.status === 'failed' &&
+          snapshotReceiptIncomplete(snapshot, state.events);
         return (
           <>
-            <Announcer snapshot={snapshot} />
+            <Announcer
+              snapshot={snapshot}
+              finishedIncomplete={finishedIncomplete}
+            />
             <section className="ex-section" aria-labelledby="ex-phase-h">
               <h2 className="ex-h2" id="ex-phase-h">
                 Phase
@@ -80,6 +96,7 @@ export default function WorkbenchView({ route }: ViewProps) {
               <PhaseStepper
                 states={snapshot.phaseStates}
                 phase={snapshot.phase}
+                finishedIncomplete={finishedIncomplete}
               />
               <GapBanner snapshot={snapshot} />
               {snapshot.status === 'waiting_approval' && (

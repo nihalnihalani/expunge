@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import {
   Ban,
+  CircleAlert,
   CircleCheck,
   CircleDot,
   CircleHelp,
@@ -35,6 +36,7 @@ export type ChipState =
   | 'complete_in_scope'
   | 'incomplete'
   | 'failed'
+  | 'finished_incomplete'
   | 'rejected'
   | 'cancelled'
   | 'stale'
@@ -88,6 +90,12 @@ const DEFS: Record<ChipState, Def> = {
     className: 'ex-chip--warn',
   },
   failed: { label: 'Failed', icon: OctagonX, className: 'ex-chip--fail' },
+  // A failed job that ran to the end and committed an honest incomplete receipt. Not a crash: warning, not fail.
+  finished_incomplete: {
+    label: 'Finished: cleanup incomplete',
+    icon: CircleAlert,
+    className: 'ex-chip--warn',
+  },
   rejected: { label: 'Rejected', icon: Ban, className: 'ex-chip--rejected' },
   cancelled: {
     label: 'Cancelled',
