@@ -15,7 +15,8 @@ export type PrivacyErrorCode =
   | 'SubmissionInProgress'
   | 'SubmissionAmbiguous'
   | 'RemoteJobMismatch'
-  | 'GuardIncomplete';
+  | 'GuardIncomplete'
+  | 'SubjectRegistrationRaced';
 
 export class PrivacyError extends Error {
   constructor(

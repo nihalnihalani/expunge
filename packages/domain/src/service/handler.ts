@@ -9,6 +9,7 @@ import {
   httpWakeSender,
   submitCleanup,
   submitRequestSchema,
+  type SubjectRegistrar,
   type WakeSender,
 } from './jobs.js';
 import { operatorPreview, previewRequestSchema } from './preview.js';
@@ -31,6 +32,11 @@ export type DomainServiceDeps = {
   /** Overrides the HTTP wake sender (tests). Absent means the configured worker origin, or no wake at all. */
   wake?: WakeSender | null;
   transport?: typeof fetch;
+  /**
+   * Registers a submitted job's subject in the privacy registry (`privacySubjectRegistrar` in @expunge/privacy, built
+   * on a privacy_controller principal). Absent means no registration, and the evidence path HOLDs for that job.
+   */
+  registerSubject?: SubjectRegistrar | null;
 };
 
 const json = (status: number, body: unknown): Response =>
@@ -150,7 +156,17 @@ export function createDomainService(deps: DomainServiceDeps): DomainService {
       case 'POST jobs': {
         const body = submitRequestSchema.safeParse(await readBody(request));
         if (!body.success) return json(400, { error: 'invalid_request' });
-        return json(200, await submitCleanup(env, config, deploymentRepository(), wake, body.data));
+        return json(
+          200,
+          await submitCleanup(
+            env,
+            config,
+            deploymentRepository(),
+            wake,
+            body.data,
+            deps.registerSubject ?? null,
+          ),
+        );
       }
       case 'POST cancel': {
         const body = cancelRequestSchema.safeParse(await readBody(request));
