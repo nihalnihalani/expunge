@@ -13,6 +13,7 @@ import {
   ExpungeExecutionAgent,
   STEP_LIMIT_NOTE,
   JobWaitSignal,
+  JobStopSignal,
   RuntimeError,
   faultCode,
   type ExecutionHooks,
@@ -676,6 +677,12 @@ describe('ExpungeExecutionAgent over the real TanStack loop, runtime 1.75.0 conv
       expect(r.store.job.status).toBe('waiting_approval');
       expect(r.store.job.lease.until.getTime()).toBe(0);
       expect(typesOf(events).at(-1)).toBe('RUN_FINISHED');
+    });
+  });
+
+  describe('a tool can end the job with a reason', () => {
+    it('refuses a code that is not a short identifier', () => {
+      expect(() => new JobStopSignal('no spaces allowed')).toThrow('JobStopSignalCodeInvalid');
     });
   });
 

@@ -34,12 +34,17 @@ import { useReadiness } from '../readiness';
 import type { ViewMeta, ViewProps } from '../registry';
 import { formatRoute } from '../routes';
 import {
+  DEFAULT_ID_TYPE,
   ID_TYPES,
   newRequestKey,
   normalizeSubjectValue,
   validateSubject,
 } from '../lib/subject';
-import { previewStale } from '../lib/preview';
+import {
+  NO_MATCH_MESSAGE,
+  previewHasNoMatch,
+  previewStale,
+} from '../lib/preview';
 export { previewStale } from '../lib/preview';
 
 export const meta: ViewMeta = {
@@ -302,7 +307,7 @@ export default function NewCleanupView({ navigate }: ViewProps) {
   const announce = useAnnounce();
   const now = useNow(5000);
   const [worldId, setWorldId] = useState<string | null>(null);
-  const [idType, setIdType] = useState<SubjectIdType>('objectId');
+  const [idType, setIdType] = useState<SubjectIdType>(DEFAULT_ID_TYPE);
   const [value, setValue] = useState('');
   const [touched, setTouched] = useState(false);
   const [phase, setPhase] = useState<
@@ -334,6 +339,8 @@ export default function NewCleanupView({ navigate }: ViewProps) {
   const normalized = validation.ok && sentValue !== value;
   const showErrors = touched && !validation.ok;
   const stale = preview ? previewStale(preview, selected, now) : null;
+  // A job for a subject that matches nothing could only end SubjectNotFound: Submit is withheld.
+  const noMatch = preview ? previewHasNoMatch(preview) : false;
   const writes = readiness.resource.data?.writes;
   const readinessFresh =
     readiness.resource.updatedAt !== null &&
@@ -395,7 +402,14 @@ export default function NewCleanupView({ navigate }: ViewProps) {
     }
   };
   const onSubmit = async () => {
-    if (!cleanupReady || !preview || !worldId || stale || !requestKey.current)
+    if (
+      !cleanupReady ||
+      !preview ||
+      !worldId ||
+      stale ||
+      noMatch ||
+      !requestKey.current
+    )
       return;
     setPhase('submitting');
     setProblem(null);
@@ -716,16 +730,16 @@ export default function NewCleanupView({ navigate }: ViewProps) {
             >
               Preview
             </h2>
-            {preview.perCollection.every(
-              (row) => row.exactIdentityMatches === 0,
-            ) && (
-              <EmptyState title="No record has this exact identity in the registered scope.">
-                Nothing would change. This is a legitimate outcome, not an
-                error; unregistered paths are not examined.
-              </EmptyState>
-            )}
             <PreviewResult preview={preview} />
-            {stale ? (
+            {noMatch && !stale ? (
+              <div className="ex-banner ex-banner--warn" role="alert">
+                <strong>{NO_MATCH_MESSAGE}</strong>
+                <span>
+                  Submit is withheld: a job for this identifier would find
+                  nothing to clean. Unregistered paths are not examined.
+                </span>
+              </div>
+            ) : stale ? (
               <div className="ex-banner ex-banner--warn" role="status">
                 <StatusChip state="stale" />
                 <strong>{stale}</strong>

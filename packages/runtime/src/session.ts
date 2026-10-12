@@ -16,6 +16,7 @@ import { filterModelStateEvent, stripProtectedKeys } from './authority.js';
 import {
   RuntimeError,
   JobWaitSignal,
+  JobStopSignal,
   errorCode,
   isFenceLoss,
   refusalCode,
@@ -395,6 +396,9 @@ export class RunSession {
             this.requestWait(error.status);
             outcome = 'ok';
             result = PAUSED(error.status);
+          } else if (error instanceof JobStopSignal) {
+            this.stopWith(error.code);
+            result = { error: error.code };
           } else if (isFenceLoss(error)) {
             this.fail('LostLease', 'lost_lease');
             result = { error: 'LostLease' };
@@ -478,6 +482,12 @@ export class RunSession {
     const carry = (this.meter as UsageMeter).carry(this.carried.wallTimeMs + (Date.now() - this.startedAt));
     const provider = this.attempts.snapshot();
     return provider.attempts > 0 ? { ...carry, provider } : carry;
+  }
+
+  /** A tool ended the job: no further model turn; the run winds down normally with `code` as its error code. */
+  private stopWith(code: string): void {
+    if (!this.failure) this.failure = { code, end: 'error' };
+    this.stopRequested = true;
   }
 
   private fail(code: RuntimeErrorCode | string, end: RunEnd): void {

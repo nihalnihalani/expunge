@@ -36,3 +36,14 @@ export function previewStale(
     return 'The world changed since this preview.';
   return null;
 }
+
+/** Shown instead of Submit when the model-free preview matched nothing: a job could only end SubjectNotFound. */
+export const NO_MATCH_MESSAGE =
+  'No record in this world matches this identifier. Check the identifier type and value.';
+
+/** True when no collection holds a record with the subject's exact identity. */
+export function previewHasNoMatch(
+  preview: Pick<CleanupPreview, 'perCollection'>,
+): boolean {
+  return preview.perCollection.every((row) => row.exactIdentityMatches === 0);
+}

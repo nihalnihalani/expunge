@@ -11,6 +11,9 @@ import { idBinding } from './preview-cleanup.js';
 /** No arguments: the subject is the one the owner submitted with the job, read from the stored row. */
 export const resolveSubjectInput = z.object({}).strict();
 
+/** The terminal reason of a job whose submitted subject matches no record in the world. */
+export const SUBJECT_NOT_FOUND = 'SubjectNotFound';
+
 export async function resolveSubject(rt: ToolRuntime) {
   const registry = await rt.registry();
   const policy = await rt.ownerPolicy();
@@ -32,7 +35,15 @@ export async function resolveSubject(rt: ToolRuntime) {
     identityHash: subject.identityHash,
     idType: subject.idType,
   };
-  if (!root) return { resolved: false as const, subject: display, worldRevision };
+  // An explicit no-match: the gateway ends the job with this reason (nothing else can run without a resolution).
+  if (!root)
+    return {
+      resolved: false as const,
+      matched: false as const,
+      reason: SUBJECT_NOT_FOUND,
+      subject: display,
+      worldRevision,
+    };
 
   const roles = await rt.fieldRoles();
   const { fields } = await rt.visible();
@@ -72,6 +83,7 @@ export async function resolveSubject(rt: ToolRuntime) {
   );
   return {
     resolved: true as const,
+    matched: true as const,
     subject: display,
     rootCollectionId: rootAddress.collectionId,
     bindingCount: bindings.size,

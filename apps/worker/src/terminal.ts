@@ -126,6 +126,7 @@ export function projectionFailureCode(reason: string): FailureCode {
     case 'NoCompletionReceipt':
     case 'incomplete_receipt':
     case 'CompletionReceiptRequired':
+    case 'SubjectNotFound': // no record matches the subject; the projection message keeps the exact code
       return 'verification_failed';
     default:
       return 'internal_error';

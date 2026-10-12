@@ -11,8 +11,11 @@ import {
   completeCleanup,
   createDomainEnv,
   createDomainToolProvider,
+  resolveSubject,
+  SUBJECT_NOT_FOUND,
   ToolRefusal,
 } from '../src/index.js';
+import { JobStopSignal } from '@expunge/runtime';
 import {
   SCRIPTED_DRIVER_LABEL,
   attempt,
@@ -571,6 +574,27 @@ describeLive(`domain gateway against a real replica set (${SCRIPTED_DRIVER_LABEL
       expect((await attempt(run.tools, 'resolve_subject')).ok).toBe(true);
       await expect(completeCleanup(gateway.rt)).rejects.toThrow(ToolRefusal);
       await expect(completeCleanup(gateway.rt)).rejects.toThrow('VerificationRequired');
+    });
+    it('a subject matching no record reports matched: false and ends the job with SubjectNotFound', async () => {
+      const seeded = await rig.seed('direct_nested');
+      const run = await rig.open(seeded, 'expert', {
+        subject: { idType: 'string', value: 'syn_000000000000000000000000' },
+      });
+      const gateway = await JobGateway.open(rig.domain, run.context);
+      expect(await resolveSubject(gateway.rt)).toMatchObject({
+        resolved: false,
+        matched: false,
+        reason: SUBJECT_NOT_FOUND,
+      });
+      await attempt(run.tools, 'inspect_scope');
+      const caught = await run.tools.resolve_subject!({}).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(caught).toBeInstanceOf(JobStopSignal);
+      expect((caught as JobStopSignal).code).toBe('SubjectNotFound');
+      // Nothing was resolved, so nothing downstream can run.
+      expect(await rig.domain.store.latestStep(seeded.actor, run.jobId, 'subject_resolution')).toBeNull();
     });
     it('a sweep that went stale because the world moved cannot complete the job', async () => {
       const seeded = await rig.seed('direct_nested');

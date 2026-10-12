@@ -63,6 +63,15 @@ describe('decideTerminal (terminal status comes from committed state, never from
         receipt: null,
       }),
     ).toMatchObject({ reason: 'WallTimeExceeded' });
+    // resolve_subject found no record: the gateway stopped the run with this code instead of a missing receipt.
+    expect(
+      decideTerminal({
+        stats: stats({ endedBy: 'error', errorCode: 'SubjectNotFound' }),
+        stored: running,
+        fence: 2,
+        receipt: null,
+      }),
+    ).toMatchObject({ status: 'failed', reason: 'SubjectNotFound' });
   });
 
   it('never writes after the run released the lease, lost it, or the stored job is already terminal', () => {
@@ -126,6 +135,7 @@ describe('projectionFailureCode', () => {
     expect(projectionFailureCode('LostLease')).toBe('lease_lost');
     expect(projectionFailureCode('ModelRunFailed')).toBe('provider_error');
     expect(projectionFailureCode('NoCompletionReceipt')).toBe('verification_failed');
+    expect(projectionFailureCode('SubjectNotFound')).toBe('verification_failed');
     expect(projectionFailureCode('SomethingElse')).toBe('internal_error');
   });
 });

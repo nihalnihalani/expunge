@@ -1,6 +1,13 @@
 import type { SubjectIdType } from '../../../shared/expunge';
 
 /**
+ * The identifier type the form starts with. World metadata does not say how the subject key is
+ * stored, and the synthetic worlds key subjects by strings such as `syn_d203706c7d0e73329c9b54b4`,
+ * so String is the default; ObjectId stays one choice away.
+ */
+export const DEFAULT_ID_TYPE: SubjectIdType = 'string';
+
+/**
  * Exact identity only: the subject is a typed identifier, never a name to search for
  * (CONTRACTS: semantic similarity is not identity evidence). Validation is local and fixed
  * vocabulary; the backend still validates and resolves authoritatively.

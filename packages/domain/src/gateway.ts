@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { AuthorityRevision } from '@expunge/contracts';
 import { PolicyEvaluator, toolArgsDigest, type Verdict } from '@expunge/governance';
 import { ProtocolError } from '@expunge/mongo';
-import { JobWaitSignal, isFenceLoss, type ToolContext } from '@expunge/runtime';
+import { JobStopSignal, JobWaitSignal, isFenceLoss, type ToolContext } from '@expunge/runtime';
 import type { WorkerToolId } from '@expunge/baselines';
 import { phaseOf, RunContext } from './context.js';
 import {
@@ -26,7 +26,7 @@ import { inspectHarness, inspectHarnessInput } from './tools/inspect-harness.js'
 import { inspectScope, inspectScopeInput } from './tools/inspect-scope.js';
 import { previewCleanup, previewCleanupInput } from './tools/preview-cleanup.js';
 import { reportDiagnostic, reportDiagnosticInput } from './tools/report-diagnostic.js';
-import { resolveSubject, resolveSubjectInput } from './tools/resolve-subject.js';
+import { SUBJECT_NOT_FOUND, resolveSubject, resolveSubjectInput } from './tools/resolve-subject.js';
 import { verifyRegisteredScope, verifyRegisteredScopeInput } from './tools/verify-registered-scope.js';
 
 /** Ledger identity of one decided call that is not an effect: the tool, its ordinal in this run and its arguments. */
@@ -66,7 +66,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   tool({
     toolId: 'resolve_subject',
     description:
-      'Resolve the authorized subject of this job from exact registered identity values. Takes no arguments; the subject is the one the owner submitted. Read only.',
+      'Resolve the authorized subject of this job from exact registered identity values. Takes no arguments; the subject is the one the owner submitted. Read only. If no record matches (`matched: false`), the job ends with SubjectNotFound.',
     parameters: resolveSubjectInput,
     run: (rt) => resolveSubject(rt),
   }),
@@ -162,8 +162,11 @@ function outcomeOf(toolId: WorkerToolId, output: unknown): CallOutcome {
   )
     return 'batches_remaining';
   if (toolId === 'verify_registered_scope' && result.verified === false) return 'verification_failed';
+  if (subjectNotFound(toolId, output)) return 'failed';
   return 'success';
 }
+const subjectNotFound = (toolId: WorkerToolId, output: unknown): boolean =>
+  toolId === 'resolve_subject' && (output as { matched?: unknown } | null)?.matched === false;
 const SAFE_CODE = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 
 /**
@@ -239,6 +242,9 @@ export class JobGateway {
       // A read returns nothing computed under an authorization that was revoked while it ran.
       if (!CHANGES_WORLD.has(toolId)) await this.assertAuthorityCurrent();
       await finish(outcomeOf(toolId, output));
+      // No record in the world matches the submitted subject: nothing can be discovered, previewed or cleaned, so the
+      // job ends here with `SubjectNotFound` instead of the model probing on and ending without a receipt.
+      if (subjectNotFound(toolId, output)) throw new JobStopSignal(SUBJECT_NOT_FOUND);
       return output;
     } catch (error) {
       throw await this.refusal(toolId, error);
@@ -300,7 +306,8 @@ export class JobGateway {
 
   /** Maps a failure to the closed vocabulary a model may see. Authority loss also stops the job. */
   private async refusal(toolId: string, error: unknown): Promise<unknown> {
-    if (error instanceof ToolRefusal || error instanceof JobWaitSignal) return error;
+    if (error instanceof ToolRefusal || error instanceof JobWaitSignal || error instanceof JobStopSignal)
+      return error;
     if (isFenceLoss(error)) return error;
     if (error instanceof ProtocolError) {
       if (AUTHORITY_CODES.has(error.code)) {

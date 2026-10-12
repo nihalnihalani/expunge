@@ -15,7 +15,7 @@ export { computeClosure, type ClosureMember } from './closure.js';
 export { classifyFields, visibleFields, type FieldRole } from './fields.js';
 
 export { inspectScope, inspectScopeInput } from './tools/inspect-scope.js';
-export { resolveSubject, resolveSubjectInput } from './tools/resolve-subject.js';
+export { SUBJECT_NOT_FOUND, resolveSubject, resolveSubjectInput } from './tools/resolve-subject.js';
 export { discoverReferences, discoverReferencesInput } from './tools/discover-references.js';
 export { previewCleanup, previewCleanupInput } from './tools/preview-cleanup.js';
 export { applyCleanupBatch, applyCleanupBatchInput, prepareApply } from './tools/apply-cleanup-batch.js';

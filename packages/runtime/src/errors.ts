@@ -48,6 +48,21 @@ export class JobWaitSignal extends Error {
   }
 }
 
+/**
+ * Thrown by a trusted tool when the job cannot go on at all (e.g. the submitted subject matches no record). The runtime
+ * answers the model with the code, stops the loop after the current tool, and records the code as the run's
+ * `errorCode`, so the job ends with that reason instead of a generic missing-receipt failure.
+ */
+export class JobStopSignal extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(code)) throw new Error('JobStopSignalCodeInvalid');
+    super(`JobStop:${code}`);
+    this.name = 'JobStopSignal';
+    this.code = code;
+  }
+}
+
 /** The short code of an error from @expunge/mongo (ProtocolError) or this package, else a generic code. */
 export function errorCode(error: unknown): string {
   if (error instanceof RuntimeError) return error.code;
