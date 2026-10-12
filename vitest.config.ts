@@ -19,6 +19,7 @@ export default defineConfig({
       'packages/gate/test/production-boundary.test.ts',
       'packages/meta-evolution/test/accounting-pure.test.ts',
       'packages/mongo/test/native-source-invariants.test.ts',
+      'packages/evolution/test/provider-model.test.ts',
     ],
     exclude: ['apps/operator/**', 'node_modules/**', '.firecrawl/**', 'research/**'],
     testTimeout: 15000,

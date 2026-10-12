@@ -4,6 +4,7 @@
 import { DISCLOSED_PRIMITIVES } from '@expunge/baselines';
 import type { HarnessBundle, JsonValue, MutationClass, TypedPatch } from '@expunge/contracts';
 import { z } from 'zod';
+import type { ModelAttestation, ModelPricing, UsageSummary } from '@expunge/runtime';
 import type { EvidenceArm, EvidencePacket } from './evidence.js';
 
 const jsonValue: z.ZodType<JsonValue> = z.lazy(() =>
@@ -74,6 +75,16 @@ export interface EvolverModel {
   /** 'fake' is a deterministic test double; 'provider' is a real model behind `createStructuredEvolverModel`. */
   kind: 'fake' | 'provider';
   propose(request: ProposalRequest): Promise<unknown>;
+  /** A provider model's stamp (attestation, prices, cumulative metered usage); recorded on every proposal it writes. */
+  stamp?(): EvolverModelStamp;
+}
+
+/** What a proposal records about the model that wrote it. Never carries a credential, URL or prompt text. */
+export interface EvolverModelStamp {
+  attestation: ModelAttestation;
+  pricing: ModelPricing;
+  /** Cumulative usage of this model instance when the stamp was taken (the proposer's own meter). */
+  usage: UsageSummary;
 }
 
 /** A provider adapter supplies this; there is intentionally no tool-choice field. */

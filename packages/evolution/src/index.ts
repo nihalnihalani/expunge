@@ -7,8 +7,17 @@ export {
   proposalSchema,
   toTypedPatch,
 } from './model.js';
+export {
+  EvolverModelCallFailed,
+  EvolverModelUnavailable,
+  PROPOSAL_WIRE_SCHEMA,
+  createProviderEvolverModel,
+  fromWire,
+} from './provider-model.js';
+export type { MeteredEvolverModel, ProviderEvolverOptions } from './provider-model.js';
 export type {
   EvolverModel,
+  EvolverModelStamp,
   ModelProposal,
   ProposalRequest,
   ProposedPatch,
