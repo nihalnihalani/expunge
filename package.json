@@ -25,7 +25,8 @@
     "drill:continuity": "node scripts/continuity/drill.mjs",
     "test:mongo": "vitest run packages/mongo/test",
     "setup:mongo": "node --import tsx --env-file-if-exists=.env scripts/setup-mongo.ts",
-    "probe:mongo": "node --import tsx --env-file-if-exists=.env scripts/probe-mongo.ts"
+    "probe:mongo": "node --import tsx --env-file-if-exists=.env scripts/probe-mongo.ts",
+    "domain": "node --import tsx --env-file-if-exists=.env scripts/domain-service.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
