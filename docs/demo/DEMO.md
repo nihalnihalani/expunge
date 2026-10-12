@@ -4,6 +4,35 @@ This demo shows one pass of Expunge's improvement loop on the invited MongoDB At
 The world it cleans is a **seeded synthetic company** (family `direct_nested`), not owner data. Every step below says
 whether it is real, a pilot, or a labelled test fixture.
 
+## Run the app
+
+All three processes read the root `.env`. Use a **new** scope id for each fresh world (a scope holds one world).
+
+1. Seed a world and deploy the improved child of W0 as that scope's starting harness. If you want W0 instead, run
+   `seed:world` with the same arguments:
+
+   ```sh
+   EXPUNGE_SCOPE_ID=demo-scope-1 npm run seed:candidate -- --family direct_nested --seed demo-1
+   ```
+
+   The scope set inline wins over `.env`. The output gives `worldId`, `subjectHandle` and the deployed harness hash.
+   The sealed manifest goes to `.expunge/worlds/<worldId>.private.json`, which is ignored.
+
+2. Start the domain service (4320), the worker (4330) and the operator (4310 and vite 5173) on that scope:
+
+   ```sh
+   npm run demo:start -- demo-scope-1            # add --dry-run to print the commands and variable names only
+   ```
+
+   The script passes the scope, tenant, environment and domain URL explicitly to all three processes. The operator
+   gets only the variables it reads, never a `MONGODB_*` or `ATLAS_*` one. The script refuses to start if a port is
+   already taken. Logs go to `.expunge/run/logs/` and pids to `.expunge/run/pids/`. `npm run demo:stop` stops only
+   the processes the script started.
+
+3. Open `http://localhost:5173`. Under New cleanup, choose the seeded world, set **Identifier type** to `String`, and
+   enter the `subjectHandle` from step 1 (the subject's `customers._id`) as the exact identifier. Then preview and
+   submit.
+
 ## Run order
 
 | Step | What happens | Command or place | Status |
