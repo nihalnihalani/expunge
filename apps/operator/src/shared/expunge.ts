@@ -20,6 +20,27 @@ export type Environment = (typeof ENVIRONMENTS)[number];
 /** Real source registrations require an explicit release environment. */
 export const SOURCE_ENVIRONMENTS = ['staging', 'production'] as const;
 export type SourceEnvironment = (typeof SOURCE_ENVIRONMENTS)[number];
+/**
+ * An isolated replay is a copy the owner created, so it may also live in the synthetic demo environment. Cleaning it
+ * never erases the original; original sources stay limited to SOURCE_ENVIRONMENTS.
+ */
+export const ISOLATED_REPLAY_ENVIRONMENTS = [
+  ...SOURCE_ENVIRONMENTS,
+  'demo',
+] as const;
+
+/** Whether a world's environment may host cleanup for its bound source kind. No binding never qualifies. */
+export function sourceEnvironmentAllowed(
+  env: Environment,
+  binding: Pick<SourceBindingView, 'sourceKind'> | undefined,
+): boolean {
+  if (!binding) return false;
+  const allowed: readonly Environment[] =
+    binding.sourceKind === 'isolated_replay'
+      ? ISOLATED_REPLAY_ENVIRONMENTS
+      : SOURCE_ENVIRONMENTS;
+  return allowed.includes(env);
+}
 
 export const JOB_KINDS = [
   'cleanup',
@@ -301,6 +322,21 @@ export function sourceBindingMatchesReadiness(
     binding.registrationRevision === source.registrationRevision &&
     binding.policyRevision === source.policyRevision &&
     binding.authorizationRevision === source.authorizationRevision,
+  );
+}
+
+/**
+ * The selected world may start cleanup only when its environment admits its source kind and its binding matches the
+ * live registration the backend reports. Shared by the server's transport gate and the New cleanup view.
+ */
+export function sourceScopeReady(
+  world: { env: Environment; source?: SourceBindingView } | undefined,
+  source: SourceReadinessView | null | undefined,
+): boolean {
+  return Boolean(
+    world &&
+    sourceEnvironmentAllowed(world.env, world.source) &&
+    sourceBindingMatchesReadiness(world.source, source),
   );
 }
 

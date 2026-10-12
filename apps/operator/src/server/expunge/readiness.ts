@@ -110,7 +110,9 @@ export function describeSourceReadiness(
       ? check(
           'pass',
           null,
-          'The backend reports an active owner-approved real-source registration with its current identity, policy and authorization revisions.',
+          source.sourceKind === 'isolated_replay'
+            ? 'The backend reports an active registration for an isolated replay copy with its current identity, policy and authorization revisions. Cleaning the copy does not erase the original source.'
+            : 'The backend reports an active owner-approved real-source registration with its current identity, policy and authorization revisions.',
           observedAt,
         )
       : fail(
